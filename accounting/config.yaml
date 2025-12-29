@@ -1,0 +1,46 @@
+# src/accounting/config.yaml
+# Minimal, well-documented accounting orchestration config.
+# Edit per-machine or leave defaults and override with env vars when running CI/Makefile.
+
+# --- general ---
+project_name: "RAG_Sync_Accounting"
+env: "local"               # local | staging | prod
+
+# --- paths (prefer relative to repo but allow absolute) ---
+base_dir: "./out"          # main run outputs (default used by Makefile)
+time_series_subdir: "time_series"    # OUT_DIR/time_series
+assemble_subdir: "assembled"        # OUT_DIR/assembled or same tree as time_series
+reports_subdir: "reports"           # OUT_DIR/reports
+fixtures_dir: "tests/fixtures"      # fixture ledger files
+logs_dir: "./logs"                  # where to store run logs
+
+# --- input sources ---
+fixture_file: "tests/fixtures/ledger_fixture.csv"
+service_account_file: ""  # Path to Google service account JSON (do NOT commit this)
+sheet_url: ""             # Google Sheet URL for live mode (leave blank if not using live)
+
+# --- ETL options ---
+freq: "W"                 # time frequency for timeseries (D, W, M)
+dry_run: false            # if true, do not write outputs
+force: false              # if true, overwrite existing outputs
+
+# --- manifest / validation ---
+manifest_name: "manifest.json"
+required_headers:
+  all_txns_parsed.csv: ["date", "source", "account", "payee", "amount", "Currency"]
+  fondos_report.csv: ["Date", "Net"]
+  renta_PM.csv: ["Date"]
+
+# --- operational / backup ---
+backup_dir: "./backups"
+backup_retention_days: 30
+
+# --- logging ---
+log_level: "INFO"
+
+# --- stakeholders (optional) ---
+stakeholders:
+  - name: "Partner"
+    contact: "partner@example.com"
+  - name: "Contador"
+    contact: "contador@example.com"

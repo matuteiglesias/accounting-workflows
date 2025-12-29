@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Reportes Mensuales</title>
+  <link rel="stylesheet" href="{{ css_path }}">
+</head>
+<body>
+  <div class="intro">
+    <p>Informe mensual — generado: {{ now }}</p>
+  </div>
+  {% for m in months %}
+    <h2>{{ m.display }}</h2>
+    <h3>Transacciones</h3>
+    {{ m.tx.to_html(classes="table", index=False, escape=False) | safe }}
+    <h3>Totales</h3>
+    {% if m.pivot.shape[0] > 0 %}
+      {{ m.pivot.to_html(classes="table", escape=False) | safe }}
+    {% else %}
+      <p>No hay totales para este mes.</p>
+    {% endif %}
+    <hr/>
+  {% endfor %}
+</body>
+</html>

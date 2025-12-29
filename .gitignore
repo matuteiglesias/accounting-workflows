@@ -1,0 +1,36 @@
+# --- repo contract ---
+private/
+junk/
+bkp/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets
+.env
+**/.env
+*.env
+
+# Generated outputs
+out/
+accounting/out/
+accounting/tmp_out/
+accounting/logs/
+
+# Local artifacts
+artifacts/
+logs/
+
+# Lock/temp
+.~lock.*
+*~
+.DS_Store
+.idea/
+.vscode/
