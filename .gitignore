@@ -34,3 +34,4 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+fixtures/ledger_fixture.csv
