@@ -127,7 +127,7 @@ def save_fig(fig: plt.Figure, path: Path, fmt: str = "png"):
 from pathlib import Path
 import argparse
 import pandas as pd
-from src.accounting.plots import plot_renta_series, save_fig
+from accounting.plots import plot_renta_series, save_fig
 
 def main(argv=None):
     p = argparse.ArgumentParser()

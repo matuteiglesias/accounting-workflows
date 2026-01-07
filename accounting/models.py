@@ -30,62 +30,6 @@ class Money(BaseModel):
         # assume rate is amount_in_original / rate = base (consistent with current convert_currency)
         return self.amount / self.rate if base_currency == Currency.USD else self.amount * self.rate
 
-class Transaction(BaseModel):
-    transaction_id: str
-    date: datetime
-    box: Optional[str] = None
-    payer: Optional[str] = None
-    receiver: Optional[str] = None
-    money: Money
-    flujo: Optional[str] = None
-    tipo: Optional[str] = None
-    lugar: Optional[str] = None
-    detalle: Optional[str] = None
-    issuer: Optional[str] = None
-    account_id: Optional[str] = None
-    status: Optional[TxStatus] = None
-    medio: Optional[str] = None
-    due_date: Optional[datetime] = None
-    posted_date: Optional[datetime] = None
-    metadata: Dict[str, Any] = {}
-
-    @root_validator
-    def at_least_one_party(cls, values):
-        if not (values.get("payer") or values.get("receiver")):
-            raise ValueError("transaction must have at least payer or receiver")
-        return values
-
-    @validator("transaction_id", pre=True)
-    def normalize_tid(cls, v):
-        return str(v).strip()
-
-    @classmethod
-    def from_series(cls, s: pd.Series) -> "Transaction":
-        # s is a DataFrame row
-        money = Money(
-            amount=float(s.get("amount") or s.get("Amount") or s.get("Debit") or s.get("Credit") or 0.0),
-            currency=(s.get("Currency") or "ARS"),
-            rate=s.get("Rate")
-        )
-        return cls(
-            transaction_id=str(s.get("transaction_id") or s.get("id") or ""),
-            date=pd.to_datetime(s.get("Date")),
-            box=s.get("Box"),
-            payer=s.get("payer"),
-            receiver=s.get("receiver"),
-            money=money,
-            flujo=s.get("Flujo"),
-            tipo=s.get("Tipo"),
-            lugar=s.get("Lugar"),
-            detalle=s.get("Detalle"),
-            issuer=s.get("issuer"),
-            account_id=s.get("account_id"),
-            status=(s.get("status") and s.get("status").lower()),
-            medio=s.get("medio"),
-            due_date=pd.to_datetime(s.get("due_date")) if s.get("due_date") else None,
-            posted_date=pd.to_datetime(s.get("posted_date")) if s.get("posted_date") else None,
-            metadata={}
-        )
 
 class Ledger(BaseModel):
     transactions: List[Transaction]
@@ -132,3 +76,60 @@ class Ledger(BaseModel):
             seen.add(tid)
             txs.append(Transaction.from_series(row))
         return cls(transactions=txs)
+
+class Transaction(BaseModel):
+    transaction_id: str
+    date: datetime
+    box: Optional[str] = None
+    payer: Optional[str] = None
+    receiver: Optional[str] = None
+    money: Money
+    flujo: Optional[str] = None
+    tipo: Optional[str] = None
+    lugar: Optional[str] = None
+    detalle: Optional[str] = None
+    issuer: Optional[str] = None
+    account_id: Optional[str] = None
+    status: Optional[TxStatus] = None
+    medio: Optional[str] = None
+    due_date: Optional[datetime] = None
+    posted_date: Optional[datetime] = None
+    metadata: Dict[str, Any] = {}
+
+    @root_validator
+    def at_least_one_party(cls, values):
+        if not (values.get("payer") or values.get("receiver")):
+            raise ValueError("transaction must have at least payer or receiver")
+        return values
+
+    @validator("transaction_id", pre=True)
+    def normalize_tid(cls, v):
+        return str(v).strip()
+
+    @classmethod
+    def from_series(cls, s: pd.Series) -> "Transaction":
+        # s is a DataFrame row
+        money = Money(
+            amount=float(s.get("amount") or s.get("Amount") or s.get("Debit") or s.get("Credit") or 0.0),
+            currency=(s.get("Currency")),
+            rate=s.get("Rate")
+        )
+        return cls(
+            transaction_id=str(s.get("transaction_id") or s.get("id") or ""),
+            date=pd.to_datetime(s.get("Date")),
+            box=s.get("Box"),
+            payer=s.get("payer"),
+            receiver=s.get("receiver"),
+            money=money,
+            flujo=s.get("Flujo"),
+            tipo=s.get("Tipo"),
+            lugar=s.get("Lugar"),
+            detalle=s.get("Detalle"),
+            issuer=s.get("issuer"),
+            account_id=s.get("account_id"),
+            status=(s.get("status") and s.get("status").lower()),
+            medio=s.get("medio"),
+            due_date=pd.to_datetime(s.get("due_date")) if s.get("due_date") else None,
+            posted_date=pd.to_datetime(s.get("posted_date")) if s.get("posted_date") else None,
+            metadata={}
+        )

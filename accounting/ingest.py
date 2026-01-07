@@ -1,373 +1,473 @@
 # src/accounting/ingest.py
 """
-Ingest / canonicalization for accounting pipeline.
+Ingest and canonicalization for the accounting pipeline.
 
 Primary entrypoint:
-    build_ledger_base(fixture_path=None, sheet_url=None, service_account_file=None, ...)
-returns:
-    pandas.DataFrame with canonical columns:
-      tx_id, Date (datetime), amount (float), amount_cents (int), currency,
-      base_amount (float, optional), payer, receiver, flujo, tipo,
-      source_file, source_row, ingest_ts, notes
+    build_ledger_base(...)
+
+Returns:
+    pandas.DataFrame with canonical columns (pipeline internal contract):
+      - tx_id (str)
+      - Date (datetime64[ns])
+      - amount (float)                 native currency signed amount (do not mix currencies)
+      - amount_cents (Int64)           derived from amount when possible
+      - Currency (str)                native currency code, eg "ARS", "USD"
+      - base_amount (float, optional) amount converted to base_currency when fx_rates_path is provided
+      - payer (str), receiver (str)   parties (external can be NaN)
+      - Flujo (str), Tipo (str)       flow and type classifiers (stable labels)
+      - status (str, optional)
+      - Box (str, optional)
+      - source_file (str), source_row (Int64), ingest_ts (str), notes (str)
 
 The returned DataFrame will have an attribute .attrs["anomalies"] which is a
-pandas.DataFrame with rows that were flagged during ingest.
+pandas.DataFrame with issues flagged during ingest (for observability, not policy).
 """
 from __future__ import annotations
 
-import sys
-sys.path.append('./../../')
-sys.path.append('./../')
-sys.path.append('./')
-
-
-import os
-import logging
-from typing import List, Optional, Dict, Tuple
-from pathlib import Path
+import argparse
+import datetime as _dt
 import hashlib
 import json
-import datetime
-
-import pandas as pd
-
-from src.accounting.core_timeseries import process_time_aggregation
-
-
-# CLI wrapper to run src.accounting.ingest.build_ledger_base and write out ledger_canonical.csv
-# and anomalies.csv (if any).
-
-# Usage examples:
-#   python scripts/run_ingest.py --fixture ./fixtures/ledger_fixture.csv --out-dir ./out
-#   python scripts/run_ingest.py --service-account /path/sa.json --sheet-url "https://..." --out-dir ./out
-
-import argparse
 import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-# logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-# LOG = logging.getLogger("run_ingest")
+from accounting.core_timeseries import period_bins_for_dates
 
 
 LOG = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
+# -----------------------
+# Source loaders
+# -----------------------
 def read_sheet_to_df(sheet_url: str, service_account_file: str, sheet_name: str = "LEDGERS") -> pd.DataFrame:
     """
-    Helper to load a google sheet tab into a DataFrame using functions.get_google_sheets_client
-    and functions.load_google_sheet that exist in src.accounting.functions.
+    Load a Google Sheet tab into a pandas DataFrame.
+
+    Notes:
+      - Imports gspread lazily so the module remains import-safe without gspread installed.
+      - This function is intentionally small and I/O only.
     """
     try:
-        from src.accounting.utils import get_google_sheets_client, load_google_sheet
+        import gspread  # type: ignore
+        from google.oauth2.service_account import Credentials  # type: ignore
     except Exception as e:
-        LOG.exception("Google Sheets helpers not available in src.accounting.functions: %s", e)
-        raise
+        raise RuntimeError("gspread/google-auth not available; install deps to use Google Sheets ingest") from e
 
-    client = get_google_sheets_client(service_account_file)
-    df = load_google_sheet(client, sheet_url, sheet_name)
-    if not isinstance(df, pd.DataFrame):
-        raise RuntimeError("load_google_sheet did not return a DataFrame")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    creds = Credentials.from_service_account_file(service_account_file, scopes=scopes)
+    gc = gspread.authorize(creds)
+
+    sh = gc.open_by_url(sheet_url)
+    ws = sh.worksheet(sheet_name)
+    records = ws.get_all_records()
+    return pd.DataFrame(records)
+
+
+def _read_fixture(path: str) -> pd.DataFrame:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(p)
+    if p.suffix.lower() in (".parquet", ".pq"):
+        return pd.read_parquet(p)
+    return pd.read_csv(p)
+
+
+# -----------------------
+# Canonicalization helpers
+# -----------------------
+_CANON_COLS = {
+    # time and money
+    "date": "Date",
+    "fecha": "Date",
+    "day": "Date",
+    "amount": "amount",
+    "importe": "amount",
+    "monto": "amount",
+    "amount_cents": "amount_cents",
+    "currency": "Currency",
+    "moneda": "Currency",
+    "curr": "Currency",
+    # parties
+    "payer": "payer",
+    "pagador": "payer",
+    "from": "payer",
+    "receiver": "receiver",
+    "to": "receiver",
+    "receptor": "receiver",
+    # classifiers and ops
+    "flujo": "Flujo",
+    "flow": "Flujo",
+    "tipo": "Tipo",
+    "type": "Tipo",
+    "status": "status",
+    "estado": "status",
+    "box": "Box",
+    "caja": "Box",
+    # misc
+    "detalle": "Detalle",
+    "concepto": "Detalle",
+    "notes": "notes",
+    "nota": "notes",
+}
+
+
+def _normalize_columns(raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Map input columns (case-insensitive) into canonical names used internally.
+
+    This does not invent business semantics. It only standardizes naming.
+    """
+    df = raw.copy()
+
+    rename: Dict[str, str] = {}
+    for c in df.columns:
+        key = str(c).strip().lower()
+        if key in _CANON_COLS:
+            rename[c] = _CANON_COLS[key]
+
+    df = df.rename(columns=rename)
+
+    # Normalize a couple of frequent variants without guessing.
+    if "Currency" not in df.columns:
+        for c in list(df.columns):
+            if str(c).strip().lower() in ("currency", "moneda", "curr"):
+                df = df.rename(columns={c: "Currency"})
+                break
+
+    if "Date" not in df.columns:
+        for c in list(df.columns):
+            if str(c).strip().lower() in ("date", "fecha", "day"):
+                df = df.rename(columns={c: "Date"})
+                break
+
     return df
 
 
-def _deterministic_tx_id(row_values: Tuple[str, ...]) -> str:
-    """
-    Compute a deterministic tx id from a tuple of stable strings.
-    """
-    h = hashlib.sha256()
-    concat = "|".join("" if v is None else str(v) for v in row_values)
-    h.update(concat.encode("utf8"))
-    return h.hexdigest()
+def _coerce_money_and_dates(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
 
+    if "Date" in out.columns:
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
 
-def _load_fx_rates(fx_rates_path: Optional[str]) -> Optional[pd.DataFrame]:
-    if not fx_rates_path:
-        return None
-    p = Path(fx_rates_path).expanduser()
-    if not p.exists():
-        LOG.warning("FX rates file not found: %s", p)
-        return None
-    try:
-        fx = pd.read_csv(p, parse_dates=["date"], dtype={"Currency": str})
-        # expect columns: date, currency, rate_to_base (float)
-        expected = {"date", "Currency", "rate_to_base"}
-        if not expected.issubset(set(fx.columns)):
-            LOG.warning("FX table missing expected columns (date,currency,rate_to_base). Found: %s", fx.columns.tolist())
-            return None
-        fx["date"] = pd.to_datetime(fx["date"]).dt.date
-        return fx
-    except Exception:
-        LOG.exception("Failed to load FX table: %s", fx_rates_path)
-        return None
+    # Amount
+    if "amount" in out.columns:
+        # Tolerate:
+        # - "1234.56" (dot decimal)
+        # - "1.234,56" (dot thousands, comma decimal)
+        # - "1234,56" (comma decimal)
+        s = out["amount"].astype("string").fillna("").str.strip()
+        s = s.str.replace(" ", "", regex=False)
 
+        has_comma = s.str.contains(",", na=False)
+        has_dot = s.str.contains(r"\.", na=False)
 
-def _apply_fx_for_row(amount: float, currency: str, date: pd.Timestamp, fx_df: pd.DataFrame, base_currency: str) -> Optional[float]:
-    """
-    Given amount, currency, date, and fx dataframe (date,currency,rate_to_base),
-    return base amount (float) or None if not found.
-    Assumes rate_to_base means: base_amount = amount * rate_to_base
-    """
-    if fx_df is None or pd.isna(amount) or not currency:
-        return None
-    try:
-        d = pd.to_datetime(date).date()
-    except Exception:
-        return None
-    # try exact date match first
-    match = fx_df[(fx_df["date"] == d) & (fx_df["Currency"].astype(str) == str(currency))]
-    if match.shape[0] == 0:
-        # try nearest previous date for that currency
-        sub = fx_df[fx_df["Currency"].astype(str) == str(currency)].sort_values("date")
-        sub = sub[sub["date"] <= d]
-        if sub.shape[0] == 0:
-            return None
-        rate = sub.iloc[-1]["rate_to_base"]
+        # both comma and dot: assume dot thousands, comma decimal
+        both = has_comma & has_dot
+        s_both = s.where(~both, s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False))
+
+        # comma only: assume comma decimal
+        comma_only = has_comma & ~has_dot
+        s_norm = s_both.where(~comma_only, s_both.str.replace(",", ".", regex=False))
+
+        out["amount"] = pd.to_numeric(s_norm, errors="coerce")
+    elif "amount_cents" in out.columns:
+        out["amount_cents"] = pd.to_numeric(out["amount_cents"], errors="coerce")
+        out["amount"] = out["amount_cents"] / 100.0
     else:
-        rate = match.iloc[0]["rate_to_base"]
-    try:
-        return float(amount) * float(rate)
-    except Exception:
+        out["amount"] = pd.NA
+
+    # Amount cents (prefer stable integer)
+    if "amount_cents" not in out.columns:
+        out["amount_cents"] = (out["amount"] * 100.0).round().astype("Int64")
+    else:
+        out["amount_cents"] = pd.to_numeric(out["amount_cents"], errors="coerce").round().astype("Int64")
+
+    # Currency cleanup: keep as uppercase strings, but do not invent values
+    if "Currency" in out.columns:
+        out["Currency"] = out["Currency"].astype(str).str.strip().str.upper()
+        out.loc[out["Currency"].isin(["", "NAN", "NONE"]), "Currency"] = pd.NA
+    else:
+        out["Currency"] = pd.NA
+
+    return out
+
+
+def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    for col in ["payer", "receiver", "Flujo", "Tipo", "status", "Box", "Detalle", "notes"]:
+        if col not in out.columns:
+            out[col] = pd.NA
+    return out
+
+
+def _apply_party_map(df: pd.DataFrame, party_map: Optional[Dict[str, str]]) -> pd.DataFrame:
+    if not party_map:
+        return df
+    out = df.copy()
+    out["payer"] = out["payer"].replace(party_map)
+    out["receiver"] = out["receiver"].replace(party_map)
+    return out
+
+
+def _build_tx_id(df: pd.DataFrame) -> pd.Series:
+    date_str = df["Date"].dt.date.astype("string").fillna("")
+    payer = df["payer"].astype("string").fillna("").str.strip()
+    receiver = df["receiver"].astype("string").fillna("").str.strip()
+    flujo = df["Flujo"].astype("string").fillna("").str.strip()
+    tipo = df["Tipo"].astype("string").fillna("").str.strip()
+    cur = df["Currency"].astype("string").fillna("").str.strip().str.upper()
+    cents = df["amount_cents"].astype("Int64").astype("string").fillna("")
+    src_row = df["source_row"].astype("Int64").astype("string").fillna("")
+    src_file = df["source_file"].astype("string").fillna("")
+
+    sig = (
+        date_str
+        + "|"
+        + payer
+        + "|"
+        + receiver
+        + "|"
+        + cur
+        + "|"
+        + flujo
+        + "|"
+        + tipo
+        + "|"
+        + cents
+        + "|"
+        + src_row
+        + "|"
+        + src_file
+    )
+
+    def _h(x: str) -> str:
+        return hashlib.sha1(x.encode("utf-8")).hexdigest()[:16]
+
+    return sig.map(_h)
+
+
+def _load_party_map(path: Optional[str]) -> Optional[Dict[str, str]]:
+    if not path:
         return None
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(p)
+    if p.suffix.lower() in (".json",):
+        return json.loads(p.read_text(encoding="utf-8"))
+    if p.suffix.lower() in (".csv",):
+        df = pd.read_csv(p)
+        cols = [c.lower() for c in df.columns]
+        if "from" in cols and "to" in cols:
+            c_from = df.columns[cols.index("from")]
+            c_to = df.columns[cols.index("to")]
+            return dict(zip(df[c_from].astype(str), df[c_to].astype(str)))
+        raise ValueError("party_map csv must have columns 'from' and 'to'")
+    raise ValueError(f"Unsupported party_map_path: {p}")
 
 
-def _collect_anomalies(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Inspect canonical-like df for rows with obvious problems and return
-    a small anomalies dataframe listing row index and issue.
-    """
-    rows = []
-    for i, row in df.iterrows():
-        issues = []
-        if pd.isna(row.get("Date")):
-            issues.append("invalid_date")
-        if pd.isna(row.get("amount")):
-            issues.append("missing_amount")
-        # if not row.get("Currency"):
-        #     issues.append("missing_currency")
-        if issues:
-            rows.append({
-                "row_index": i,
-                "tx_id": row.get("tx_id"),
-                "issues": ";".join(issues),
-                "raw_payer": row.get("payer"),
-                "raw_receiver": row.get("receiver"),
-            })
-    if not rows:
-        return pd.DataFrame(columns=["row_index", "tx_id", "issues", "raw_payer", "raw_receiver"])
-    return pd.DataFrame(rows)
+def _load_fx_rates(path: Optional[str]) -> Optional[pd.DataFrame]:
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(p)
+    fx = pd.read_csv(p) if p.suffix.lower() not in (".parquet", ".pq") else pd.read_parquet(p)
+    fx = _normalize_columns(fx)
+
+    if "Date" not in fx.columns:
+        raise ValueError("fx_rates missing Date column")
+    if "Currency" not in fx.columns:
+        raise ValueError("fx_rates missing Currency column")
+
+    fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce")
+    fx["Currency"] = fx["Currency"].astype(str).str.strip().str.upper()
+    fx.loc[fx["Currency"].isin(["", "NAN", "NONE"]), "Currency"] = pd.NA
+
+    rate_col = None
+    for c in fx.columns:
+        if str(c).strip().lower() in ("rate_to_base", "rate", "fx", "tc"):
+            rate_col = c
+            break
+    if rate_col is None:
+        raise ValueError("fx_rates missing rate_to_base/rate column")
+
+    fx["rate_to_base"] = pd.to_numeric(fx[rate_col], errors="coerce")
+    fx = fx[["Date", "Currency", "rate_to_base"]].dropna(subset=["Date", "Currency"])
+    return fx
 
 
-def _safe_str(x) -> str:
-    if x is None or (isinstance(x, float) and pd.isna(x)):
-        return ""
-    return str(x).strip()
+def _attach_base_amount(
+    df: pd.DataFrame,
+    fx: pd.DataFrame,
+    base_currency: str = "ARS",
+) -> Tuple[pd.Series, pd.Series]:
+    base_currency = str(base_currency).strip().upper()
+    cur = df["Currency"].astype("string").str.upper()
+    needs_fx = cur.notna() & (cur != base_currency)
+
+    base_amount = pd.Series(pd.NA, index=df.index, dtype="Float64")
+    base_amount.loc[~needs_fx] = df.loc[~needs_fx, "amount"].astype("Float64")
+
+    if needs_fx.any():
+        left = df.loc[needs_fx, ["Date", "Currency", "amount"]].copy()
+        right = fx.copy()
+
+        merged = left.merge(
+            right,
+            how="left",
+            on=["Date", "Currency"],
+            validate="m:1",
+        )
+        fx_missing = merged["rate_to_base"].isna()
+
+        computed = merged["amount"].astype("Float64") * merged["rate_to_base"].astype("Float64")
+        base_amount.loc[left.index] = computed.values
+
+        fx_missing_mask = pd.Series(False, index=df.index)
+        fx_missing_mask.loc[left.index] = fx_missing.values
+    else:
+        fx_missing_mask = pd.Series(False, index=df.index)
+
+    return base_amount, fx_missing_mask
 
 
+def _collect_anomalies(df: pd.DataFrame, fx_missing_mask: Optional[pd.Series] = None) -> pd.DataFrame:
+    issues: List[pd.DataFrame] = []
+
+    def _pack(mask: pd.Series, issue: str, detail: str) -> None:
+        if mask is None or not mask.any():
+            return
+        sub = df.loc[mask, ["tx_id", "source_file", "source_row"]].copy()
+        sub["issue"] = issue
+        sub["detail"] = detail
+        issues.append(sub)
+
+    _pack(df["Date"].isna(), "missing_date", "Date could not be parsed")
+    _pack(df["Currency"].isna() | (df["Currency"].astype("string").str.strip() == ""), "missing_currency", "Currency missing/blank")
+    _pack(df["amount"].isna(), "missing_amount", "amount could not be parsed")
+    _pack(df["payer"].isna() & df["receiver"].isna(), "missing_parties", "payer and receiver are both null")
+    _pack(df["Flujo"].isna() | (df["Flujo"].astype("string").str.strip() == ""), "missing_flujo", "Flujo missing/blank")
+    _pack(df["Tipo"].isna() | (df["Tipo"].astype("string").str.strip() == ""), "missing_tipo", "Tipo missing/blank")
+
+    if fx_missing_mask is not None:
+        _pack(fx_missing_mask, "missing_fx_rate", "fx rate missing for (Date, Currency)")
+
+    if not issues:
+        return pd.DataFrame(columns=["tx_id", "source_file", "source_row", "issue", "detail"])
+
+    out = pd.concat(issues, ignore_index=True)
+    if "source_row" in out.columns:
+        out["source_row"] = pd.to_numeric(out["source_row"], errors="coerce").astype("Int64")
+    return out
+
+
+# -----------------------
+# Public API
+# -----------------------
 def build_ledger_base(
     fixture_path: Optional[str] = None,
     sheet_url: Optional[str] = None,
     service_account_file: Optional[str] = None,
     sheet_name: str = "LEDGERS",
     party_map_path: Optional[str] = None,
-    fx_rates_path: Optional[str] = '',
+    fx_rates_path: Optional[str] = "",
     base_currency: str = "ARS",
     require_tx_id: bool = False,
+    exclude_household: bool = False,
+    only_status: Optional[Sequence[str]] = ("pagado",),
+    add_time_period: bool = False,
+    time_freq: str = "W",
 ) -> pd.DataFrame:
-    """
-    Build canonical ledger DataFrame from fixture CSV or Google Sheet.
+    if not fixture_path and not sheet_url:
+        fixture_path = os.getenv("FIXTURE") or None
+        sheet_url = os.getenv("SHEET_URL") or os.getenv("ACCOUNT_SHEET_URL") or None
+    if not service_account_file:
+        service_account_file = os.getenv("SERVICE_ACCOUNT") or os.getenv("ACCOUNT_SERVICE_ACCOUNT") or None
 
-    NOTE: this function returns the canonical DataFrame and DOES NOT write final artifact CSVs.
-    The returned DataFrame has .attrs["anomalies"] with a small DataFrame describing issues found.
-
-    Canonical columns produced:
-      tx_id (str), Date (datetime64[ns]), amount (float), amount_cents (optional int),
-      currency (str), base_amount (float or NaN), payer, receiver, flujo, tipo,
-      source_file (str), source_row (int), ingest_ts (iso str), notes (str)
-
-    Defaults: if fixture_path is None, this function attempts to read from
-    environment variables SHEET_URL and SERVICE_ACCOUNT_FILE or the arguments provided.
-    """
-    # 1) Load raw data
     if fixture_path:
-        p = Path(fixture_path).expanduser()
-        if not p.exists():
-            raise FileNotFoundError(f"Fixture not found: {p}")
-        LOG.info("Loading ledger fixture: %s", p)
-        raw = pd.read_csv(p, dtype=str, low_memory=False)
-        source_file = str(p)
-    else:
-        # prefer explicit args, fall back to env
-        sheet_url = sheet_url or os.getenv("SHEET_URL")
-        service_account_file = service_account_file or os.getenv("SERVICE_ACCOUNT_FILE")
-        if not sheet_url or not service_account_file:
-            raise ValueError("No fixture_path provided and SHEET_URL or SERVICE_ACCOUNT_FILE not set.")
-        LOG.info("Loading ledger from Google Sheet: %s (sheet=%s)", sheet_url, sheet_name)
-        raw = read_sheet_to_df(sheet_url, service_account_file, sheet_name)
+        raw = _read_fixture(fixture_path)
+        source_file = str(Path(fixture_path).resolve())
+    elif sheet_url and service_account_file:
+        raw = read_sheet_to_df(sheet_url=sheet_url, service_account_file=service_account_file, sheet_name=sheet_name)
         source_file = sheet_url
-
-    if raw is None or raw.shape[0] == 0:
-        LOG.warning("No data loaded from source.")
-        return pd.DataFrame()
-
-    # normalize column names (strip)
-    raw = raw.rename(columns={c: c.strip() for c in raw.columns})
-
-    # prefer the known columns mapping (try to be forgiving)
-    # expected sheet columns (examples): transaction_id, Date, Box, payer, receiver, amount, Currency, Flujo, Tipo, Lugar, Detalle, issuer, account_id, status, medio
-    colmap = {
-        "transaction_id": "transaction_id",
-        "transaction id": "transaction_id",
-        "tx_id": "transaction_id",
-        "date": "Date",
-        "fecha": "Date",
-        "box": "Box",
-        "payer": "payer",
-        "payee": "receiver",
-        "receiver": "receiver",
-        "amount": "amount",
-        "monto": "amount",
-        "Currency": "Currency",
-        "moneda": "Currency",
-        "flujo": "Flujo",
-        "tipo": "Tipo",
-        "lugar": "Lugar",
-        "detalle": "Detalle",
-        "issuer": "issuer",
-        "account_id": "account_id",
-        "status": "status",
-        "medio": "medio",
-    }
-    # perform case-insensitive mapping
-    lower_to_orig = {c.lower(): c for c in raw.columns}
-    normalized = {}
-    for k, v in colmap.items():
-        if k in lower_to_orig:
-            normalized[v] = lower_to_orig[k]
-    # apply renaming to canonical intermediate names
-    df = raw.rename(columns={orig: new for new, orig in normalized.items()})
-
-    # df = df.loc[df.Box != 'Household'] ### Hardcoded FB BOX only
-    df = df.loc[df.status.isin(['pagado'])] ### Hardcoded pagado only
-
-    # If some core columns are missing, try to fallback using presence of approximate names
-    # Ensure we have at least Date, amount, Currency, payer/receiver if possible
-    # cast amount to float where possible
-    if "amount" in df.columns:
-        df["amount"] = pd.to_numeric(df["amount"].astype(str).str.replace(",", ""), errors="coerce")
     else:
-        # try other heuristics
-        amount_cands = [c for c in df.columns if "amount" in c.lower() or "monto" in c.lower() or "total" in c.lower()]
-        if amount_cands:
-            df["amount"] = pd.to_numeric(df[amount_cands[0]].astype(str).str.replace(",", ""), errors="coerce")
-        else:
-            df["amount"] = pd.NA
+        raise ValueError("Must provide fixture_path or (sheet_url and service_account_file)")
 
-    # parse Date conservatively: do not coerce to timezone
-    date_col_candidates = [c for c in ("Date", "date", "Fecha", "fecha") if c in df.columns]
-    if date_col_candidates:
-        df["Date"] = pd.to_datetime(df[date_col_candidates[0]], errors="coerce")
-    else:
-        df["Date"] = pd.NaT
+    df = _normalize_columns(raw)
+    df = _ensure_columns(df)
 
-    # ensure currency column exists
-    if "Currency" not in df.columns:
-        # try to detect common currency column
-        cands = [c for c in df.columns if c.lower() in ("Currency", "moneda", "curr")]
-        if cands:
-            df["Currency"] = df[cands[0]].astype(str).str.upper()
-        else:
-            df["Currency"] = ""
-
-    # canonical textual fields
-    for col in ("payer", "receiver", "Flujo", "Tipo", "Lugar", "Detalle", "issuer", "account_id", "status", "medio"):
-        if col not in df.columns:
-            df[col] = ""
-
-    # source provenance: source_file and source_row (1-based)
-    df = df.reset_index(drop=True)
-    df["source_row"] = df.index + 1
     df["source_file"] = source_file
-    ingest_ts = datetime.datetime.utcnow().isoformat() + "Z"
-    df["ingest_ts"] = ingest_ts
+    if "source_row" not in df.columns:
+        df["source_row"] = pd.RangeIndex(start=1, stop=len(df) + 1, step=1).astype("Int64")
+    else:
+        df["source_row"] = pd.to_numeric(df["source_row"], errors="coerce").astype("Int64")
 
-    # notes: concat Lugar + Detalle + issuer + medio (if present)
-    df["notes"] = (
-        df.get("Lugar", "").astype(str).fillna("")
-        + " | "
-        + df.get("Detalle", "").astype(str).fillna("")
-        + " | "
-        + df.get("issuer", "").astype(str).fillna("")
-        + " | "
-        + df.get("medio", "").astype(str).fillna("")
-    )
+    df["ingest_ts"] = _dt.datetime.utcnow().replace(microsecond=0).isoformat()
 
-    # deterministic tx_id generation (always compute to guarantee stable ids)
-    tx_ids = []
-    for _, r in df.iterrows():
-        row_vals = (
-            pd.to_datetime(r["Date"]).strftime("%Y-%m-%d") if not pd.isna(r["Date"]) else "",
-            _safe_str(r.get("payer")),
-            _safe_str(r.get("receiver")),
-            _safe_str(r.get("amount")),
-            _safe_str(r.get("Currency")),
-            _safe_str(r.get("Flujo")),
-            _safe_str(r.get("Tipo")),
-            str(r.get("source_row")),
-        )
-        tx_ids.append(_deterministic_tx_id(row_vals))
-    df["tx_id"] = tx_ids
+    df = _coerce_money_and_dates(df)
 
-    # compute amount_cents as optional compatibility column (rounded int)
-    df["amount_cents"] = pd.to_numeric((df["amount"].astype(float) * 100).round(0), errors="coerce").astype("Int64")
+    if only_status is not None and "status" in df.columns:
+        allowed = {str(s).strip().lower() for s in only_status}
+        df = df[df["status"].astype(str).str.strip().str.lower().isin(allowed)].copy()
 
-    # load FX if requested
-    fx_df = _load_fx_rates(fx_rates_path)
-    # compute base_amount using fx_df if available and Currency != base_currency
-    base_amounts = []
-    for _, r in df.iterrows():
-        amt = r.get("amount")
-        cur = r.get("Currency")
-        if amt is None or pd.isna(amt):
-            base_amounts.append(pd.NA)
-            continue
-        if not fx_df or (not cur) or str(cur).upper() == str(base_currency).upper():
-            base_amounts.append(pd.NA)
-            continue
-        base = _apply_fx_for_row(amt, cur, r.get("Date"), fx_df, base_currency)
-        base_amounts.append(base)
-    df["base_amount"] = base_amounts
+    if exclude_household and "Box" in df.columns:
+        household_markers = {"household", "hogar", "h", "casa"}
+        mask_house = df["Box"].astype(str).str.strip().str.lower().isin(household_markers)
+        df = df[~mask_house].copy()
 
-    # collect anomalies: bad dates, missing amounts, missing currency
-    anomalies_df = _collect_anomalies(df)
+    party_map = _load_party_map(party_map_path)
+    df = _apply_party_map(df, party_map)
 
-    # optionally add party normalization if party_map provided
-    if party_map_path:
-        try:
-            pmap = json.loads(Path(party_map_path).read_text(encoding="utf8"))
-            # apply simple mapping for payer and receiver
-            def normalize_party(x):
-                if not x:
-                    return x
-                s = str(x).strip()
-                return pmap.get(s, s)
-            df["payer"] = df["payer"].apply(normalize_party)
-            df["receiver"] = df["receiver"].apply(normalize_party)
-        except Exception:
-            LOG.exception("Failed to load/apply party_map: %s", party_map_path)
+    notes_parts = []
+    if "Detalle" in df.columns:
+        notes_parts.append(df["Detalle"].astype("string").fillna(""))
+    if "notes" in df.columns:
+        notes_parts.append(df["notes"].astype("string").fillna(""))
+    if notes_parts:
+        df["notes"] = notes_parts[0]
+        for part in notes_parts[1:]:
+            df["notes"] = (df["notes"].astype("string") + " | " + part.astype("string")).str.strip(" |")
+    else:
+        df["notes"] = pd.NA
 
-    # run lightweight time aggregation helper (adds TimePeriod)
-    try:
-        df = process_time_aggregation(df, time_freq="W", date_col="Date")
-    except Exception:
-        LOG.exception("process_time_aggregation failed; proceeding without TimePeriod.")
+    if "tx_id" in df.columns:
+        df["tx_id"] = df["tx_id"].astype("string").str.strip()
+        missing_tx = df["tx_id"].isna() | (df["tx_id"].str.strip() == "")
+    else:
+        df["tx_id"] = pd.NA
+        missing_tx = pd.Series(True, index=df.index)
 
-    # final column ordering for canonical ledger
-    canonical_cols = [
+    if require_tx_id or missing_tx.any():
+        df.loc[missing_tx, "tx_id"] = _build_tx_id(df.loc[missing_tx])
+
+    fx_missing_mask = None
+    if fx_rates_path:
+        fx = _load_fx_rates(fx_rates_path)
+        if fx is None:
+            df["base_amount"] = pd.NA
+        else:
+            base_amount, fx_missing_mask = _attach_base_amount(df, fx, base_currency=base_currency)
+            df["base_amount"] = base_amount
+    else:
+        df["base_amount"] = pd.NA
+
+    if add_time_period:
+        p = period_bins_for_dates(df["Date"], freq=time_freq)
+        if isinstance(p, pd.DataFrame) and "TimePeriod" in p.columns:
+            df["TimePeriod"] = p["TimePeriod"].astype(str)
+        else:
+            df["TimePeriod"] = df["Date"].dt.to_period(time_freq).astype(str)
+
+    anomalies = _collect_anomalies(df, fx_missing_mask=fx_missing_mask)
+    df.attrs["anomalies"] = anomalies
+
+    preferred = [
         "tx_id",
         "Date",
         "amount",
@@ -378,105 +478,166 @@ def build_ledger_base(
         "receiver",
         "Flujo",
         "Tipo",
+        "status",
+        "Box",
         "source_file",
         "source_row",
         "ingest_ts",
         "notes",
     ]
-    canonical_df = df[[c for c in canonical_cols if c in df.columns]].copy()
-
-    # attach anomalies
-    canonical_df.attrs["anomalies"] = anomalies_df
-
-    LOG.info("Built ledger_base rows=%d anomalies=%d", len(canonical_df), len(anomalies_df))
-    return canonical_df
+    cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
+    return df[cols].copy()
 
 
-
-
-def parse_args():
+# -----------------------
+# CLI (thin wrapper)
+# -----------------------
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run ingest and write ledger_canonical.csv")
-    p.add_argument("--fixture", help="Local fixture CSV/Parquet path (prefer)", default=os.getenv("FIXTURE"))
-    p.add_argument("--service-account", help="Google service account JSON path", default=os.getenv("SERVICE_ACCOUNT") or os.getenv("ACCOUNT_SERVICE_ACCOUNT"))
+    p.add_argument("--fixture", help="Local fixture CSV/Parquet path", default=os.getenv("FIXTURE"))
+    p.add_argument(
+        "--service-account",
+        help="Google service account JSON path",
+        default=os.getenv("SERVICE_ACCOUNT") or os.getenv("ACCOUNT_SERVICE_ACCOUNT"),
+    )
     p.add_argument("--sheet-url", help="Google Sheet URL", default=os.getenv("SHEET_URL") or os.getenv("ACCOUNT_SHEET_URL"))
-    p.add_argument("--sheet-name", help="Sheet/tab name (when using Google Sheets)", default="C. Long Ledger")
+    p.add_argument("--sheet-name", help="Sheet/tab name (when using Google Sheets)", default=os.getenv("SHEET_NAME", "C. Long Ledger"))
     p.add_argument("--out-dir", help="Output directory", default=os.getenv("OUT_DIR", "./out"))
-    p.add_argument("--exclude-household", action="store_true", help="Exclude household Box rows", default=False)
-    p.add_argument("--require-tx-id", action="store_true", help="Require tx_id generation/enforcement", default=False)
+
+    p.add_argument("--exclude-household", action="store_true", default=False)
+    p.add_argument("--require-tx-id", action="store_true", default=False)
+
+    p.add_argument(
+        "--only-status",
+        default=os.getenv("ONLY_STATUS", "pagado"),
+        help="Comma or space separated status filter. Use empty string to disable filtering.",
+    )
+
+    p.add_argument("--fx-rates", default=os.getenv("FX_RATES", ""))
+    p.add_argument("--base-currency", default=os.getenv("BASE_CURRENCY", "ARS"))
+    p.add_argument("--add-time-period", action="store_true", default=bool(int(os.getenv("ADD_TIME_PERIOD", "0"))))
+    p.add_argument("--time-freq", default=os.getenv("TIME_FREQ", "W"))
+
+    p.add_argument("--mode", choices=["smoke", "run"], default=os.getenv("MODE", "run"))
+    p.add_argument("--run-id", default=os.getenv("RUN_ID", ""))
+
     return p.parse_args()
 
-    
+
+def _parse_list_arg(s: str) -> Optional[List[str]]:
+    if s is None:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    parts = [p.strip() for p in s.replace(",", " ").split() if p.strip()]
+    return parts or None
 
 
-def main():
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(message)s")
+
     args = parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        from src.accounting.ingest import build_ledger_base
-    except Exception as e:
-        LOG.exception("Failed importing ingest module: %s", e)
-        sys.exit(10)
 
-    fixture = args.fixture
-    service_account = args.service_account
-    sheet_url = args.sheet_url
+    only_status = _parse_list_arg(args.only_status)
 
-    use_fixture = False
-    if fixture:
-        f = Path(fixture)
-        if f.exists():
-            use_fixture = True
-            LOG.info("Using fixture: %s", f)
-        else:
-            LOG.warning("Fixture provided but not found: %s", f)
+    ledger = build_ledger_base(
+        fixture_path=args.fixture or None,
+        sheet_url=args.sheet_url or None,
+        service_account_file=args.service_account or None,
+        sheet_name=args.sheet_name,
+        party_map_path=os.getenv("PARTY_MAP") or None,
+        fx_rates_path=(args.fx_rates or ""),
+        base_currency=args.base_currency,
+        require_tx_id=bool(args.require_tx_id),
+        exclude_household=bool(args.exclude_household),
+        only_status=only_status if only_status is not None else None,
+        add_time_period=bool(args.add_time_period),
+        time_freq=str(args.time_freq),
+    )
 
-    try:
-        if use_fixture:
-            # ledger = build_ledger_base(fixture_path=str(f), sheet_name=args.sheet_name, exclude_household=args.exclude_household, require_tx_id=args.require_tx_id)
-            ledger = build_ledger_base(fixture_path=str(f), sheet_name=args.sheet_name, require_tx_id=args.require_tx_id)
-        else:
-            if not service_account or not sheet_url:
-                LOG.error("Live mode requires --service-account and --sheet-url when fixture not provided.")
-                sys.exit(2)
-            # ledger = build_ledger_base(service_account_file=service_account, sheet_url=sheet_url, sheet_name=args.sheet_name, exclude_household=args.exclude_household, require_tx_id=args.require_tx_id)
-            ledger = build_ledger_base(service_account_file=service_account, sheet_url=sheet_url, sheet_name=args.sheet_name, require_tx_id=args.require_tx_id)
-
-            # Make sure to cover for currency... build_ledger_base(..., fx_rates_path = 
-    except Exception as e:
-        LOG.exception("Ingest failed: %s", e)
-        sys.exit(3)
-
-    if ledger is None or getattr(ledger, "shape", (0,))[0] == 0:
-        LOG.error("Ingest produced no rows - aborting")
-        sys.exit(4)
-
-    # write canonical ledger
     ledger_path = out_dir / "ledger_canonical.csv"
-    # ensure Date formatting for readability
-    if "Date" in ledger.columns:
-        try:
-            ledger["Date"] = pd.to_datetime(ledger["Date"], errors="coerce").dt.date.astype(str)
-        except Exception:
-            pass
-    ledger.to_csv(ledger_path, index=False)
-    LOG.info("Wrote ledger_canonical rows=%d -> %s", len(ledger), ledger_path)
+    ldf = ledger.copy()
+    if "Date" in ldf.columns:
+        ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce").dt.date.astype(str)
+    ldf.to_csv(ledger_path, index=False)
+    LOG.info("Wrote ledger_canonical rows=%d -> %s", len(ldf), ledger_path)
 
-    # anomalies
     anoms = ledger.attrs.get("anomalies")
     if isinstance(anoms, pd.DataFrame) and not anoms.empty:
         anoms_path = out_dir / "anomalies.csv"
         anoms.to_csv(anoms_path, index=False)
         LOG.info("Wrote anomalies rows=%d -> %s", len(anoms), anoms_path)
-    else:
-        LOG.info("No anomalies to write")
 
-    print(ledger_path)
+    try:
+        meta_dir = out_dir / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+
+        out_art = artifact_from_path(
+            name="ledger_canonical",
+            path=ledger_path,
+            stage="A.ingest",
+            mode=args.mode,
+            run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+            role="output",
+            root_dir=out_dir,
+            content_type="text/csv",
+        )
+
+        out_arts = [out_art]
+        if isinstance(anoms, pd.DataFrame) and not anoms.empty:
+            out_arts.append(
+                artifact_from_path(
+                    name="anomalies",
+                    path=(out_dir / "anomalies.csv"),
+                    stage="A.ingest",
+                    mode=args.mode,
+                    run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+                    role="derived",
+                    root_dir=out_dir,
+                    content_type="text/csv",
+                )
+            )
+
+        stage_manifest: Dict[str, Any] = {
+            "stage": "A.ingest",
+            "mode": args.mode,
+            "run_id": (args.run_id or "smoke" if args.mode == "smoke" else ""),
+            "generated_at": _dt.datetime.utcnow().replace(microsecond=0).isoformat(),
+            "inputs": [],
+            "params": {
+                "only_status": only_status,
+                "exclude_household": int(bool(args.exclude_household)),
+                "require_tx_id": int(bool(args.require_tx_id)),
+                "fx_rates": bool(args.fx_rates),
+                "base_currency": args.base_currency,
+            },
+            "outputs": out_arts,
+            "warnings": [],
+        }
+
+        rel = write_stage_manifest(meta_dir, stage_manifest)
+        stage_meta_art = artifact_from_path(
+            name="stage_A_ingest",
+            path=(out_dir / rel),
+            stage="A.ingest",
+            mode=args.mode,
+            run_id=stage_manifest["run_id"],
+            role="meta",
+            root_dir=out_dir,
+            content_type="application/json",
+        )
+        append_artifacts(meta_dir, [*out_arts, stage_meta_art])
+    except Exception:
+        LOG.exception("Manifest write failed (non-fatal)")
+
+    print(str(ledger_path))
     return 0
 
+
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        print("Interrupted", file=sys.stderr)
-        sys.exit(130)
+    raise SystemExit(main())

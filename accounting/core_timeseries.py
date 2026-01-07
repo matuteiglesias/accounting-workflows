@@ -294,7 +294,16 @@ def compute_daily_cash_position(
     expanded = expand_party_rows(ledger_df, amount_col=amount_col, date_col=date_col)
     # group by Date and party summing signed_amount
     expanded["Date"] = pd.to_datetime(expanded["Date"], errors="coerce").dt.normalize()
-    daily = expanded.groupby(["Date", "party"]).signed_amount.sum().reset_index().rename(columns={"signed_amount": "net_flow"})
+
+    daily = (
+        expanded
+        .groupby(["Date", "party", "Currency"], dropna=False)["signed_amount"]
+        .sum()
+        .reset_index()
+        .rename(columns={"signed_amount":"net_flow"})
+    )
+    pairs = daily[["party","Currency"]].dropna().drop_duplicates()
+    
     # create a complete calendar per party to ensure stable cumulative sums
     parties = daily["party"].dropna().unique().tolist()
     if len(parties) == 0:
@@ -303,22 +312,32 @@ def compute_daily_cash_position(
     max_date = daily["Date"].max()
     # daily date range
     drange = pd.date_range(start=min_date, end=max_date, freq=_normalize_freq_token(freq) if freq.lower() in _FREQ_MAP else freq)
+
     frames = []
-    for p in parties:
-        sub = daily[daily["party"] == p].set_index("Date").reindex(drange, fill_value=0.0)
+    for party, cur in pairs.itertuples(index=False):
+        sub = daily[(daily["party"]==party) & (daily["Currency"]==cur)].set_index("Date").reindex(drange, fill_value=0.0)
         sub = sub.rename_axis("Date").reset_index()
-        sub["party"] = p
-        # opening balance
-        opening = 0.0
-        if opening_balances and p in opening_balances:
-            opening = float(opening_balances[p])
-        # cumulative sum
-        sub["balance"] = sub["net_flow"].cumsum() + opening
-        # currency: try to infer most common currency for that party
-        currencies = expanded[expanded["party"] == p]["Currency"].dropna().astype(str)
-        cur = currencies.mode().iloc[0] if not currencies.empty else ""
+        sub["party"] = party
+
+
+        # # opening balance
+        # opening = 0.0
+        # if opening_balances and p in opening_balances:
+        #     opening = float(opening_balances[p])
+        # # cumulative sum
+        # sub["balance"] = sub["net_flow"].cumsum() + opening
+
+        # sub["balance"] = sub["net_flow"].cumsum() + opening_for(party, cur)
+        sub["balance"] = sub["net_flow"].cumsum() + 0 # Shortcut, opening = 0
         sub["Currency"] = cur
-        frames.append(sub[["Date", "party", "balance", "Currency"]])
+        frames.append(sub[["Date","party","Currency","balance"]])
+
+
+        # # currency: try to infer most common currency for that party
+        # currencies = expanded[expanded["party"] == p]["Currency"].dropna().astype(str)
+        # cur = currencies.mode().iloc[0] if not currencies.empty else ""
+        # sub["Currency"] = cur
+        # frames.append(sub[["Date", "party", "balance", "Currency"]])
     result = pd.concat(frames, ignore_index=True).sort_values(["party", "Date"]).reset_index(drop=True)
     result["source_ledger_hash"] = None
     return result

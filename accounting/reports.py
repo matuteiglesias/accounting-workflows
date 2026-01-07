@@ -7,7 +7,16 @@ import re
 import pandas as pd
 import numpy as np
 
-from src.accounting.utils import atomic_write_df, sha256_file
+from accounting.utils import atomic_write_df, sha256_file
+
+import logging, sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
 
 # ---------------------------------------------------------------------
 # IO helpers (CSV-only, amounts in currency units)
@@ -446,6 +455,8 @@ def _derive_top_parties(materialized: dict, top_n: int = 6) -> List[str]:
     totals = tmp.groupby("party")["_amount_for_rank"].sum().sort_values(ascending=False)
     return [p for p in totals.index.tolist()[:top_n]]
 
+import os
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(prog="reports", description="Generate accounting reports from materialized CSVs.")
     p.add_argument("-o", "--out-dir", default="out", help="Path to materialized outputs (CSV folder).")
@@ -455,6 +466,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--top", type=int, default=6, help="When parties omitted, pick top N parties by volume (default: 6).")
     p.add_argument("--no-validate", action="store_true", help="Skip validation step (not recommended).")
     p.add_argument("--pretty-json", action="store_true", help="Print summary JSON prettily.")
+    p.add_argument("--summary-path", default=None, help="Write summary JSON to this path.")
+    p.add_argument("--mode", default=os.getenv("MODE", "run"), choices=["smoke", "run"])
+    p.add_argument("--run-id", default=os.getenv("RUN_ID", ""))
+
+
     args = p.parse_args(argv)
 
     out_dir = Path(args.out_dir)
@@ -484,13 +500,78 @@ def main(argv: Optional[List[str]] = None) -> int:
     if validation is not None:
         result.setdefault("validation", validation)
 
-    # print summary
+
+
+
+    from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+
+    meta_dir = out_dir / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    rid = args.run_id or ("smoke" if args.mode == "smoke" else "")
+
+    # outputs reportados por tu runner
+    out_arts = []
+    outputs = (result.get("outputs") or {})
+
+    for fname, meta in outputs.items():
+        fpath = (write_dir / fname)
+        if fpath.exists():
+            out_arts.append(artifact_from_path(
+                name=fname.replace(".csv", ""),
+                path=fpath,
+                stage="E.reports",
+                mode=args.mode,
+                run_id=rid,
+                role="primary",
+                root_dir=out_dir,
+                rows=meta.get("rows"),
+                content_type="text/csv",
+            ))
+
+    stage_manifest = {
+        "stage": "E.reports",
+        "mode": args.mode,
+        "run_id": rid,
+        "inputs": [
+            # input principal: la materialización ya hecha
+            # opcional: si querés, podés agregar artifacts de per_party/per_flow aquí
+            {"kind": "materialized_folder", "relpath": str(Path(args.out_dir).resolve().relative_to(out_dir.resolve())) if False else "."}
+        ],
+        "params": {"freq": args.freq, "top": args.top, "parties": parties, "write_dir": str(write_dir.resolve().relative_to(out_dir.resolve()))},
+        "outputs": out_arts,
+        "validation": result.get("validation"),
+        "warnings": [],
+    }
+
+    stage_manifest_rel = write_stage_manifest(meta_dir, stage_manifest)
+
+    stage_meta_art = artifact_from_path(
+        name="stage_E_reports",
+        path=(out_dir / stage_manifest_rel),
+        stage="E.reports",
+        mode=args.mode,
+        run_id=rid,
+        role="meta",
+        root_dir=out_dir,
+        content_type="application/json",
+    )
+
+    append_artifacts(meta_dir, [*out_arts, stage_meta_art])
+
+    # stdout sigue existiendo
     if args.pretty_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
+        if args.summary_path:
+            with open(args.summary_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=4)
         print(json.dumps(result, ensure_ascii=False))
 
     return 0
+
+
+
 
 if __name__ == "__main__":
     sys.exit(main())

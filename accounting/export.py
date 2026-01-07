@@ -56,7 +56,7 @@ from datetime import datetime
 # re-use your helper that builds an authorized gspread client
 # # (you already defined get_google_sheets_client in src.accounting.utils)
 # try:
-#     from src.accounting.utils import get_google_sheets_client
+#     from accounting.utils import get_google_sheets_client
 # except Exception:
 #     # fallback: if utils not available, expect caller to pass an authorized client
 #     get_google_sheets_client = None
@@ -67,7 +67,7 @@ sys.path.append('./../')
 sys.path.append('./../../')
 sys.path.append('./../../../')
 
-from src.accounting.utils import get_google_sheets_client
+from accounting.utils import get_google_sheets_client
 
 def _val_to_cell(v):
     """Coerce dataframe value to a sheet-friendly scalar (empty string for NaN)."""

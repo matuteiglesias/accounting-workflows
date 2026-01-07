@@ -3,7 +3,7 @@
 Configuration loader for accounting pipeline.
 
 Usage:
-    from src.accounting.config import load_config
+    from accounting.config import load_config
     cfg = load_config()
     print(cfg.to_paths()["out"])
 """

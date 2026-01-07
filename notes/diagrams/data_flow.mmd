@@ -1,0 +1,24 @@
+flowchart TD
+  SRC[Google Sheet / fixture CSV] --> A[A.ingest]
+  A --> LEDGER[ledger_canonical.csv]
+  A --> ANOM[anomalies.csv]
+  A --> META_A[meta/stage_A_ingest.json + artifacts.jsonl]
+
+  LEDGER --> D[D.materialize]
+  D --> PF[per_flow_time_long.freq=F.csv]
+  D --> PP[per_party_time_long.freq=F.csv]
+  D --> LOANS[loans_time.freq=M.csv]
+  D --> CASH[daily_cash_position.csv]
+  D --> PART[partitions.json]
+  D --> META_D[meta/stage_D_materialize.json + artifacts.jsonl]
+
+  PF --> E[E.reports]
+  PP --> E
+  CASH --> E
+  E --> FONDOS[fondos_report.csv]
+  E --> RENTA[renta_*.csv]
+  E --> META_E[meta/stage_E_reports.json + artifacts.jsonl]
+
+  PF --> V[views.py / notebook EDA]
+  PP --> V
+  CASH --> V
