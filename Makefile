@@ -1,86 +1,80 @@
-# Makefile.v2 — Accounting spine (A ingest → D materialize → E reports)
+# Makefile.v2 - Accounting spine (A ingest -> D materialize -> E reports -> V views)
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
-# - Explicit out_dir always
-# - Timestamped run outputs (no stale-file illusions)
+# - Explicit out-dir passed to all Python entrypoints
+# - Timestamped run outputs (avoid stale-file illusions)
 # - Content checks (not only presence)
-# - Wrapper manifests for ingest + reports (materialize already emits manifest.json)
+# - Materialize emits manifest.json; ingest/reports may emit wrappers
 
 SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+MAKEFLAGS += --no-print-directory
+
 PY ?= python3
+export PYTHONUNBUFFERED := 1
 
 # ----------------------------------------
-# Paths / import roots
+# Resolve repo root (assumes Makefile in repo root)
 # ----------------------------------------
-ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))      # folder containing this Makefile
-WORKDIR := $(abspath $(ROOT)/../..)                         # repo root containing "src/"
-export PYTHONPATH := $(WORKDIR)
+ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+export PYTHONPATH := $(ROOT)
 
 # ----------------------------------------
 # User-tunable parameters
 # ----------------------------------------
-OUT ?= out
-FREQ ?= W
-TOP ?= 6
-
-ACCOUNT_SHEET_URL ?=
-RENTALS_SHEET_URL ?=
-ACCOUNT_SA ?=
-
-define require_var
-	@if [ -z "$($(1))" ]; then \
-		echo "[ERROR] Missing required var: $(1)"; \
-		echo "        Set it via environment or private/.env (not committed)."; \
-		exit 2; \
-	fi
-endef
-
-
-# Then, in targets that need Sheets access, add:
-
-# 	$(call require_var,ACCOUNT_SHEET_URL)
-# 	$(call require_var,ACCOUNT_SA)
-
-
-# And replace args like:
-
-# --sheet-url "$(ACCOUNT_SHEET_URL)" \
-# --service-account "$(ACCOUNT_SA)" \
-
-
-
-
+OUT  ?= out
+FREQ ?= M
+TOP  ?= 10
 
 # Smoke fixture (override if your fixture lives elsewhere)
-FIXTURE ?= /home/matias/RAG_Sync/Accounting/4_Analysis_Workflows/src/fixtures/ledger_fixture.csv
+FIXTURE ?= $(ROOT)/fixtures/ledger_fixture.csv
 
-# Live sheet config (RUN mode)
-ACCOUNT_SHEET_URL ?= $(ACCOUNT_SHEET_URL)
-ACCOUNT_SERVICE_ACCOUNT ?= $(ACCOUNT_SA)
+# Live ingest vars (export before running, or use run-env wrapper)
+ACCOUNT_SA ?=
+ACCOUNT_SHEET_URL ?=
 ACCOUNT_SHEET_NAME ?= C. Long Ledger
 
 # Optional explicit parties for reports (RUN boundedness)
-# Example: REPORT_PARTIES="PM FB"  (space-separated)
-# or:      REPORT_PARTIES="PM,FB" (comma-separated)
-REPORT_PARTIES ?=
+# Examples:
+#   REPORT_PARTIES="PM FB"
+#   REPORT_PARTIES="PM,FB"
+REPORT_PARTIES ?= PM,FB
+
+# ----------------------------------------
+# Helpers
+# ----------------------------------------
+define require_var
+	@if [ -z "$($(1))" ]; then echo "ERROR: missing required var: $(1)"; exit 2; fi
+endef
+
+define _guard_out_dir
+	@if [ -z "$(1)" ]; then echo "ERROR: OUT_DIR empty"; exit 2; fi
+endef
 
 # ----------------------------------------
 # Derived output dirs
 # ----------------------------------------
 SMOKE_OUT := $(OUT)/smoke/accounting
 RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
-RUN_OUT := $(OUT)/run/accounting/$(RUN_STAMP)
+RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)
 
 SMOKE_REPORTS_DIR := $(SMOKE_OUT)/reports
-RUN_REPORTS_DIR := $(RUN_OUT)/reports
+RUN_REPORTS_DIR   := $(RUN_OUT)/reports
 
+SMOKE_VIEWS_DIR   := $(SMOKE_OUT)/views
+RUN_VIEWS_DIR     := $(RUN_OUT)/views
 
+SMOKE_VIEWS_SANITY := $(SMOKE_VIEWS_DIR)/views_sanity.json
+RUN_VIEWS_SANITY   := $(RUN_VIEWS_DIR)/views_sanity.json
 
-ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-OUT_DIR ?= $(ROOT)/../out
+SMOKE_RUN_ID := smoke
+RUN_RUN_ID   := $(RUN_STAMP)
 
-export PYTHONPATH := $(ROOT)/../..
+SMOKE_META_DIR := $(SMOKE_OUT)/meta
+RUN_META_DIR   := $(RUN_OUT)/meta
 
+SMOKE_REPORTS_SUMMARY := $(SMOKE_META_DIR)/reports_summary.json
+RUN_REPORTS_SUMMARY   := $(RUN_META_DIR)/reports_summary.json
 
 # ----------------------------------------
 # Help
@@ -89,63 +83,58 @@ export PYTHONPATH := $(ROOT)/../..
 help:
 	@echo ""
 	@echo "Accounting spine v2:"
-	@echo "  make smoke-accounting         # fixture → ingest → materialize → reports (+checks)"
-	@echo "  make run-accounting           # live sheet → ingest → materialize → reports (+checks)"
+	@echo "  make smoke-accounting         # fixture -> ingest -> materialize -> reports -> views (+checks)"
+	@echo "  make run-accounting           # live sheet -> ingest -> materialize -> reports -> views (+checks)"
 	@echo ""
 	@echo "Per-step targets:"
-	@echo "  make smoke-ingest | smoke-materialize | smoke-reports"
-	@echo "  make run-ingest   | run-materialize   | run-reports"
+	@echo "  make smoke-ingest | smoke-materialize | smoke-reports | smoke-views"
+	@echo "  make run-ingest   | run-materialize   | run-reports   | run-views"
 	@echo ""
 	@echo "Key vars:"
 	@echo "  OUT=out  FREQ=W|M  TOP=6"
-	@echo "  FIXTURE=$(WORKDIR)/src/fixtures/ledger_fixture.csv"
-	@echo "  ACCOUNT_SERVICE_ACCOUNT=...  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
+	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
+	@echo "  ACCOUNT_SA=/path/to/sa.json  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
 	@echo "  REPORT_PARTIES='PM FB'  (or 'PM,FB')"
 	@echo ""
-
-# ----------------------------------------
-# Guardrails helpers
-# ----------------------------------------
-define _guard_out_dir
-	@test -n "$(1)" || (echo "ERROR: out_dir is empty"; exit 2)
-	@test "$(1)" != "/" || (echo "ERROR: refusing to write to /"; exit 2)
-endef
+	@echo "Env wrapper targets (explicit, no implicit .env include):"
+	@echo "  make run-env ENV_FILE=private/accounting.env"
+	@echo "  make smoke-env ENV_FILE=private/accounting.env"
+	@echo "  make run-story-env ENV_FILE=private/accounting.env STORY_YEAR=2025"
+	@echo ""
 
 # ----------------------------------------
 # Meta targets
 # ----------------------------------------
 .PHONY: smoke-accounting run-accounting
-smoke-accounting: smoke-reports
-run-accounting: run-reports
+smoke-accounting: smoke-views
+run-accounting: run-views
 
 # ========================================
-# SMOKE MODE (fixture, offline, deterministic-ish)
+# SMOKE MODE
 # ========================================
 
 .PHONY: smoke-ingest
 smoke-ingest:
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@echo "[SMOKE][INGEST] fixture=$(FIXTURE) -> out=$(SMOKE_OUT)"
-	@echo "$(FIXTURE)"
-
 	@mkdir -p "$(SMOKE_OUT)"
-	@$(PY) -m src.accounting.ingest \
+	@$(PY) -m accounting.ingest \
+		--mode smoke \
 		--fixture "$(FIXTURE)" \
 		--out-dir "$(SMOKE_OUT)" \
-		--require-tx-id
-		--service-account "$(ACCOUNT_SERVICE_ACCOUNT)" \ 
-		--sheet-url "$(ACCOUNT_SHEET_URL)" \ 
-
+		--run-id "$(SMOKE_RUN_ID)"
 	@$(MAKE) _check_ingest OUT_DIR="$(SMOKE_OUT)" MODE="smoke" FIXTURE="$(FIXTURE)"
 
 .PHONY: smoke-materialize
 smoke-materialize: smoke-ingest
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@echo "[SMOKE][MATERIALIZE] freq=$(FREQ) -> out=$(SMOKE_OUT)"
-	@$(PY) -m src.accounting.materialize \
+	@$(PY) -m accounting.materialize \
 		--out-dir "$(SMOKE_OUT)" \
 		--freq "$(FREQ)" \
-		--force 1
+		--force 1 \
+		--mode smoke \
+		--run-id "$(SMOKE_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(SMOKE_OUT)" MODE="smoke" FREQ="$(FREQ)"
 
 .PHONY: smoke-reports
@@ -153,42 +142,71 @@ smoke-reports: smoke-materialize
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@echo "[SMOKE][REPORTS] top=$(TOP) freq=$(FREQ) -> out=$(SMOKE_REPORTS_DIR)"
 	@mkdir -p "$(SMOKE_REPORTS_DIR)"
-	@$(PY) -m src.accounting.reports \
+
+	@bash -eu -o pipefail -c '\
+	mkdir -p "$(SMOKE_META_DIR)"; \
+	err="$(SMOKE_OUT)/reports.stderr.log"; \
+	$(PY) -m accounting.reports \
 		--out-dir "$(SMOKE_OUT)" \
 		--freq "$(FREQ)" \
 		--write-dir "$(SMOKE_REPORTS_DIR)" \
 		--top "$(TOP)" \
-		--pretty-json > "$(SMOKE_OUT)/reports_summary.json"
+		--summary-path "$(SMOKE_REPORTS_SUMMARY)" \
+		--mode smoke \
+		--run-id "$(SMOKE_RUN_ID)" \
+		> /dev/null 2> "$$err"; \
+	test -s "$(SMOKE_REPORTS_SUMMARY)" || (echo "ERROR: reports_summary.json missing/empty"; exit 2); \
+	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(SMOKE_REPORTS_SUMMARY)"; \
+	'
 	@$(MAKE) _check_reports OUT_DIR="$(SMOKE_OUT)" MODE="smoke" REPORTS_DIR="$(SMOKE_REPORTS_DIR)"
 
+.PHONY: smoke-views
+smoke-views: smoke-reports
+	@$(call _guard_out_dir,$(SMOKE_OUT))
+	@echo "[SMOKE][VIEWS] freq=$(FREQ) -> out=$(SMOKE_VIEWS_DIR)"
+	@mkdir -p "$(SMOKE_VIEWS_DIR)"
+	@bash -eu -o pipefail -c '\
+	err="$(SMOKE_OUT)/views.stderr.log"; \
+	$(PY) -m accounting.views \
+		--reports-dir "$(SMOKE_REPORTS_DIR)" \
+		--write-dir "$(SMOKE_VIEWS_DIR)" \
+		--freq "$(FREQ)" \
+		> /dev/null 2> "$$err"; \
+	test -s "$(SMOKE_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
+	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(SMOKE_VIEWS_SANITY)"; \
+	'
+	@$(MAKE) _check_views OUT_DIR="$(SMOKE_OUT)" MODE="smoke"
+
 # ========================================
-# RUN MODE (live sheet, bounded, timestamped output)
+# RUN MODE (LIVE)
 # ========================================
 
 .PHONY: run-ingest
 run-ingest:
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -n "$(ACCOUNT_SERVICE_ACCOUNT)" || (echo "ERROR: missing ACCOUNT_SERVICE_ACCOUNT (or ACCOUNT_SA)"; exit 2)
-	@test -f "$(ACCOUNT_SERVICE_ACCOUNT)" || (echo "ERROR: service account file not found: $(ACCOUNT_SERVICE_ACCOUNT)"; exit 3)
-	@test -n "$(ACCOUNT_SHEET_URL)" || (echo "ERROR: missing ACCOUNT_SHEET_URL"; exit 2)
+	# @$(call require_var,ACCOUNT_SA)
+	@$(call require_var,ACCOUNT_SHEET_URL)
 	@echo "[RUN][INGEST] sheet='$(ACCOUNT_SHEET_NAME)' -> out=$(RUN_OUT)"
 	@mkdir -p "$(RUN_OUT)"
-	@$(PY) -m src.accounting.ingest \
-		--service-account "$(ACCOUNT_SERVICE_ACCOUNT)" \
-		--sheet-url "$(ACCOUNT_SHEET_URL)" \
-		--sheet-name "$(ACCOUNT_SHEET_NAME)" \
+	@$(PY) -m accounting.ingest \
+		--mode run \
 		--out-dir "$(RUN_OUT)" \
-		--require-tx-id
-	@$(MAKE) _check_ingest OUT_DIR="$(RUN_OUT)" MODE="run" FIXTURE=""
+		--run-id "$(RUN_RUN_ID)" \
+		--service-account "$(ACCOUNT_SA)" \
+		--sheet-url "$(ACCOUNT_SHEET_URL)" \
+		--sheet-name "$(ACCOUNT_SHEET_NAME)"
+	@$(MAKE) _check_ingest OUT_DIR="$(RUN_OUT)" MODE="run"
 
 .PHONY: run-materialize
 run-materialize: run-ingest
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@echo "[RUN][MATERIALIZE] freq=$(FREQ) -> out=$(RUN_OUT)"
-	@$(PY) -m src.accounting.materialize \
+	@$(PY) -m accounting.materialize \
 		--out-dir "$(RUN_OUT)" \
 		--freq "$(FREQ)" \
-		--force 1
+		--force 0 \
+		--mode run \
+		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 
 .PHONY: run-reports
@@ -196,348 +214,125 @@ run-reports: run-materialize
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@echo "[RUN][REPORTS] freq=$(FREQ) parties='$(REPORT_PARTIES)' top=$(TOP) -> out=$(RUN_REPORTS_DIR)"
 	@mkdir -p "$(RUN_REPORTS_DIR)"
-	@set -e; \
-	if [ -n "$(REPORT_PARTIES)" ]; then \
-		$(PY) -m src.accounting.reports \
-			--out-dir "$(RUN_OUT)" \
-			--freq "$(FREQ)" \
-			--write-dir "$(RUN_REPORTS_DIR)" \
-			--parties $(REPORT_PARTIES) \
-			--pretty-json > "$(RUN_OUT)/reports_summary.json"; \
-	else \
-		$(PY) -m src.accounting.reports \
-			--out-dir "$(RUN_OUT)" \
-			--freq "$(FREQ)" \
-			--write-dir "$(RUN_REPORTS_DIR)" \
-			--top "$(TOP)" \
-			--pretty-json > "$(RUN_OUT)/reports_summary.json"; \
-	fi
+
+	@bash -eu -o pipefail -c '\
+	mkdir -p "$(RUN_META_DIR)"; \
+	err="$(RUN_OUT)/reports.stderr.log"; \
+	$(PY) -m accounting.reports \
+		--out-dir "$(RUN_OUT)" \
+		--freq "$(FREQ)" \
+		--write-dir "$(RUN_REPORTS_DIR)" \
+		--top "$(TOP)" \
+		--parties "$(REPORT_PARTIES)" \
+		--summary-path "$(RUN_REPORTS_SUMMARY)" \
+		--mode run \
+		--run-id "$(RUN_RUN_ID)" \
+		> /dev/null 2> "$$err"; \
+	test -s "$(RUN_REPORTS_SUMMARY)" || (echo "ERROR: reports_summary.json missing/empty"; exit 2); \
+	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(RUN_REPORTS_SUMMARY)"; \
+	'
 	@$(MAKE) _check_reports OUT_DIR="$(RUN_OUT)" MODE="run" REPORTS_DIR="$(RUN_REPORTS_DIR)"
 
+.PHONY: run-views
+run-views: run-reports
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@echo "[RUN][VIEWS] freq=$(FREQ) -> out=$(RUN_VIEWS_DIR)"
+	@mkdir -p "$(RUN_VIEWS_DIR)"
+	@bash -eu -o pipefail -c '\
+	err="$(RUN_OUT)/views.stderr.log"; \
+	$(PY) -m accounting.views \
+		--reports-dir "$(RUN_REPORTS_DIR)" \
+		--write-dir "$(RUN_VIEWS_DIR)" \
+		--freq "$(FREQ)" \
+		> /dev/null 2> "$$err"; \
+	test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
+	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(RUN_VIEWS_SANITY)"; \
+	'
+	@$(MAKE) _check_views OUT_DIR="$(RUN_OUT)" MODE="run"
+
 # ========================================
-# CHECKS (content checks + wrapper manifests)
+# CHECKS
 # ========================================
 
 .PHONY: _check_ingest
 _check_ingest:
-	@$(PY) - <<'PY'
-	import json, hashlib
-	from pathlib import Path
-	import pandas as pd
-
-	out_dir = Path("$(OUT_DIR)")
-	mode = "$(MODE)"
-	fixture = Path("$(FIXTURE)") if "$(FIXTURE)" else None
-
-	ledger = out_dir / "ledger_canonical.csv"
-	assert ledger.exists(), f"missing {ledger}"
-
-	df = pd.read_csv(ledger)
-
-	# Minimal canonical contract: required fields for downstream stages
-	required = [
-	"tx_id","Date","amount","Currency","payer","receiver","Flujo","Tipo"
-	]
-	missing = [c for c in required if c not in df.columns]
-	assert not missing, f"missing columns: {missing}"
-
-	n = len(df)
-	assert n > 0, "ledger_canonical.csv is empty"
-	assert n < 5_000_000, f"suspiciously large n={n}"
-
-	# require-tx-id invariant
-	assert df["tx_id"].notna().all(), "null tx_id exists"
-	assert df["tx_id"].is_unique, "duplicate tx_id exists"
-
-	anoms_path = out_dir / "anomalies.csv"
-	anoms_rows = 0
-	if anoms_path.exists():
-		anoms_rows = len(pd.read_csv(anoms_path))
-
-	# Input hash:
-	# - smoke: hash fixture (if present)
-	# - run: hash ledger output (proxy for sheet snapshot)
-	if mode == "smoke" and fixture and fixture.exists():
-		input_hash = hashlib.sha256(fixture.read_bytes()).hexdigest()
-	else:
-		input_hash = hashlib.sha256(ledger.read_bytes()).hexdigest()
-
-	manifest = {
-	"stage": "A.ingest",
-	"mode": mode,
-	"input_hash": input_hash,
-	"outputs": {
-		"ledger_canonical": {
-		"path": str(ledger),
-		"rows": n,
-		"sha256": hashlib.sha256(ledger.read_bytes()).hexdigest()
-		},
-		"anomalies": {
-		"path": str(anoms_path),
-		"rows": anoms_rows
-		} if anoms_path.exists() else None,
-	},
-	"schema": {"columns": df.columns.tolist()},
-	}
-
-	(out_dir / "ingest_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-	print(f"[OK] ingest {mode}: rows={n} anomalies={anoms_rows}")
-	PY
+	@$(call _guard_out_dir,$(OUT_DIR))
+	@OUT_DIR="$(OUT_DIR)" MODE="$(MODE)" FIXTURE="$(FIXTURE)" $(PY) scripts/check_ingest.py
 
 .PHONY: _check_materialize
 _check_materialize:
-	@$(PY) - <<'PY'
-	import json
-	from pathlib import Path
-	import pandas as pd
-
-	out_dir = Path("$(OUT_DIR)")
-	freq = "$(FREQ)"
-	mode = "$(MODE)"
-
-	manifest_path = out_dir / "manifest.json"
-	partitions_path = out_dir / "partitions.json"
-	assert manifest_path.exists(), f"missing {manifest_path}"
-	assert partitions_path.exists(), f"missing {partitions_path}"
-
-	m = json.loads(manifest_path.read_text(encoding="utf-8"))
-	assert isinstance(m.get("aggregates"), dict), "manifest missing aggregates dict"
-	assert isinstance(m.get("partitions"), dict), "manifest missing partitions dict"
-
-	ledger = out_dir / "ledger_canonical.csv"
-	per_flow = out_dir / f"per_flow_time_long.freq={freq}.csv"
-	per_party = out_dir / f"per_party_time_long.freq={freq}.csv"
-	daily_cash = out_dir / "daily_cash_position.csv"
-
-	for p in (ledger, per_flow, per_party, daily_cash):
-		assert p.exists(), f"missing {p}"
-
-	ld = pd.read_csv(ledger)
-	pf = pd.read_csv(per_flow)
-
-	# Totals reconciliation (smoke/run): ledger amount sum equals per_flow amount sum within tight tol
-	ld_amt = pd.to_numeric(ld.get("amount"), errors="coerce").fillna(0.0).sum()
-	pf_amt = pd.to_numeric(pf.get("amount"), errors="coerce").fillna(0.0).sum()
-
-	tol = max(1e-6, abs(ld_amt) * 1e-9)
-	assert abs(ld_amt - pf_amt) <= tol, f"totals drift: ledger={ld_amt} per_flow={pf_amt} tol={tol}"
-
-	print(f"[OK] materialize {mode}: ledger_sum={ld_amt} per_flow_sum={pf_amt}")
-	PY
+	@$(call _guard_out_dir,$(OUT_DIR))
+	@OUT_DIR="$(OUT_DIR)" MODE="$(MODE)" FREQ="$(FREQ)" $(PY) scripts/check_materialize.py
 
 .PHONY: _check_reports
 _check_reports:
-	@$(PY) - <<'PY'
-	import json, hashlib
-	from pathlib import Path
+	@$(call _guard_out_dir,$(OUT_DIR))
+	@OUT_DIR="$(OUT_DIR)" MODE="$(MODE)" REPORTS_DIR="$(REPORTS_DIR)" $(PY) scripts/check_reports.py
 
-	out_dir = Path("$(OUT_DIR)")
-	reports_dir = Path("$(REPORTS_DIR)")
-	mode = "$(MODE)"
+.PHONY: _check_views
+_check_views:
+	@$(call _guard_out_dir,$(OUT_DIR))
+	@echo "[CHECK][VIEWS] MODE=$(MODE) OUT_DIR=$(OUT_DIR)"
+	@sanity="$(OUT_DIR)/views/views_sanity.json"; \
+	test -s "$$sanity" || (echo "ERROR: views_sanity.json missing/empty at $$sanity"; exit 2); \
+	$(PY) -c 'import json,sys; json.load(open(sys.argv[1],"r",encoding="utf-8"))' "$$sanity"
 
-	summary_path = out_dir / "reports_summary.json"
-	assert summary_path.exists(), f"missing {summary_path}"
+# ========================================
+# Aliases / convenience
+# ========================================
 
-	summary = json.loads(summary_path.read_text(encoding="utf-8"))
-	assert isinstance(summary, dict), "reports_summary.json not a JSON object"
-	assert "outputs" in summary, "reports summary missing 'outputs'"
+.PHONY: smoke run-all run caps
+smoke: smoke-accounting
+run-all: run-accounting
 
-	csvs = sorted(reports_dir.glob("*.csv"))
-	assert len(csvs) >= 1, "no report CSVs produced"
-
-	outputs = []
-	for p in csvs:
-		b = p.read_bytes()
-		outputs.append({"path": str(p), "sha256": hashlib.sha256(b).hexdigest(), "bytes": len(b)})
-
-	manifest = {
-	"stage": "E.reports",
-	"mode": mode,
-	"summary_path": str(summary_path),
-	"outputs": outputs,
-	}
-
-	(out_dir / "reports_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-	print(f"[OK] reports {mode}: files={len(csvs)}")
-	PY
+# optional alias if you want the runner to call `run` not `run-all`
+run: run-accounting
 
 # ----------------------------------------
-# Cleaning (safe-ish)
+# Explicit env wrappers (no implicit .env include)
 # ----------------------------------------
-.PHONY: clean-smoke clean-runs
-clean-smoke:
-	@echo "[CLEAN] rm -rf $(SMOKE_OUT)"
-	@rm -rf "$(SMOKE_OUT)" || true
+ENV_FILE ?= private/accounting.env
 
-clean-runs:
-	@echo "[CLEAN] rm -rf $(OUT)/run/accounting/*"
-	@rm -rf "$(OUT)/run/accounting" || true
+.PHONY: run-env smoke-env run-story-env smoke-story-env
+run-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-accounting'
 
+smoke-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-accounting'
 
+run-story-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-storypack STORY_YEAR="$(STORY_YEAR)" STORY_FREQ="$(STORY_FREQ)"'
 
+smoke-story-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-storypack STORY_YEAR="$(STORY_YEAR)" STORY_FREQ="$(STORY_FREQ)"'
 
+# ========================================
+# Storypack layer (F) - depends on views (V)
+# ========================================
 
-# # Makefile — weekly accounting pipeline (uses CLI modules, no embedded Python)
-# PY ?= python3
+STORY_YEAR ?= 2025
+STORY_FREQ ?= $(FREQ)
+STORY_WRITE_DIR ?= $(RUN_OUT)/storypack
 
-# # CLI modules (calls python -m <module>)
-# INGEST_MODULE ?= src.accounting.ingest
-# MATERIALIZE_MODULE ?= src.accounting.materialize
+.PHONY: run-storypack smoke-storypack
+run-storypack: run-views
+	@echo "[RUN][STORY] year=$(STORY_YEAR) freq=$(STORY_FREQ) -> $(RUN_OUT)/storypack"
+	@$(PY) scripts/run_storypack.py \
+		--run-out "$(RUN_OUT)" \
+		--year "$(STORY_YEAR)" \
+		--freq "$(STORY_FREQ)" \
+		--report-parties "$(REPORT_PARTIES)" \
+		--write-dir "$(RUN_OUT)/storypack"
 
-# # overridable run-time vars (export ACCOUNT_* env vars to override)
-# # # OUT_DIR ?= ./../out
-# ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-# OUT_DIR ?= $(ROOT)/../out
+smoke-storypack: smoke-views
+	@echo "[SMOKE][STORY] -> $(SMOKE_OUT)/storypack"
+	@$(PY) scripts/run_storypack.py \
+		--run-out "$(SMOKE_OUT)" \
+		--year "$(STORY_YEAR)" \
+		--freq "$(STORY_FREQ)" \
+		--report-parties "$(REPORT_PARTIES)" \
+		--write-dir "$(SMOKE_OUT)/storypack"
 
-# export PYTHONPATH := $(ROOT)/../..
-
-# FIXTURE ?= ./../fixtures/ledger_fixture.csv
-# FREQ ?= M
-# FORCE ?= 0          # 1 to force materialize full rebuild
-# PARTIES ?= FB,PM
-
-
-
-# SERVICE_ACCOUNT ?= $(ACCOUNT_SERVICE_ACCOUNT)
-
-# SHEET_URL ?= $(ACCOUNT_SHEET_URL)
-
-# LOG_DIR := logs
-# ANOM_DIR := $(OUT_DIR)/anomalies
-
-# # lightweight report targets for accounting reports
-# WRITE_DIR ?= $(OUT_DIR)/reports
-# TOP ?= 6
-
-
-
-# .PHONY: help all weekly ingest ingest-live materialize materialize-force quick clean manifest validate
-
-# help:
-# 	@echo ""
-# 	@echo "Make targets (lean, CLI-driven):"
-# 	@echo "  make ingest            -> run ingest using FIXTURE (writes ledger_canonical.csv)"
-# 	@echo "  make ingest-live       -> run ingest against Google Sheet (requires SERVICE_ACCOUNT & SHEET_URL)"
-# 	@echo "  make materialize       -> run materialize (reads ledger_canonical.csv -> writes CSV artifacts)"
-# 	@echo "  make materialize-force -> run materialize with FORCE=1 (full rebuild)"
-# 	@echo "  make weekly            -> ingest + materialize"
-# 	@echo "  make quick             -> quick dev run using tests fixture -> out/quick"
-# 	@echo "  make manifest          -> show existing manifest.json if present"
-# 	@echo "  make validate          -> basic existence checks of key outputs"
-# 	@echo "  make clean             -> remove OUT_DIR/*"
-# 	@echo ""
-
-# all: weekly
-
-# # Combined weekly run: ingest (fixture) then materialize
-# weekly: ingest materialize
-# 	@echo "WEEKLY: done. outputs in $(OUT_DIR)"
-
-# # INGEST (fixture mode)
-# ingest:
-# 	@echo "[INGEST] fixture -> OUT_DIR=$(OUT_DIR)"
-# 	@mkdir -p $(OUT_DIR) $(ANOM_DIR) $(LOG_DIR)
-# 	@$(PY) -m $(INGEST_MODULE) --fixture "$(FIXTURE)" --out-dir "$(OUT_DIR)" || (echo "ingest failed"; false)
-
-# # INGEST LIVE (Google Sheets mode)
-# ingest-live:
-# 	@if [ -z "$(SERVICE_ACCOUNT)" ]; then \
-# 		echo "ERROR: set SERVICE_ACCOUNT (or export ACCOUNT_SERVICE_ACCOUNT)"; exit 2; \
-# 	fi
-# 	@if [ ! -f "$(SERVICE_ACCOUNT)" ]; then \
-# 		echo "ERROR: SERVICE_ACCOUNT file '$(SERVICE_ACCOUNT)' not found"; exit 3; \
-# 	fi
-# 	@if [ -z "$(SHEET_URL)" ]; then \
-# 		echo "ERROR: set SHEET_URL (or export ACCOUNT_SHEET_URL)"; exit 2; \
-# 	fi
-# 	@echo "[INGEST-LIVE] sheet -> OUT_DIR=$(OUT_DIR)"
-# 	@mkdir -p $(OUT_DIR) $(ANOM_DIR) $(LOG_DIR)
-# 	@$(PY) -m $(INGEST_MODULE) --service-account "$(SERVICE_ACCOUNT)" --sheet-url "$(SHEET_URL)" --out-dir "$(OUT_DIR)" || (echo "ingest-live failed"; false)
-
-# # MATERIALIZE (reads ledger_canonical.csv)
-# materialize:
-# 	@echo "[MATERIALIZE] freq=$(FREQ) -> OUT_DIR=$(OUT_DIR)"
-# 	@mkdir -p $(OUT_DIR) $(LOG_DIR)
-# 	@$(PY) -m $(MATERIALIZE_MODULE) --out-dir "$(OUT_DIR)" --freq "$(FREQ)" $(if $(filter 1,$(FORCE)),--force)  || (echo "materialize failed"; false)
-
-# # FORCE materialize convenience target
-# materialize-force:
-# 	@$(MAKE) materialize FORCE=1
-
-# # QUICK dev run using local test fixture
-# quick:
-# 	@OUT_DIR=./out/quick FIXTURE=./tests/fixtures/ledger_fixture.csv FREQ=W $(MAKE) weekly
-
-# # Show manifest if present
-# manifest:
-# 	@if [ -f "$(OUT_DIR)/manifest.json" ]; then \
-# 		echo "Manifest: $(OUT_DIR)/manifest.json"; \
-# 		cat "$(OUT_DIR)/manifest.json"; \
-# 	else \
-# 		echo "No manifest found at $(OUT_DIR)/manifest.json"; \
-# 	fi
-
-# # Basic validate: check canonical ledger + at least per_flow + per_party CSV existence
-# validate:
-# 	@echo "[VALIDATE] quick existence checks in $(OUT_DIR)"
-# 	@if [ -f "$(OUT_DIR)/ledger_canonical.csv" ]; then echo "OK: ledger_canonical.csv"; else echo "MISSING: ledger_canonical.csv" >&2; fi
-# 	@if [ -f "$(OUT_DIR)/per_flow_time_long.freq=$(FREQ).csv" ]; then echo "OK: per_flow_time_long.freq=$(FREQ).csv"; else echo "MISSING: per_flow_time_long.freq=$(FREQ).csv" >&2; fi
-# 	@if [ -f "$(OUT_DIR)/per_party_time_long.freq=$(FREQ).csv" ]; then echo "OK: per_party_time_long.freq=$(FREQ).csv"; else echo "MISSING: per_party_time_long.freq=$(FREQ).csv" >&2; fi
-
-# clean:
-# 	@echo "[CLEAN] rm -rf $(OUT_DIR)/*"
-# 	@rm -rf $(OUT_DIR)/* || true
-
-
-# .PHONY: reports reports-parties clean-reports
-
-# # default: derive top $(TOP) parties and produce fondos + renta_{party}.csv in $(WRITE_DIR)
-# reports:
-# 	mkdir -p $(WRITE_DIR)
-# 	PYTHONPATH=$(PYTHONPATH) $(PY) -m src.accounting.reports --out-dir $(OUT_DIR) --freq $(FREQ) --write-dir $(WRITE_DIR) --top $(TOP)
-
-# # explicit parties: pass comma-separated list, e.g. make reports-parties PARTIES="PM,FB"
-# reports-parties:
-# ifndef PARTIES
-# 	$(error PARTIES variable required, e.g. make reports-parties PARTIES="PM,FB")
-# endif
-# 	mkdir -p $(WRITE_DIR)
-# 	PYTHONPATH=$(PYTHONPATH) $(PY) -m src.accounting.reports --out-dir $(OUT_DIR) --freq $(FREQ) --write-dir $(WRITE_DIR) --parties "$(PARTIES)"
-
-# # quick cleanup of generated reports
-# clean-reports:
-# 	-rm -rf $(WRITE_DIR)/*
-
-
-# .PHONY: views plots
-
-# views:
-# 	mkdir -p $(OUT_DIR)/views
-# 	PYTHONPATH=$(PYTHONPATH) python3 -m src.accounting.views --reports-dir $(OUT_DIR)/reports --write-dir $(OUT_DIR)/views
-
-# plots:
-# 	mkdir -p $(OUT_DIR)/figs
-# 	PYTHONPATH=$(PYTHONPATH) python3 -m src.accounting.plots --views-dir $(OUT_DIR)/views --out-dir $(OUT_DIR)/figs
-
-
-# # lightweight smoke target for CI / local quick checks
-# .PHONY: smoke
-# smoke:
-# 	@echo "[SMOKE] creating tmp smoke out and running ingest+materialize+validate"
-# 	@TMP_OUT=./tmp_smoke_out
-# 	@mkdir -p $(PWD)/tmp_smoke_out
-# 	@OUT_DIR=$$TMP_OUT FIXTURE=./tests/fixtures/ledger_fixture.csv FREQ=W FORCE=1 $(MAKE) weekly
-# 	@OUT_DIR=$$TMP_OUT FREQ=W $(MAKE) validate
-# 	@echo "[SMOKE] artifacts in $$(realpath $$TMP_OUT)"
-
-
-# # Rebuild whole monthly pipeline (clean + ingest + materialize + reports + views + plots)
-# .PHONY: rebuild-monthly
-# rebuild-monthly: clean
-# 	@echo "[REBUILD-MONTHLY] starting full pipeline (monthly)"
-# 	@$(MAKE) ingest-live OUT_DIR="$(OUT_DIR)" FIXTURE="$(FIXTURE)"
-# 	@$(MAKE) materialize FREQ=M FORCE=1 OUT_DIR="$(OUT_DIR)"
-# 	@$(MAKE) reports WRITE_DIR="$(WRITE_DIR)" OUT_DIR="$(OUT_DIR)" FREQ=M TOP=$(TOP)
-# 	@$(MAKE) views OUT_DIR="$(OUT_DIR)"
-# 	@$(MAKE) plots OUT_DIR="$(OUT_DIR)"
-# 	@echo "[REBUILD-MONTHLY] done. outputs in $(OUT_DIR)"
+# Notes:
+# notebooks should stay as assembly/visualization
+# reusable logic lives in accounting/views.py / reports.py

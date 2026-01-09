@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import logging
+import datetime as _dt
 from pathlib import Path
 from typing import Dict, Optional, List, Any, Tuple
 
@@ -35,6 +38,8 @@ _PER_FLOW_PATTERNS = [
 
 _DAILY_CASH_FN = "daily_cash_position.csv"
 _MANIFEST_FN = "manifest.json"
+
+LOG = logging.getLogger(__name__)
 
 
 # -----------------------
@@ -531,6 +536,37 @@ def export_views(
 # -----------------------
 # CLI
 # -----------------------
+def _artifact_name_for_file(filename: str) -> str:
+    """Normalize a filename into a stable artifact `name` (no extensions, no dots)."""
+    base = str(filename).strip()
+    for ext in (".csv", ".json", ".parquet", ".pq", ".txt"):
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    # keep it filename-derived but schema-friendly
+    base = base.replace(".", "_")
+    base = base.replace("-", "_")
+    return base
+
+
+def _content_type_for_path(p: Path) -> str:
+    suf = p.suffix.lower()
+    if suf == ".csv":
+        return "text/csv"
+    if suf in {".json", ".jsonl"}:
+        return "application/json"
+    if suf in {".parquet", ".pq"}:
+        return "application/octet-stream"
+    return "application/octet-stream"
+
+
+def _resolve_run_id(mode: str, run_id: str) -> str:
+    rid = str(run_id or "").strip()
+    if rid:
+        return rid
+    return "smoke" if str(mode).strip().lower() == "smoke" else ""
+
+
 def _parse_args(argv=None):
     import argparse
 
@@ -538,18 +574,148 @@ def _parse_args(argv=None):
     p.add_argument("--reports-dir", default="out/reports")
     p.add_argument("--write-dir", default="out/views")
     p.add_argument("--freq", default="W")
-    p.add_argument("--allow-cross-currency-sum", default="0")
+    p.add_argument("--allow-cross-currency-sum", default=os.getenv("ALLOW_CROSS_CURRENCY_SUM", "0"))
+    p.add_argument("--mode", choices=["smoke", "run"], default=os.getenv("MODE", "run"))
+    p.add_argument("--run-id", default=os.getenv("RUN_ID", ""))
     return p.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+
+    reports_dir = Path(args.reports_dir)
+    write_dir = Path(args.write_dir)
+
     out = export_views(
-        Path(args.reports_dir),
-        Path(args.write_dir),
+        reports_dir,
+        write_dir,
         freq=str(args.freq),
         allow_cross_currency_sum=bool(int(str(args.allow_cross_currency_sum))),
     )
+
+    # Align artifact recording with A.ingest / D.materialize / E.reports.
+    # Non-fatal: views are useful even if manifest writing fails.
+    try:
+        root_dir = write_dir.resolve().parent  # expected: out/
+        meta_dir = root_dir / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+
+        stage = "F.views"
+        mode = str(args.mode)
+        run_id = _resolve_run_id(mode=mode, run_id=str(args.run_id))
+
+        stage_generated_at = pd.Timestamp.utcnow().isoformat()
+
+        # Inputs: best-effort from the written sanity file (it captures resolved paths).
+        inputs = []
+        sanity_path = write_dir / "views_sanity.json"
+        if sanity_path.exists():
+            try:
+                sanity = json.loads(sanity_path.read_text(encoding="utf-8"))
+                paths = sanity.get("paths", {}) or {}
+            except Exception:
+                paths = {}
+        else:
+            paths = {}
+
+        key_to_name = {
+            "fondos": "fondos_report",
+            "per_party_time_long": "per_party_time_long",
+            "per_flow_time_long": "per_flow_time_long",
+            "ledger": "ledger_canonical",
+            "daily_cash_position": "daily_cash_position",
+            "_manifest_path": "manifest",
+        }
+
+        for k, v in (paths or {}).items():
+            if not v or "*" in str(v):
+                continue
+            p = Path(v)
+            if not (p.exists() and p.is_file()):
+                continue
+            nm = key_to_name.get(k, _artifact_name_for_file(p.name))
+            inputs.append(
+                artifact_from_path(
+                    name=nm,
+                    path=p,
+                    stage=stage,
+                    mode=mode,
+                    run_id=run_id,
+                    role="input",
+                    root_dir=root_dir,
+                    content_type=_content_type_for_path(p),
+                )
+            )
+
+        # Outputs: all view files created by this stage.
+        out_arts = []
+        for fn, pth in out.items():
+            p = Path(pth)
+            if not (p.exists() and p.is_file()):
+                continue
+            out_arts.append(
+                artifact_from_path(
+                    name=_artifact_name_for_file(fn),
+                    path=p,
+                    stage=stage,
+                    mode=mode,
+                    run_id=run_id,
+                    role="derived",
+                    root_dir=root_dir,
+                    content_type=_content_type_for_path(p),
+                )
+            )
+
+        stage_manifest = {
+            "generated_at": stage_generated_at,
+            "stage": stage,
+            "mode": mode,
+            "run_id": run_id,
+            "inputs": inputs,
+            "params": {
+                "reports_dir": str(reports_dir),
+                "write_dir": str(write_dir),
+                "freq": str(args.freq),
+                "allow_cross_currency_sum": int(bool(int(str(args.allow_cross_currency_sum)))),
+            },
+            "outputs": out_arts,
+            "warnings": [],
+        }
+
+        stage_manifest_rel = write_stage_manifest(meta_dir, stage_manifest)
+
+        stage_meta_path = root_dir / stage_manifest_rel
+        stage_meta_sha = artifact_from_path(
+            name="stage_F_views",
+            path=stage_meta_path,
+            stage=stage,
+            mode=mode,
+            run_id=run_id,
+            role="meta",
+            root_dir=root_dir,
+            content_type="application/json",
+        )["sha256"]
+
+        stage_meta_art = {
+            "run_id": run_id,
+            "stage": stage,
+            "mode": mode,
+            "name": "stage_F_views",
+            "relpath": stage_manifest_rel,
+            "sha256": stage_meta_sha,
+            "bytes": stage_meta_path.stat().st_size,
+            "rows": None,
+            "content_type": "application/json",
+            "created_at": stage_generated_at,
+            "role": "meta",
+        }
+
+        append_artifacts(meta_dir, [*inputs, *out_arts, stage_meta_art])
+    except Exception:
+        LOG.exception("Views manifest write failed (non-fatal)")
+
     print(json.dumps(out, indent=2))
     return 0
 

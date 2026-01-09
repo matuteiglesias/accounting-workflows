@@ -130,7 +130,7 @@ def materialize_per_flow(
     if "TimePeriod_ts_end" in df.columns:
         df["TimePeriod_ts_end"] = pd.to_datetime(df["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
 
-    cols = ["TimePeriod", "TimePeriod_ts_end", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
+    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
     out_df = df[[c for c in cols if c in df.columns]].copy()
 
     _atomic_write_csv(out_df, target)
@@ -172,7 +172,7 @@ def materialize_per_party(
     if "TimePeriod_ts_end" in agg.columns:
         agg["TimePeriod_ts_end"] = pd.to_datetime(agg["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
 
-    cols = ["TimePeriod", "TimePeriod_ts_end", "party", "role", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
+    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Flujo", "Tipo", "party", "role", "Currency", "amount", "n_tx"]
     out_df = agg[[c for c in cols if c in agg.columns]].copy()
 
     _atomic_write_csv(out_df, target)
@@ -204,8 +204,8 @@ def materialize_daily_cash(
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date.astype(str)
 
     out_df = (
-        df[["Date", "party", "balance", "Currency", "source_ledger_hash"]]
-        if all(c in df.columns for c in ["Date", "party", "balance", "Currency", "source_ledger_hash"])
+        df[["Date", "Box", "party", "balance", "Currency", "source_ledger_hash"]]
+        if all(c in df.columns for c in ["Date", "Box", "party", "balance", "Currency", "source_ledger_hash"])
         else df.copy()
     )
 
@@ -213,6 +213,124 @@ def materialize_daily_cash(
     LOG.info("Wrote daily_cash rows=%d -> %s", len(out_df), target)
     return out_df, target
 
+import re
+
+def _infer_box_party_from_box_name(box: str) -> str:
+    """
+    Heurística de fallback: sigla por iniciales del Box.
+    Recomendación: evitar depender de esto y proveer BoxParty explícito.
+    """
+    if box is None:
+        return ""
+    b = str(box).strip()
+    if not b:
+        return ""
+    # casos típicos tuyos
+    if b.lower() == "household":
+        return "HH"
+    # iniciales (Family Business -> FB, Property Management -> PM)
+    parts = [p for p in re.split(r"\s+", b) if p]
+    initials = "".join(p[0].upper() for p in parts if p[0].isalpha())
+    return initials
+
+
+
+def materialize_box_balance_time_long(
+    ledger: pd.DataFrame, out_dir: Path, freq: str = "W", force: bool = False
+) -> Tuple[pd.DataFrame, Path]:
+    """
+    Produce box_balance_time_long.freq=<freq>.csv
+
+    Output columns:
+      TimePeriod, Date_end, Box, currency, in_amt, out_amt, net, cum_net
+
+    Semántica:
+      - in_amt: suma de amount donde receiver == BoxParty
+      - out_amt: suma de amount donde payer == BoxParty
+      - net = in_amt - out_amt
+      - cum_net: cumsum(net) por (Box, currency) ordenado por Date_end
+    """
+    _ = force
+    ledger = _ensure_amount_float(ledger)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"box_balance_time_long.freq={freq}.csv"
+
+    # Normalizar nombres de columnas
+    ldf = ledger.copy()
+    if "Currency" not in ldf.columns and "currency" in ldf.columns:
+        ldf = ldf.rename(columns={"currency": "Currency"})
+    if "amount" not in ldf.columns and "monto" in ldf.columns:
+        ldf = ldf.rename(columns={"monto": "amount"})
+
+    required = ["Date", "amount", "Currency", "Box", "payer", "receiver"]
+    missing = [c for c in required if c not in ldf.columns]
+    if missing:
+        raise ValueError(f"materialize_box_balance_time_long: ledger missing required columns: {missing}")
+
+    # BoxParty: prefer explícito
+    if "BoxParty" not in ldf.columns:
+        ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+
+    # Parseos
+    ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce")
+    ldf = ldf[~ldf["Date"].isna()].copy()
+    ldf["amount"] = pd.to_numeric(ldf["amount"], errors="coerce")
+    ldf = ldf[~ldf["amount"].isna()].copy()
+
+    # Normalizar strings para matching
+    payer = ldf["payer"].astype("string").str.strip().str.upper()
+    receiver = ldf["receiver"].astype("string").str.strip().str.upper()
+    box_party = ldf["BoxParty"].astype("string").str.strip().str.upper()
+
+    in_mask = receiver == box_party
+    out_mask = payer == box_party
+
+    # Si ninguna coincide, esa fila no representa movimiento del Box
+    unmatched = ~(in_mask | out_mask)
+    if unmatched.any():
+        # No rompemos el pipeline, pero esto es señal de gobernanza/datos
+        LOG.warning(
+            "box_balance: %d row(s) where BoxParty not in payer/receiver. Dropping them from box_balance.",
+            int(unmatched.sum()),
+        )
+        ldf = ldf.loc[~unmatched].copy()
+        payer = payer.loc[~unmatched]
+        receiver = receiver.loc[~unmatched]
+        box_party = box_party.loc[~unmatched]
+        in_mask = receiver == box_party
+        out_mask = payer == box_party
+
+    # Periodización
+    try:
+        period = ldf["Date"].dt.to_period(freq)
+    except Exception as e:
+        raise ValueError(f"materialize_box_balance_time_long: invalid freq={freq!r}: {e}")
+
+    ldf["TimePeriod"] = period.astype(str)
+    ldf["Date_end"] = period.dt.end_time.dt.date.astype(str)
+
+    # Flujos
+    ldf["in_amt"] = ldf["amount"].where(in_mask, 0.0)
+    ldf["out_amt"] = ldf["amount"].where(out_mask, 0.0)
+    ldf["net"] = ldf["in_amt"] - ldf["out_amt"]
+
+    agg = (
+        ldf.groupby(["TimePeriod", "Date_end", "Box", "Currency"], as_index=False)[["in_amt", "out_amt", "net"]]
+        .sum()
+        .sort_values(["Box", "Currency", "Date_end", "TimePeriod"])
+        .reset_index(drop=True)
+    )
+    agg["cum_net"] = agg.groupby(["Box", "Currency"])["net"].cumsum()
+
+    out_df = agg.rename(columns={"Currency": "currency"})[
+        ["TimePeriod", "Date_end", "Box", "currency", "in_amt", "out_amt", "net", "cum_net"]
+    ].copy()
+
+    _atomic_write_csv(out_df, target)
+    LOG.info("Wrote box_balance rows=%d -> %s", len(out_df), target)
+    return out_df, target
 
 
 
@@ -316,6 +434,18 @@ def materialize_all(
 
     if _materialize_debug_enabled() and pp_df is not None:
         LOG.debug("materialize_all: per_party shape=%s cols=%s", pp_df.shape, list(pp_df.columns))
+
+
+
+    # 2.5) box balance
+    try:
+        bb_df, bb_path = materialize_box_balance_time_long(ledger_df, out_dir, freq=freq, force=force)
+        aggregates[bb_path.name] = {"path": str(bb_path), "rows": len(bb_df), "sha256": _sha256_file(bb_path)}
+    except Exception:
+        LOG.exception("Failed materialize_box_balance_time_long")
+        aggregates["box_balance_failed"] = {"error": "failed"}
+
+
 
     # 3) loans (always monthly, independent of pipeline freq)
     loans_freq = "M"
@@ -482,6 +612,24 @@ def main() -> int:
                 content_type="text/csv",
             )
         )
+
+    # Box balance (per Box, per Currency, per period)
+    box_balance = out_dir / f"box_balance_time_long.freq={freq}.csv"
+    if box_balance.exists():
+        out_arts.append(
+            artifact_from_path(
+                name="box_balance_time_long",
+                path=box_balance,
+                stage="D.materialize",
+                mode=args.mode,
+                run_id=run_id,
+                role="derived",
+                root_dir=out_dir,
+                content_type="text/csv",
+            )
+        )
+
+
 
     loans = out_dir / "loans_time.freq=M.csv"
     if loans.exists():

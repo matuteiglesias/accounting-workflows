@@ -78,8 +78,8 @@ Drop this Makefile at repo root as `Makefile`.
 # Makefile for RAG_Sync_Accounting pipeline
 PY := python3
 OUT_DIR ?= ./out
-FIXTURE ?= $(shell python -c "from src.accounting.config import load_config; print(load_config().fixture_file)")
-FREQ ?= $(shell python -c "from src.accounting.config import load_config; print(load_config().freq)")
+FIXTURE ?= $(shell python -c "from accounting.config import load_config; print(load_config().fixture_file)")
+FREQ ?= $(shell python -c "from accounting.config import load_config; print(load_config().freq)")
 PARTIES ?= PM,FB,MI,Primos,Alejandro
 FORCE ?= 0
 LOG := logs/pipeline.log
@@ -109,7 +109,7 @@ validate:
 	@echo "Validating materialization and reports"
 	$(PY) - <<'PY'
 from pathlib import Path
-from src.accounting.reports import load_materialized_folder, validate_materialization_totals
+from accounting.reports import load_materialized_folder, validate_materialization_totals
 p=Path("$(OUT_DIR)")
 m=load_materialized_folder(p, freq="$(FREQ)")
 ledger=m.get("ledger_canonical") or None
@@ -149,7 +149,7 @@ clean:
 # convenience: show config summary
 config:
 	@python - <<'PY'
-from src.accounting.config import load_config
+from accounting.config import load_config
 print(load_config())
 PY
 ```
