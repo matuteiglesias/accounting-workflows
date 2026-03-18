@@ -10,8 +10,12 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from accounting.build_metric_values import METRIC_VIEWS_DIRNAME, REQUIRED_METRIC_VIEW_FILES
+from accounting.metrics_views import parse_noise_floor
+
 
 REPORT_ID = "balance_human_v2"
+METRIC_VIEWS_MANIFEST_FILENAME = "metric_views_manifest.csv"
 
 
 @dataclass(frozen=True)
@@ -124,19 +128,6 @@ def _manifest_item(spec: ItemSpec, csv_path: Path, html_path: Path) -> Dict[str,
     }
 
 
-def _parse_noise_floor(text: str) -> Dict[str, float]:
-    if not text.strip():
-        return dict(DEFAULT_NOISE_FLOOR)
-    out: Dict[str, float] = {}
-    for part in text.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        curr, val = part.split(":", 1)
-        out[curr.strip().upper()] = float(val.strip())
-    return out
-
-
 # def ensure_metrics_exist(metrics_dir: Path, run_root: Optional[Path], as_of_date: str) -> None:
 #     required = [
 #         metrics_dir / "metric_registry.csv",
@@ -197,6 +188,37 @@ def read_metrics_artifacts(metrics_dir: Path) -> Dict[str, Any]:
         "manifest": json.loads(required["manifest"].read_text(encoding="utf-8")),
     }
 
+def read_metric_view(metrics_dir: Path, filename: str) -> pd.DataFrame:
+    path = metrics_dir / METRIC_VIEWS_DIRNAME / filename
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing required metric view: {path}. Run accounting.build_metric_values to refresh metric_views."
+        )
+    return pd.read_csv(path)
+
+
+
+def read_metric_views_manifest(metrics_dir: Path) -> Dict[str, str]:
+    df = read_metric_view(metrics_dir, METRIC_VIEWS_MANIFEST_FILENAME)
+    if df.empty:
+        raise FileNotFoundError(
+            f"Metric views manifest is empty: {metrics_dir / METRIC_VIEWS_DIRNAME / METRIC_VIEWS_MANIFEST_FILENAME}"
+        )
+    return {k: str(v) for k, v in df.iloc[0].to_dict().items()}
+
+
+def ensure_required_metric_views(metrics_dir: Path) -> None:
+    missing = [
+        str(metrics_dir / METRIC_VIEWS_DIRNAME / name)
+        for name in REQUIRED_METRIC_VIEW_FILES
+        if not (metrics_dir / METRIC_VIEWS_DIRNAME / name).exists()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "Missing required metric view artifacts in metrics_dir: " + ", ".join(missing)
+        )
+
+
 def _infer_run_root(manifest: Dict[str, Any], explicit_run_root: Optional[Path]) -> Path:
     if explicit_run_root is not None:
         return explicit_run_root
@@ -204,44 +226,6 @@ def _infer_run_root(manifest: Dict[str, Any], explicit_run_root: Optional[Path])
     if not run_root:
         raise FileNotFoundError("Could not infer run_root from manifest and none was provided.")
     return Path(run_root)
-
-def load_ledger(run_root: Path) -> pd.DataFrame:
-    path = run_root / "ledger_canonical.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing ledger file: {path}")
-
-    df = pd.read_csv(path)
-
-    date_col = _resolve_col(df, "Date", ["date", "posted_date"])
-    amount_col = _resolve_amount_col(df)
-    currency_col = _resolve_col(df, "Currency", ["currency"])
-    status_col = _resolve_col(df, "status", ["Status"])
-    flujo_col = _resolve_col(df, "Flujo", ["flujo"])
-    tipo_col = _resolve_col(df, "Tipo", ["tipo"])
-
-    rename_map = {
-        date_col: "Date",
-        amount_col: "amount",
-        currency_col: "Currency",
-        status_col: "status",
-        flujo_col: "Flujo",
-        tipo_col: "Tipo",
-    }
-
-    for optional in ["Box", "Lugar", "Detalle", "payer", "receiver", "medio", "tag"]:
-        if optional in df.columns:
-            rename_map[optional] = optional
-
-    df = df.rename(columns=rename_map).copy()
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
-    df["status"] = df["status"].astype(str).str.strip().str.lower()
-
-    df = df.dropna(subset=["Date", "amount", "Currency"]).copy()
-    df["period_m"] = df["Date"].dt.to_period("M").astype(str)
-    return df
-    
-    
 
 def _latest_period(metric_values: pd.DataFrame, grain: str) -> Optional[str]:
     vals = sorted(metric_values.loc[metric_values["period_grain"] == grain, "period"].dropna().astype(str).unique().tolist())
@@ -271,28 +255,6 @@ def _label_map(registry: pd.DataFrame) -> Dict[str, str]:
     if "label" not in registry.columns:
         return {}
     return dict(zip(registry["metric_id"].astype(str), registry["label"].astype(str)))
-
-
-def _last_n_months(df: pd.DataFrame, months: int) -> List[str]:
-    periods = sorted(df["period_m"].dropna().astype(str).unique().tolist())
-    return periods[-months:]
-
-
-def _apply_noise_floor_rows(df: pd.DataFrame, total_col: str, currency_col: str, noise_floor_by_currency: Dict[str, float]) -> pd.DataFrame:
-    if df.empty:
-        return df
-    work = df.copy()
-    def keep_row(row: pd.Series) -> bool:
-        curr = str(row.get(currency_col, "")).upper()
-        thr = noise_floor_by_currency.get(curr, None)
-        if thr is None:
-            return True
-        val = row.get(total_col, pd.NA)
-        if pd.isna(val):
-            return True
-        return abs(float(val)) >= thr
-    mask = work.apply(keep_row, axis=1)
-    return work.loc[mask].reset_index(drop=True)
 
 
 def build_cash_snapshot(registry: pd.DataFrame, metric_values: pd.DataFrame) -> pd.DataFrame:
@@ -348,251 +310,6 @@ def build_data_quality(registry: pd.DataFrame, metric_values: pd.DataFrame, vali
     return pd.DataFrame(rows)
 
 
-def build_flow_rollup_last_n_months(
-    ledger: pd.DataFrame,
-    *,
-    flow_filter: Optional[str] = None,
-    type_filter: Optional[str] = None,
-    groupby_cols: Sequence[str],
-    months: int = 6,
-    include_statuses: Sequence[str] = DEFAULT_INCLUDE_STATUSES,
-    amount_col: str = "amount",
-    currency_col: str = "Currency",
-    status_col: str = "status",
-    noise_floor_by_currency: Optional[Dict[str, float]] = None,
-    top_n: Optional[int] = None,
-) -> pd.DataFrame:
-    work = ledger.copy()
-
-    if flow_filter is not None:
-        work = work.loc[work["Flujo"].astype(str) == flow_filter].copy()
-    if type_filter is not None:
-        work = work.loc[work["Tipo"].astype(str) == type_filter].copy()
-    if include_statuses:
-        allowed = {str(x).strip().lower() for x in include_statuses}
-        work = work.loc[work[status_col].astype(str).str.strip().str.lower().isin(allowed)].copy()
-
-    work[amount_col] = pd.to_numeric(work[amount_col], errors="coerce")
-    work = work.dropna(subset=[amount_col, currency_col]).copy()
-
-    months_list = _last_n_months(work, months)
-    if months_list:
-        work = work.loc[work["period_m"].isin(months_list)].copy()
-
-    missing_cols = [c for c in groupby_cols if c not in work.columns]
-    if missing_cols:
-        raise ValueError(f"Missing groupby columns in ledger: {missing_cols}")
-
-    work[groupby_cols] = work[groupby_cols].fillna("").astype(str)
-
-    base_group_cols = []
-    for c in list(groupby_cols):
-        if c not in base_group_cols:
-            base_group_cols.append(c)
-
-    if currency_col not in base_group_cols:
-        base_group_cols.append(currency_col)
-
-    group_cols = base_group_cols + ["period_m"]
-
-    grouped = (
-        work.groupby(group_cols, dropna=False)[amount_col]
-        .sum()
-        .reset_index()
-    )
-
-    if grouped.empty:
-        cols = list(groupby_cols) + [currency_col] + months_list + ["total_6m", "avg_m", "last_m", "delta_last_vs_prev"]
-        return pd.DataFrame(columns=cols)
-
-    wide = (
-        grouped.pivot_table(
-            index=base_group_cols,
-            columns="period_m",
-            values=amount_col,
-            aggfunc="sum",
-            fill_value=0.0,
-            )
-            .reset_index()
-        )
-
-    for m in months_list:
-        if m not in wide.columns:
-            wide[m] = 0.0
-
-    wide["total_6m"] = wide[months_list].sum(axis=1) if months_list else 0.0
-    wide["avg_m"] = wide["total_6m"] / max(len(months_list), 1)
-    wide["last_m"] = wide[months_list[-1]] if months_list else 0.0
-    wide["delta_last_vs_prev"] = (
-        wide[months_list[-1]] - wide[months_list[-2]]
-        if len(months_list) >= 2
-        else pd.NA
-    )
-
-    if noise_floor_by_currency:
-        wide = _apply_noise_floor_rows(wide, "total_6m", currency_col, noise_floor_by_currency)
-
-    sort_cols = ["total_6m"]
-    wide = wide.sort_values(sort_cols, ascending=False).reset_index(drop=True)
-
-    if top_n is not None and len(wide) > top_n:
-        wide = wide.head(top_n).reset_index(drop=True)
-
-    # ordered_cols = list(groupby_cols) + [currency_col] + months_list + ["total_6m", "avg_m", "last_m", "delta_last_vs_prev"]
-    ordered_cols = base_group_cols + months_list + ["total_6m", "avg_m", "last_m", "delta_last_vs_prev"]
-    return wide[ordered_cols]
-
-
-def build_income_statement_monthly_last6(
-    ledger: pd.DataFrame,
-    *,
-    months: int,
-    include_statuses: Sequence[str],
-) -> pd.DataFrame:
-    work = ledger.copy()
-    allowed = {str(x).strip().lower() for x in include_statuses}
-    work = work.loc[work["status"].astype(str).str.strip().str.lower().isin(allowed)].copy()
-    work["amount"] = pd.to_numeric(work["amount"], errors="coerce")
-    work = work.dropna(subset=["amount", "Currency"]).copy()
-
-    months_list = _last_n_months(work, months)
-    work = work.loc[work["period_m"].isin(months_list)].copy()
-
-    specs = [
-        ("IS.RENT.TOTAL", "Renta total", (work["Flujo"].astype(str) == "Cobros") & (work["Tipo"].astype(str) == "Renta")),
-        ("IS.CONTRIB.TOTAL", "Contribuciones totales", work["Flujo"].astype(str) == "Contribucion"),
-        ("IS.OPEX.TOTAL", "Costos operativos totales", work["Flujo"].astype(str) == "Pagos"),
-    ]
-
-    rows = []
-    for metric_id, label, mask in specs:
-        sub = work.loc[mask].copy()
-        if sub.empty:
-            continue
-        agg = (
-            sub.groupby(["Currency", "period_m"], dropna=False)["amount"]
-            .sum()
-            .reset_index()
-        )
-        wide = (
-            agg.pivot_table(index=["Currency"], columns="period_m", values="amount", aggfunc="sum", fill_value=0.0)
-            .reset_index()
-        )
-        for m in months_list:
-            if m not in wide.columns:
-                wide[m] = 0.0
-        for _, row in wide.iterrows():
-            out = {
-                "metric_id": metric_id,
-                "label": label,
-                "currency": row["Currency"],
-            }
-            vals = [row[m] for m in months_list]
-            for m in months_list:
-                out[m] = row[m]
-            out["total_6m"] = sum(vals)
-            out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-            rows.append(out)
-
-    df = pd.DataFrame(rows)
-
-    # derived rows
-    if not df.empty:
-        derived_rows = []
-        for currency in sorted(df["currency"].astype(str).unique().tolist()):
-            sub = df.loc[df["currency"].astype(str) == currency].set_index("metric_id")
-            rent = sub.loc["IS.RENT.TOTAL"] if "IS.RENT.TOTAL" in sub.index else None
-            contrib = sub.loc["IS.CONTRIB.TOTAL"] if "IS.CONTRIB.TOTAL" in sub.index else None
-            opex = sub.loc["IS.OPEX.TOTAL"] if "IS.OPEX.TOTAL" in sub.index else None
-
-            if rent is not None or contrib is not None:
-                out = {"metric_id": "IS.INCOME.TOTAL", "label": "Ingresos totales", "currency": currency}
-                for m in months_list:
-                    out[m] = (rent[m] if rent is not None else 0.0) + (contrib[m] if contrib is not None else 0.0)
-                out["total_6m"] = sum(out[m] for m in months_list)
-                out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-                derived_rows.append(out)
-
-            if (rent is not None or contrib is not None) and opex is not None:
-                base = derived_rows[-1] if derived_rows else None
-                if base and base["metric_id"] == "IS.INCOME.TOTAL":
-                    out = {"metric_id": "IS.NET.AFTER_COSTS", "label": "Neto después de costos", "currency": currency}
-                    for m in months_list:
-                        out[m] = base[m] - opex[m]
-                    out["total_6m"] = sum(out[m] for m in months_list)
-                    out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-                    derived_rows.append(out)
-
-        if derived_rows:
-            df = pd.concat([df, pd.DataFrame(derived_rows)], ignore_index=True)
-
-    ordered_metric_ids = [
-        "IS.RENT.TOTAL",
-        "IS.CONTRIB.TOTAL",
-        "IS.INCOME.TOTAL",
-        "IS.OPEX.TOTAL",
-        "IS.NET.AFTER_COSTS",
-    ]
-    df["__sort"] = df["metric_id"].map({k: i for i, k in enumerate(ordered_metric_ids)})
-    cols = ["metric_id", "label", "currency"] + months_list + ["total_6m", "avg_m"]
-    return df.sort_values(["currency", "__sort"]).reset_index(drop=True)[cols]
-
-
-def build_draws_discipline_monthly_last6(
-    ledger: pd.DataFrame,
-    *,
-    months: int,
-    include_statuses: Sequence[str],
-    noise_floor_by_currency: Dict[str, float],
-) -> pd.DataFrame:
-    work = ledger.copy()
-    allowed = {str(x).strip().lower() for x in include_statuses}
-    work = work.loc[work["status"].astype(str).str.strip().str.lower().isin(allowed)].copy()
-    work["amount"] = pd.to_numeric(work["amount"], errors="coerce")
-    work = work.dropna(subset=["amount", "Currency"]).copy()
-    months_list = _last_n_months(work, months)
-    work = work.loc[work["period_m"].isin(months_list)].copy()
-
-    text_cols = [c for c in ["Tipo", "Detalle", "tag", "Lugar"] if c in work.columns]
-    mask = pd.Series(False, index=work.index)
-    for c in text_cols:
-        mask = mask | work[c].astype(str).str.contains(r"personal|retiro|draw|owner|dividend", case=False, na=False)
-
-    draws = (
-        work.loc[mask]
-        .groupby(["Currency", "period_m"], dropna=False)["amount"]
-        .sum()
-        .reset_index()
-    )
-    net = build_income_statement_monthly_last6(work, months=months, include_statuses=include_statuses)
-    net = net.loc[net["metric_id"] == "IS.NET.AFTER_COSTS"].copy()
-
-    rows = []
-    for currency in sorted(set(draws["Currency"].astype(str)) | set(net["currency"].astype(str))):
-        dsub = draws.loc[draws["Currency"].astype(str) == currency]
-        nsub = net.loc[net["currency"].astype(str) == currency]
-        row = {"currency": currency}
-        total_draws = 0.0
-        distress = 0
-        for m in months_list:
-            d = dsub.loc[dsub["period_m"].astype(str) == m, "amount"]
-            n = nsub[m].iloc[0] if (not nsub.empty and m in nsub.columns) else pd.NA
-            draw_val = float(d.iloc[0]) if not d.empty else 0.0
-            row[f"draws_{m}"] = draw_val
-            row[f"net_{m}"] = n
-            if pd.notna(n) and float(n) <= 0 and draw_val > 0:
-                distress += 1
-            total_draws += draw_val
-        row["draws_total_6m"] = total_draws
-        row["distress_months"] = distress
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = _apply_noise_floor_rows(df, "draws_total_6m", "currency", noise_floor_by_currency)
-    return df
-
-
 def build_summary_kpis(cash_snapshot: pd.DataFrame, income_statement_m: pd.DataFrame, draws_discipline_m: pd.DataFrame) -> List[Dict[str, str]]:
     def _pick_cash() -> Dict[str, str]:
         sub = cash_snapshot.loc[cash_snapshot["metric_id"] == "BS.CASH.TOTAL"]
@@ -634,40 +351,19 @@ def build_human_balance_report(
     noise_floor_by_currency: Dict[str, float],
 ) -> None:
     arts = read_metrics_artifacts(metrics_dir)
+    ensure_required_metric_views(metrics_dir)
+    metric_views_manifest = read_metric_views_manifest(metrics_dir)
     registry = arts["registry"]
     metric_values = arts["metric_values"]
     validation = arts["validation"]
     manifest_in = arts["manifest"]
-    ledger = load_ledger(run_root)
 
     cash_snapshot = build_cash_snapshot(registry, metric_values)
-    income_statement_monthly_last6 = build_income_statement_monthly_last6(
-        ledger, months=months, include_statuses=include_statuses
-    )
-    rent_rollup_by_place = build_flow_rollup_last_n_months(
-        ledger,
-        flow_filter="Cobros",
-        type_filter="Renta",
-        groupby_cols=["Box", "Currency", rent_place_col],
-        months=months,
-        include_statuses=include_statuses,
-        noise_floor_by_currency=noise_floor_by_currency,
-    )
-    flow_type_rollup = build_flow_rollup_last_n_months(
-        ledger,
-        groupby_cols=list(flow_rollup_groupby),
-        months=months,
-        include_statuses=include_statuses,
-        noise_floor_by_currency=noise_floor_by_currency,
-        top_n=12,
-    )
+    income_statement_monthly_last6 = read_metric_view(metrics_dir, "income_statement_monthly_last6.csv")
+    rent_rollup_by_place = read_metric_view(metrics_dir, "rent_rollup_by_place_m_last6.csv")
+    flow_type_rollup = read_metric_view(metrics_dir, "flow_type_rollup_m_last6.csv")
+    draws_discipline_monthly = read_metric_view(metrics_dir, "draws_discipline_monthly_last6.csv")
     data_quality = build_data_quality(registry, metric_values, validation, manifest_in)
-    draws_discipline_monthly = build_draws_discipline_monthly_last6(
-        ledger,
-        months=months,
-        include_statuses=include_statuses,
-        noise_floor_by_currency=noise_floor_by_currency,
-    )
 
     tables = {
         "cash_snapshot": cash_snapshot,
@@ -708,12 +404,12 @@ def build_human_balance_report(
 
     standalone_sections = [
         "<h1>Balance humano v2</h1>",
-        f"<p>run_id: {manifest_in.get('run_id', '')}<br>as_of_date: {manifest_in.get('as_of_date', '')}<br>run_root: {run_root}<br>months: {months}</p>",
+        f"<p>run_id: {manifest_in.get('run_id', '')}<br>as_of_date: {manifest_in.get('as_of_date', '')}<br>run_root: {run_root}<br>months: {metric_views_manifest.get('months', months)}</p>",
         f"<div class='kpi-grid'>{kpi_html}</div>",
         _df_to_html_fragment(cash_snapshot, "Snapshot de caja"),
         _df_to_html_fragment(income_statement_monthly_last6, f"P&L mensual últimos {months} meses"),
-        _df_to_html_fragment(rent_rollup_by_place, "Renta por lugar, caja y moneda", f"groupby = Box, Currency, {rent_place_col}"),
-        _df_to_html_fragment(flow_type_rollup, "Drilldown por flujo y tipo", f"groupby = {', '.join(flow_rollup_groupby)}"),
+        _df_to_html_fragment(rent_rollup_by_place, "Renta por lugar, caja y moneda", f"groupby = Box, Currency, {metric_views_manifest.get('rent_place_col', rent_place_col)}"),
+        _df_to_html_fragment(flow_type_rollup, "Drilldown por flujo y tipo", f"groupby = {metric_views_manifest.get('flow_rollup_groupby', '').replace(',', ' , ') or ' , '.join(flow_rollup_groupby)}"),
         _df_to_html_fragment(draws_discipline_monthly, "Retiros y disciplina, últimos 6 meses"),
         _df_to_html_fragment(data_quality, "Calidad de datos y cobertura"),
     ]
@@ -730,31 +426,23 @@ def build_human_balance_report(
     _write_text(json.dumps(manifest, indent=2, ensure_ascii=False), dirs["base"] / "story_manifest.json")
 
     # useful extra drilldown not in manifest
-    rent_rollup_by_detail = build_flow_rollup_last_n_months(
-        ledger,
-        flow_filter="Cobros",
-        type_filter="Renta",
-        groupby_cols=["Box", "Currency", rent_detail_col],
-        months=months,
-        include_statuses=include_statuses,
-        noise_floor_by_currency=noise_floor_by_currency,
-    )
+    rent_rollup_by_detail = read_metric_view(metrics_dir, "rent_rollup_by_detail_m_last6.csv")
     _write_csv(rent_rollup_by_detail, dirs["tables"] / "extra__rent_rollup_by_detail_m_last6.csv")
     _write_text(
         _df_to_html_fragment(
             rent_rollup_by_detail,
             "Renta por detalle, caja y moneda",
-            f"groupby = Box, Currency, {rent_detail_col}",
+            f"groupby = Box, Currency, {metric_views_manifest.get('rent_detail_col', rent_detail_col)}",
         ),
         dirs["html"] / "extra__rent_rollup_by_detail_m_last6.html",
     )
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build a human-oriented balance storypack v2 from metrics artifacts and ledger.")
+    p = argparse.ArgumentParser(description="Build a human-oriented balance report from metrics artifacts and metric_views outputs.")
     p.add_argument("--run-root", required=True, help="Accounting run root containing ledger_canonical.csv")
     p.add_argument("--metrics-dir", required=True, help="Directory with metric_registry.csv / metric_values.csv etc.")
-    p.add_argument("--write-dir", required=True, help="Output storypack directory.")
+    p.add_argument("--write-dir", required=True, help="Output balance report directory.")
     # p.add_argument("--as-of-date", default=pd.Timestamp.today().date().isoformat(), help="Used if metrics bootstrap is needed.")
     p.add_argument("--months", type=int, default=6, help="Number of monthly periods to surface.")
     p.add_argument("--rent-place-col", default="Lugar", help="Column used for rent rollup by place.")
@@ -766,30 +454,13 @@ def parse_args() -> argparse.Namespace:
 
 
 
-def _resolve_amount_col(df: pd.DataFrame) -> str:
-    candidates = ["amount", "monto", "Amount", "Debit", "Credit"]
-    for c in candidates:
-        if c in df.columns:
-            return c
-    raise KeyError(f"No amount-like column found. Available columns: {list(df.columns)}")
-
-
-def _resolve_col(df: pd.DataFrame, preferred: str, aliases: list[str]) -> str:
-    if preferred in df.columns:
-        return preferred
-    for c in aliases:
-        if c in df.columns:
-            return c
-    raise KeyError(f"Missing required column '{preferred}'. Available columns: {list(df.columns)}")
-    
-    
 def main() -> None:
     args = parse_args()
     metrics_dir = Path(args.metrics_dir)
     write_dir = Path(args.write_dir)
     run_root = Path(args.run_root) if args.run_root else None
     include_statuses = tuple(x.strip() for x in args.include_statuses.split(",") if x.strip())
-    noise_floor_by_currency = _parse_noise_floor(args.noise_floor)
+    noise_floor_by_currency = parse_noise_floor(args.noise_floor)
     flow_rollup_groupby = [x.strip() for x in args.flow_rollup_groupby.split(",") if x.strip()]
 
     # ensure_metrics_exist(metrics_dir=metrics_dir, run_root=run_root, as_of_date=args.as_of_date)
