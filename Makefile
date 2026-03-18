@@ -94,6 +94,8 @@ HUMAN_LATEST   := $(OUT)/human_reports/latest
 # RUN_LATEST := $(OUT)/run/accounting/latest
 # STORY_LATEST := $(OUT)/storypack/latest
 
+RUN_REL := $(notdir $(RUN_OUT))
+
 .PHONY: _update_latest
 _update_latest:
 	@echo "[RUN][LATEST] run=$(RUN_RUN_ID)"
@@ -114,11 +116,10 @@ _update_latest:
 			mv -f "$$tmp" "$$latest"; \
 			ls -lah "$$latest"; \
 		}; \
-		link_swap "$(RUN_BASE)" "$(RUN_RUN_ID)"; \
-		link_swap "$(OUT)/metrics" "$(RUN_RUN_ID)"; \
-		link_swap "$(OUT)/human_reports" "$(RUN_RUN_ID)"; \
+		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
+		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
+		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
 	'
-
 
 
 # ----------------------------------------
@@ -322,8 +323,14 @@ run-human-balance: run-metrics
 			> /dev/null 2> "$$err"; \
 		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
 		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
-	'
-	@$(MAKE) _update_latest
+	@$(MAKE) _update_latest \
+	  RUN_STAMP="$(RUN_STAMP)" \
+	  RUN_OUT="$(RUN_OUT)" \
+	  RUN_RUN_ID="$(RUN_RUN_ID)" \
+	  RUN_REL="$(RUN_REL)" \
+	  OUT="$(OUT)" \
+	  RUN_BASE="$(RUN_BASE)"
+	  
 	@echo "[RUN][HUMAN] ok"
 
 	
