@@ -587,13 +587,19 @@ def main() -> int:
 
         from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
 
+        resolved_run_id = resolve_run_id(
+            mode=args.mode,
+            run_id=getattr(args, "run_id", None),
+            root_dir=out_dir,
+            strict=True,
+        )
+
         out_art = artifact_from_path(
             name="ledger_canonical",
             path=ledger_path,
             stage="A.ingest",
             mode=args.mode,
-            # run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
-            run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True),
+            run_id=resolved_run_id,
             role="output",
             root_dir=out_dir,
             content_type="text/csv",
@@ -607,8 +613,7 @@ def main() -> int:
                     path=(out_dir / "anomalies.csv"),
                     stage="A.ingest",
                     mode=args.mode,
-                    # run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
-                    run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True),
+                    run_id=resolved_run_id,
                     role="derived",
                     root_dir=out_dir,
                     content_type="text/csv",
@@ -618,7 +623,7 @@ def main() -> int:
         stage_manifest: Dict[str, Any] = {
             "stage": "A.ingest",
             "mode": args.mode,
-            "run_id": (args.run_id or "smoke" if args.mode == "smoke" else ""),
+            "run_id": resolved_run_id,
             "generated_at": _dt.datetime.utcnow().replace(microsecond=0).isoformat(),
             "inputs": [],
             "params": {
