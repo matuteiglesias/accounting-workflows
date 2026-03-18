@@ -612,7 +612,7 @@ def materialize_all(
     # 5) partitions.json update (simple)
     parts_path = out_dir / "partitions.json"
     parts = load_partitions_json(parts_path)
-    parts["last_materialized_at"] = pd.Timestamp.utcnow().isoformat()
+    parts["last_materialized_at"] = pd.Timestamp.now("UTC").isoformat()
     parts["freq"] = freq
 
     try:
@@ -642,7 +642,7 @@ def materialize_all(
         }
 
     return {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "generated_at": pd.Timestamp.now("UTC").isoformat(),
         "aggregates": aggregates,
         "partitions_path": str(parts_path),
         "anomalies": anomalies_meta,
@@ -704,7 +704,7 @@ def main() -> int:
 
     from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
 
-    stage_generated_at = pd.Timestamp.utcnow().isoformat()
+    stage_generated_at = pd.Timestamp.now("UTC").isoformat()
 
     # inputs
     in_art = artifact_from_path(

@@ -882,7 +882,7 @@ def export_views(
 
     # Observability / sanity
     sanity = {
-        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "generated_at": pd.Timestamp.now("UTC").isoformat(),
         "reports_dir": str(Path(reports_dir)),
         "write_dir": str(write_dir),
         "freq": str(freq),
@@ -989,7 +989,7 @@ def main(argv=None) -> int:
         run_id = resolve_run_id(mode=mode, run_id=getattr(args, "run_id", None), root_dir=root_dir, strict=True)
         # run_id = _resolve_run_id(args)
 
-        stage_generated_at = pd.Timestamp.utcnow().isoformat()
+        stage_generated_at = pd.Timestamp.now("UTC").isoformat()
 
         # Inputs: best-effort from the written sanity file (it captures resolved paths).
         inputs = []
