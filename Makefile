@@ -303,7 +303,6 @@ run-metrics: run-views
 
 
 
-
 .PHONY: run-human-balance
 run-human-balance: run-metrics
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -324,14 +323,14 @@ run-human-balance: run-metrics
 			> /dev/null 2> "$$err"; \
 		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
 		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
+	'
 	@$(MAKE) _update_latest \
-	  RUN_STAMP="$(RUN_STAMP)" \
-	  RUN_OUT="$(RUN_OUT)" \
-	  RUN_RUN_ID="$(RUN_RUN_ID)" \
-	  RUN_REL="$(RUN_REL)" \
-	  OUT="$(OUT)" \
-	  RUN_BASE="$(RUN_BASE)"
-	  
+		RUN_STAMP="$(RUN_STAMP)" \
+		RUN_OUT="$(RUN_OUT)" \
+		RUN_RUN_ID="$(RUN_RUN_ID)" \
+		RUN_REL="$(RUN_REL)" \
+		OUT="$(OUT)" \
+		RUN_BASE="$(RUN_BASE)"
 	@echo "[RUN][HUMAN] ok"
 
 	
