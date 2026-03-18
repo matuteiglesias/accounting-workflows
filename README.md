@@ -1,18 +1,20 @@
-# Accounting workflows (src)
+# Accounting workflows
 
-Python pipeline for ledger ingestion -> canonicalization -> materialization -> views/reports.
+Python pipeline for ledger ingestion -> canonicalization -> materialization -> views -> metrics -> human balance output.
 
-## Structure
-- `accounting/`: main library + CLI scripts
-- `fixtures/`: small sample inputs for smoke / tests
-- `templates/`: HTML templates
-- `tests/`: tests (if present)
-- `notes/`: runbook / contracts
+## Official run path
+Run the accounting spine from the repository root with these Make targets:
 
-## Quickstart
-Preferred interface:
-- `make -C accounting smoke-ingest`
-- `make -C accounting run_all` (if meaningful)
+1. `make run-ingest`
+2. `make run-materialize`
+3. `make run-views`
+4. `make run-metrics`
+5. `make run-human-balance`
+
+`make run-accounting` is the happy-path wrapper and resolves to `run-human-balance`. The legacy storypack / compile branch is not part of the official flow anymore.
+
+## Runbook
+See `notes/accounting_spine_runbook.md` for the per-stage outputs, required files, and a concise smoke checklist.
 
 ## Repo hygiene
 - Generated outputs are not tracked (`out/`, `accounting/out/`, etc.)

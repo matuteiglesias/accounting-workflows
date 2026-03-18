@@ -1,10 +1,11 @@
-# Makefile.v3 - Accounting spine (A ingest -> D materialize -> V views)
+# Makefile.v3 - Accounting spine
+# Official path: run-ingest -> run-materialize -> run-views -> run-metrics -> run-human-balance
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
 # - Explicit out-dir passed to all Python entrypoints
 # - Timestamped run outputs (avoid stale-file illusions)
 # - Content checks (not only presence)
-# - Views consumes Stage D; "reports/" is optional legacy anchor, not a required stage
+# - Views consumes Stage D; reports/ is optional legacy input only, never a required stage
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -25,6 +26,12 @@ export PYTHONPATH := $(ROOT)
 OUT  ?= out
 FREQ ?= M
 TOP  ?= 10
+METRIC_MONTHS ?= 6
+RENT_PLACE_COL ?= Lugar
+RENT_DETAIL_COL ?= Detalle
+FLOW_ROLLUP_GROUPBY ?= Flujo,Tipo,Currency
+INCLUDE_STATUSES ?= pagado
+NOISE_FLOOR ?= ARS:5000,USD:10
 
 # Smoke fixture (override if your fixture lives elsewhere)
 FIXTURE ?= $(ROOT)/fixtures/ledger_fixture.csv
@@ -75,11 +82,6 @@ RUN_VIEWS_DIR     := $(RUN_OUT)/views
 SMOKE_VIEWS_SANITY := $(SMOKE_VIEWS_DIR)/views_sanity.json
 RUN_VIEWS_SANITY   := $(RUN_VIEWS_DIR)/views_sanity.json
 
-RUN_STORYPACK_DIR := $(RUN_OUT)/storypack
-RUN_DOCS_DIR      := $(RUN_OUT)/docs
-RUN_ASSETS_CSS     := $(PWD)/templates/style.css
-
-
 SMOKE_RUN_ID := smoke
 RUN_RUN_ID   := $(RUN_STAMP)
 
@@ -126,15 +128,20 @@ _update_latest:
 help:
 	@echo ""
 	@echo "Accounting spine v3:"
-	@echo "  make smoke-accounting         # fixture -> ingest -> materialize -> views (+checks)"
-	@echo "  make run-accounting           # live sheet -> ingest -> materialize -> views (+checks)"
+	@echo "  make run-ingest"
+	@echo "  make run-materialize"
+	@echo "  make run-views"
+	@echo "  make run-metrics"
+	@echo "  make run-human-balance"
+	@echo "  make run-accounting           # wrapper for the official full path above"
+	@echo "  make smoke-accounting         # fixture path through views only"
 	@echo ""
 	@echo "Per-step targets:"
 	@echo "  make smoke-ingest | smoke-materialize | smoke-views"
-	@echo "  make run-ingest   | run-materialize   | run-views"
+	@echo "  make run-ingest   | run-materialize   | run-views | run-metrics | run-human-balance"
 	@echo ""	
 	@echo "Key vars:"
-	@echo "  OUT=out  FREQ=W|M  TOP=6"
+	@echo "  OUT=out  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
 	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
 	@echo "  ACCOUNT_SA=/path/to/sa.json  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
 	@echo ""
@@ -144,8 +151,6 @@ help:
 # ----------------------------------------
 .PHONY: smoke-accounting run-accounting
 smoke-accounting: smoke-views
-# run-accounting: run-views
-# run-accounting: run-storypack
 run-accounting: run-human-balance
 
 # ========================================
@@ -274,11 +279,23 @@ run-metrics: run-views
 		$(PY) -m accounting.build_metric_values \
 			--run-root "$(RUN_OUT)" \
 			--out-dir "$(RUN_METRICS_DIR)" \
+			--months "$(METRIC_MONTHS)" \
+			--rent-place-col "$(RENT_PLACE_COL)" \
+			--rent-detail-col "$(RENT_DETAIL_COL)" \
+			--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
+			--include-statuses "$(INCLUDE_STATUSES)" \
+			--noise-floor "$(NOISE_FLOOR)" \
 			> /dev/null 2> "$$err"; \
 		test -s "$(RUN_METRICS_DIR)/metric_registry.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_values.csv"; \
 		test -s "$(RUN_METRICS_DIR)/validation_report.csv"; \
 		test -s "$(RUN_METRICS_DIR)/build_manifest.json"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/income_statement_monthly_last6.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_place_m_last6.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_detail_m_last6.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/flow_type_rollup_m_last6.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/draws_discipline_monthly_last6.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_views/metric_views_manifest.csv"; \
 	'
 	@echo "[RUN][METRICS] ok"
 
@@ -296,12 +313,12 @@ run-human-balance: run-metrics
 			--run-root "$(RUN_OUT)" \
 			--metrics-dir "$(RUN_METRICS_DIR)" \
 			--write-dir "$(RUN_HUMAN_DIR)" \
-			--months 6 \
-			--rent-place-col Lugar \
-			--rent-detail-col Detalle \
-			--flow-rollup-groupby Flujo,Tipo \
-			--include-statuses pagado \
-			--noise-floor ARS:5000,USD:10 \
+			--months "$(METRIC_MONTHS)" \
+			--rent-place-col "$(RENT_PLACE_COL)" \
+			--rent-detail-col "$(RENT_DETAIL_COL)" \
+			--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
+			--include-statuses "$(INCLUDE_STATUSES)" \
+			--noise-floor "$(NOISE_FLOOR)" \
 			> /dev/null 2> "$$err"; \
 		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
 		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
@@ -444,16 +461,9 @@ run-all: run-accounting
 # ----------------------------------------
 ENV_FILE ?= private/accounting.env
 
-.PHONY: run-env smoke-env run-story-env smoke-story-env
+.PHONY: run-env smoke-env
 run-env:
 	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-accounting'
 
 smoke-env:
 	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-accounting'
-
-run-story-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-storypack STORY_YEAR="$(STORY_YEAR)" STORY_FREQ="$(STORY_FREQ)"'
-
-smoke-story-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-storypack STORY_YEAR="$(STORY_YEAR)" STORY_FREQ="$(STORY_FREQ)"'
-

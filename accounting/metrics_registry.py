@@ -132,8 +132,6 @@ def list_metric_ids(
 
 def default_metric_specs_v1() -> list[MetricSpec]:
     return [
-        # MetricSpec("IS.RENT.CABA", "IS", "RENT", "Renta CABA", "sum", True, "per_flow", "build_is_rent_caba", "IS.RENT.TOTAL", "IS.1.1", 110),
-        # MetricSpec("IS.RENT.TORCUATO", "IS", "RENT", "Renta Torcuato", "sum", True, "per_flow", "build_is_rent_torcuato", "IS.RENT.TOTAL", "IS.1.2", 120),
         MetricSpec("IS.RENT.TOTAL", "IS", "RENT", "Renta total", "sum_components", False, "", "", "IS.INCOME.TOTAL", "IS.1", 100),
         MetricSpec("IS.CONTRIB.TOTAL", "IS", "CONTRIB", "Contribuciones totales", "sum", True, "v_contributions_monthly", "build_is_contrib_total", "IS.INCOME.TOTAL", "IS.2", 200),
         MetricSpec("IS.INCOME.TOTAL", "IS", "INCOME", "Ingresos totales", "sum_components", False, "", "", "", "IS.3", 300),
