@@ -6,8 +6,8 @@ import tempfile
 import os
 from typing import Dict
 import logging
+
 LOG = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 
@@ -160,7 +160,7 @@ def require_currency(df: pd.DataFrame, *, name: str, col: str = "Currency") -> p
     out = _normalize_currency_col(df, allow_missing=False, out_col=col)
     if out[col].isna().any():
         # raise ValueError(f"{name} has null/empty values in '{col}'")
-        print(f"{name} has {str(out[col].isna().sum())} null/empty values in '{col}'")
+        LOG.warning("%s has %s null/empty values in %r", name, int(out[col].isna().sum()), col)
     return out
 
 

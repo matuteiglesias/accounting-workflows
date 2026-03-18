@@ -108,3 +108,44 @@ out/metrics/<RUN_ID>/metric_values.csv
 out/metrics/<RUN_ID>/metric_views/income_statement_monthly_last6.csv
 out/human_reports/<RUN_ID>/balance_human_v2/balance_humano_v2.html
 ```
+
+## Logging / operations
+
+### Log format
+All supported stage entrypoints now emit operational logs with this format:
+
+```text
+YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message
+```
+
+Examples:
+
+```bash
+make run-materialize
+ACCOUNTING_DEBUG=1 make run-views
+journalctl --user -u accounting-spine-live.service -n 100 --no-pager
+journalctl --user -u accounting-spine-live.service --since "1 hour ago"
+```
+
+### What should appear in logs
+Keep logs focused on:
+- stage start / finish
+- effective input/output directories
+- key files written
+- row counts
+- important warnings (for example null currency values, dropped rows, invariant issues, optional export failures)
+- final errors when a stage aborts
+
+Do not treat logs as a substitute for artifacts such as:
+- `views/views_sanity.json`
+- `meta/*.json` manifests
+- `metric_views/*.csv`
+- `tables/*.csv` and final HTML outputs
+
+### DEBUG mode
+Verbose dataframe diagnostics are available only when explicitly enabled:
+
+```bash
+ACCOUNTING_DEBUG=1 make run-materialize
+ACCOUNTING_LOG_LEVEL=DEBUG python -m accounting.views --reports-dir ... --write-dir ...
+```

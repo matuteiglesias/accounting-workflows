@@ -162,7 +162,6 @@ run-accounting: run-human-balance
 .PHONY: smoke-ingest
 smoke-ingest:
 	@$(call _guard_out_dir,$(SMOKE_OUT))
-	@echo "[SMOKE][INGEST] fixture=$(FIXTURE) -> out=$(SMOKE_OUT)"
 	@mkdir -p "$(SMOKE_OUT)"
 	@$(PY) -m accounting.ingest \
 		--mode smoke \
@@ -174,7 +173,6 @@ smoke-ingest:
 .PHONY: smoke-materialize
 smoke-materialize: smoke-ingest
 	@$(call _guard_out_dir,$(SMOKE_OUT))
-	@echo "[SMOKE][MATERIALIZE] freq=$(FREQ) -> out=$(SMOKE_OUT)"
 	@$(PY) -m accounting.materialize \
 		--out-dir "$(SMOKE_OUT)" \
 		--freq "$(FREQ)" \
@@ -186,19 +184,14 @@ smoke-materialize: smoke-ingest
 .PHONY: smoke-views
 smoke-views: smoke-materialize
 	@$(call _guard_out_dir,$(SMOKE_OUT))
-	@echo "[SMOKE][VIEWS] freq=$(FREQ) -> out=$(SMOKE_VIEWS_DIR)"
 	@mkdir -p "$(SMOKE_VIEWS_DIR)"
 	@mkdir -p "$(SMOKE_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
-	@bash -eu -o pipefail -c '\
-	err="$(SMOKE_OUT)/views.stderr.log"; \
-	$(PY) -m accounting.views \
+	@$(PY) -m accounting.views \
 		--reports-dir "$(SMOKE_REPORTS_DIR)" \
 		--write-dir "$(SMOKE_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
 		--mode smoke \
-		--run-id "$(SMOKE_RUN_ID)" \
-		> /dev/null 2> "$$err"; \
-	'
+		--run-id "$(SMOKE_RUN_ID)"
 
 	test -s "$(SMOKE_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
 	$(PY) -c 'import json,sys; d=json.load(open(sys.argv[1],"r",encoding="utf-8")); errs=(d.get("invariants") or {}).get("errors") or []; assert len(errs)==0, "views invariant errors: "+str(errs)' "$(SMOKE_VIEWS_SANITY)"; \
@@ -208,9 +201,6 @@ smoke-views: smoke-materialize
 	@$(MAKE) _check_views OUT_DIR="$(SMOKE_OUT)" MODE="smoke"
 
 
-
-	'
-
 # ========================================
 # RUN MODE (LIVE)
 # ========================================
@@ -219,7 +209,6 @@ smoke-views: smoke-materialize
 run-ingest:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@$(call require_var,ACCOUNT_SHEET_URL)
-	@echo "[RUN][INGEST] sheet='$(ACCOUNT_SHEET_NAME)' -> out=$(RUN_OUT)"
 	@mkdir -p "$(RUN_OUT)"
 	@$(PY) -m accounting.ingest \
 		--mode run \
@@ -233,7 +222,6 @@ run-ingest:
 .PHONY: run-materialize
 run-materialize: run-ingest
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@echo "[RUN][MATERIALIZE] freq=$(FREQ) -> out=$(RUN_OUT)"
 	@$(PY) -m accounting.materialize \
 		--out-dir "$(RUN_OUT)" \
 		--freq "$(FREQ)" \
@@ -245,39 +233,28 @@ run-materialize: run-ingest
 .PHONY: run-views
 run-views: run-materialize
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@echo "[RUN][VIEWS] freq=$(FREQ) -> out=$(RUN_VIEWS_DIR)"
 	@mkdir -p "$(RUN_VIEWS_DIR)"
 	@mkdir -p "$(RUN_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
-	@bash -eu -o pipefail -c '\
-	err="$(RUN_OUT)/views.stderr.log"; \
-	$(PY) -m accounting.views \
+	@$(PY) -m accounting.views \
 		--reports-dir "$(RUN_REPORTS_DIR)" \
 		--write-dir "$(RUN_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
 		--mode run \
-		--run-id "$(RUN_RUN_ID)" \
-		> /dev/null 2> "$$err"; \
-	'
+		--run-id "$(RUN_RUN_ID)"
 
 
 	test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
 	$(PY) -c 'import json,sys; d=json.load(open(sys.argv[1],"r",encoding="utf-8")); errs=(d.get("invariants") or {}).get("errors") or []; assert len(errs)==0, "views invariant errors: "+str(errs)' "$(RUN_VIEWS_SANITY)"; \
 
 
-
-
 	@$(call _check_views_sanity,$(RUN_VIEWS_SANITY))
 	@$(MAKE) _check_views OUT_DIR="$(RUN_OUT)" MODE="run"
-
-
 
 .PHONY: run-metrics
 run-metrics: run-views
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@echo "[RUN][METRICS] -> out=$(RUN_METRICS_DIR)"
 	@mkdir -p "$(RUN_METRICS_DIR)"
 	@bash -eu -o pipefail -c '\
-		err="$(RUN_OUT)/metrics.stderr.log"; \
 		$(PY) -m accounting.build_metric_values \
 			--run-root "$(RUN_OUT)" \
 			--out-dir "$(RUN_METRICS_DIR)" \
@@ -286,8 +263,7 @@ run-metrics: run-views
 			--rent-detail-col "$(RENT_DETAIL_COL)" \
 			--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
 			--include-statuses "$(INCLUDE_STATUSES)" \
-			--noise-floor "$(NOISE_FLOOR)" \
-			> /dev/null 2> "$$err"; \
+			--noise-floor "$(NOISE_FLOOR)"; \
 		test -s "$(RUN_METRICS_DIR)/metric_registry.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_values.csv"; \
 		test -s "$(RUN_METRICS_DIR)/validation_report.csv"; \
@@ -299,17 +275,14 @@ run-metrics: run-views
 		test -s "$(RUN_METRICS_DIR)/metric_views/draws_discipline_monthly_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/metric_views_manifest.csv"; \
 	'
-	@echo "[RUN][METRICS] ok"
 
 
 
 .PHONY: run-human-balance
 run-human-balance: run-metrics
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@echo "[RUN][HUMAN] -> out=$(RUN_HUMAN_DIR)"
 	@mkdir -p "$(RUN_HUMAN_DIR)"
 	@bash -eu -o pipefail -c '\
-		err="$(RUN_OUT)/human_balance.stderr.log"; \
 		$(PY) -m accounting.human_balance_document_factory \
 			--run-root "$(RUN_OUT)" \
 			--metrics-dir "$(RUN_METRICS_DIR)" \
@@ -319,8 +292,7 @@ run-human-balance: run-metrics
 			--rent-detail-col "$(RENT_DETAIL_COL)" \
 			--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
 			--include-statuses "$(INCLUDE_STATUSES)" \
-			--noise-floor "$(NOISE_FLOOR)" \
-			> /dev/null 2> "$$err"; \
+			--noise-floor "$(NOISE_FLOOR)"; \
 		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
 		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
 	'
@@ -331,7 +303,6 @@ run-human-balance: run-metrics
 		RUN_REL="$(RUN_REL)" \
 		OUT="$(OUT)" \
 		RUN_BASE="$(RUN_BASE)"
-	@echo "[RUN][HUMAN] ok"
 
 	
 # ========================================
@@ -444,7 +415,6 @@ _check_materialize:
 .PHONY: _check_views
 _check_views:
 	@$(call _guard_out_dir,$(OUT_DIR))
-	@echo "[CHECK][VIEWS] MODE=$(MODE) OUT_DIR=$(OUT_DIR)"
 	@sanity="$(OUT_DIR)/views/views_sanity.json"; \
 	test -s "$$sanity" || (echo "ERROR: views_sanity.json missing/empty at $$sanity"; exit 2); \
 	$(PY) -c 'import json,sys; json.load(open(sys.argv[1],"r",encoding="utf-8"))' "$$sanity"

@@ -37,9 +37,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from accounting.core_timeseries import period_bins_for_dates
+from accounting.logging_utils import configure_logging, get_logger
 from accounting.utils import resolve_run_id
 
-LOG = logging.getLogger(__name__)
+LOG = get_logger("ingest")
 
 
 # -----------------------
@@ -545,11 +546,13 @@ def _parse_list_arg(s: str) -> Optional[List[str]]:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging()
 
     args = parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    LOG.info("Stage start mode=%s out_dir=%s", args.mode, out_dir)
 
     only_status = _parse_list_arg(args.only_status)
 
@@ -652,7 +655,7 @@ def main() -> int:
     except Exception:
         LOG.exception("Manifest write failed (non-fatal)")
 
-    print(str(ledger_path))
+    LOG.info("Stage finish ledger_rows=%d ledger_path=%s anomalies=%d", len(ldf), ledger_path, 0 if not isinstance(anoms, pd.DataFrame) else len(anoms))
     return 0
 
 
