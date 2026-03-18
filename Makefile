@@ -1,10 +1,10 @@
-# Makefile.v2 - Accounting spine (A ingest -> D materialize -> E reports -> V views)
+# Makefile.v3 - Accounting spine (A ingest -> D materialize -> V views)
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
 # - Explicit out-dir passed to all Python entrypoints
 # - Timestamped run outputs (avoid stale-file illusions)
 # - Content checks (not only presence)
-# - Materialize emits manifest.json; ingest/reports may emit wrappers
+# - Views consumes Stage D; "reports/" is optional legacy anchor, not a required stage
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -34,12 +34,6 @@ ACCOUNT_SA ?=
 ACCOUNT_SHEET_URL ?=
 ACCOUNT_SHEET_NAME ?= C. Long Ledger
 
-# Optional explicit parties for reports (RUN boundedness)
-# Examples:
-#   REPORT_PARTIES="PM FB"
-#   REPORT_PARTIES="PM,FB"
-REPORT_PARTIES ?= PM,FB
-
 # ----------------------------------------
 # Helpers
 # ----------------------------------------
@@ -51,13 +45,27 @@ define _guard_out_dir
 	@if [ -z "$(1)" ]; then echo "ERROR: OUT_DIR empty"; exit 2; fi
 endef
 
+# Assert views sanity exists and invariant errors are empty
+define _check_views_sanity
+	@sanity="$(1)"; \
+	test -s "$$sanity" || (echo "ERROR: views_sanity.json missing/empty at $$sanity"; exit 2); \
+	$(PY) -c 'import json,sys; d=json.load(open(sys.argv[1],"r",encoding="utf-8")); errs=(d.get("invariants") or {}).get("errors") or []; assert len(errs)==0, "views invariant errors: "+str(errs)' "$$sanity"
+endef
+
+
 # ----------------------------------------
 # Derived output dirs
 # ----------------------------------------
 SMOKE_OUT := $(OUT)/smoke/accounting
 RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
-RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)
 
+RUN_BASE := $(OUT)/run/accounting
+
+RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)
+# Per-run out dir (you probably already have this, keep your existing one)
+# RUN_OUT := $(RUN_BASE)/$(RUN_RUN_ID)
+
+# NOTE: keep reports dirs only as anchors for legacy files and for loader heuristics.
 SMOKE_REPORTS_DIR := $(SMOKE_OUT)/reports
 RUN_REPORTS_DIR   := $(RUN_OUT)/reports
 
@@ -67,14 +75,49 @@ RUN_VIEWS_DIR     := $(RUN_OUT)/views
 SMOKE_VIEWS_SANITY := $(SMOKE_VIEWS_DIR)/views_sanity.json
 RUN_VIEWS_SANITY   := $(RUN_VIEWS_DIR)/views_sanity.json
 
+RUN_STORYPACK_DIR := $(RUN_OUT)/storypack
+RUN_DOCS_DIR      := $(RUN_OUT)/docs
+RUN_ASSETS_CSS     := $(PWD)/templates/style.css
+
+
 SMOKE_RUN_ID := smoke
 RUN_RUN_ID   := $(RUN_STAMP)
 
-SMOKE_META_DIR := $(SMOKE_OUT)/meta
-RUN_META_DIR   := $(RUN_OUT)/meta
+RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_RUN_ID)
+RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
 
-SMOKE_REPORTS_SUMMARY := $(SMOKE_META_DIR)/reports_summary.json
-RUN_REPORTS_SUMMARY   := $(RUN_META_DIR)/reports_summary.json
+METRICS_LATEST := $(OUT)/metrics/latest
+HUMAN_LATEST   := $(OUT)/human_reports/latest
+
+# RUN_LATEST := $(OUT)/run/accounting/latest
+# STORY_LATEST := $(OUT)/storypack/latest
+
+.PHONY: _update_latest
+_update_latest:
+	@echo "[RUN][LATEST] run=$(RUN_RUN_ID)"
+	@bash -eu -o pipefail -c '\
+		link_swap () { \
+			base="$$1"; \
+			target="$$2"; \
+			latest="$$base/latest"; \
+			mkdir -p "$$base"; \
+			if [ -d "$$latest" ] && [ ! -L "$$latest" ]; then \
+				echo "[LATEST] WARN: $$latest is a directory. Moving aside."; \
+				rm -rf "$$latest.bak"; \
+				mv "$$latest" "$$latest.bak"; \
+			fi; \
+			tmp="$$base/.latest_tmp"; \
+			ln -sfn "$$target" "$$tmp"; \
+			rm -f "$$latest"; \
+			mv -f "$$tmp" "$$latest"; \
+			ls -lah "$$latest"; \
+		}; \
+		link_swap "$(RUN_BASE)" "$(RUN_RUN_ID)"; \
+		link_swap "$(OUT)/metrics" "$(RUN_RUN_ID)"; \
+		link_swap "$(OUT)/human_reports" "$(RUN_RUN_ID)"; \
+	'
+
+
 
 # ----------------------------------------
 # Help
@@ -82,24 +125,18 @@ RUN_REPORTS_SUMMARY   := $(RUN_META_DIR)/reports_summary.json
 .PHONY: help
 help:
 	@echo ""
-	@echo "Accounting spine v2:"
-	@echo "  make smoke-accounting         # fixture -> ingest -> materialize -> reports -> views (+checks)"
-	@echo "  make run-accounting           # live sheet -> ingest -> materialize -> reports -> views (+checks)"
+	@echo "Accounting spine v3:"
+	@echo "  make smoke-accounting         # fixture -> ingest -> materialize -> views (+checks)"
+	@echo "  make run-accounting           # live sheet -> ingest -> materialize -> views (+checks)"
 	@echo ""
 	@echo "Per-step targets:"
-	@echo "  make smoke-ingest | smoke-materialize | smoke-reports | smoke-views"
-	@echo "  make run-ingest   | run-materialize   | run-reports   | run-views"
-	@echo ""
+	@echo "  make smoke-ingest | smoke-materialize | smoke-views"
+	@echo "  make run-ingest   | run-materialize   | run-views"
+	@echo ""	
 	@echo "Key vars:"
 	@echo "  OUT=out  FREQ=W|M  TOP=6"
 	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
 	@echo "  ACCOUNT_SA=/path/to/sa.json  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
-	@echo "  REPORT_PARTIES='PM FB'  (or 'PM,FB')"
-	@echo ""
-	@echo "Env wrapper targets (explicit, no implicit .env include):"
-	@echo "  make run-env ENV_FILE=private/accounting.env"
-	@echo "  make smoke-env ENV_FILE=private/accounting.env"
-	@echo "  make run-story-env ENV_FILE=private/accounting.env STORY_YEAR=2025"
 	@echo ""
 
 # ----------------------------------------
@@ -107,7 +144,9 @@ help:
 # ----------------------------------------
 .PHONY: smoke-accounting run-accounting
 smoke-accounting: smoke-views
-run-accounting: run-views
+# run-accounting: run-views
+# run-accounting: run-storypack
+run-accounting: run-human-balance
 
 # ========================================
 # SMOKE MODE
@@ -137,45 +176,33 @@ smoke-materialize: smoke-ingest
 		--run-id "$(SMOKE_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(SMOKE_OUT)" MODE="smoke" FREQ="$(FREQ)"
 
-.PHONY: smoke-reports
-smoke-reports: smoke-materialize
-	@$(call _guard_out_dir,$(SMOKE_OUT))
-	@echo "[SMOKE][REPORTS] top=$(TOP) freq=$(FREQ) -> out=$(SMOKE_REPORTS_DIR)"
-	@mkdir -p "$(SMOKE_REPORTS_DIR)"
-
-	@bash -eu -o pipefail -c '\
-	mkdir -p "$(SMOKE_META_DIR)"; \
-	err="$(SMOKE_OUT)/reports.stderr.log"; \
-	$(PY) -m accounting.reports \
-		--out-dir "$(SMOKE_OUT)" \
-		--freq "$(FREQ)" \
-		--write-dir "$(SMOKE_REPORTS_DIR)" \
-		--top "$(TOP)" \
-		--summary-path "$(SMOKE_REPORTS_SUMMARY)" \
-		--mode smoke \
-		--run-id "$(SMOKE_RUN_ID)" \
-		> /dev/null 2> "$$err"; \
-	test -s "$(SMOKE_REPORTS_SUMMARY)" || (echo "ERROR: reports_summary.json missing/empty"; exit 2); \
-	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(SMOKE_REPORTS_SUMMARY)"; \
-	'
-	@$(MAKE) _check_reports OUT_DIR="$(SMOKE_OUT)" MODE="smoke" REPORTS_DIR="$(SMOKE_REPORTS_DIR)"
-
 .PHONY: smoke-views
-smoke-views: smoke-reports
+smoke-views: smoke-materialize
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@echo "[SMOKE][VIEWS] freq=$(FREQ) -> out=$(SMOKE_VIEWS_DIR)"
 	@mkdir -p "$(SMOKE_VIEWS_DIR)"
+	@mkdir -p "$(SMOKE_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
 	@bash -eu -o pipefail -c '\
 	err="$(SMOKE_OUT)/views.stderr.log"; \
 	$(PY) -m accounting.views \
 		--reports-dir "$(SMOKE_REPORTS_DIR)" \
 		--write-dir "$(SMOKE_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
+		--mode smoke \
+		--run-id "$(SMOKE_RUN_ID)" \
 		> /dev/null 2> "$$err"; \
-	test -s "$(SMOKE_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
-	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(SMOKE_VIEWS_SANITY)"; \
 	'
+
+	test -s "$(SMOKE_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
+	$(PY) -c 'import json,sys; d=json.load(open(sys.argv[1],"r",encoding="utf-8")); errs=(d.get("invariants") or {}).get("errors") or []; assert len(errs)==0, "views invariant errors: "+str(errs)' "$(SMOKE_VIEWS_SANITY)"; \
+
+
+	@$(call _check_views_sanity,$(SMOKE_VIEWS_SANITY))
 	@$(MAKE) _check_views OUT_DIR="$(SMOKE_OUT)" MODE="smoke"
+
+
+
+	'
 
 # ========================================
 # RUN MODE (LIVE)
@@ -184,7 +211,6 @@ smoke-views: smoke-reports
 .PHONY: run-ingest
 run-ingest:
 	@$(call _guard_out_dir,$(RUN_OUT))
-	# @$(call require_var,ACCOUNT_SA)
 	@$(call require_var,ACCOUNT_SHEET_URL)
 	@echo "[RUN][INGEST] sheet='$(ACCOUNT_SHEET_NAME)' -> out=$(RUN_OUT)"
 	@mkdir -p "$(RUN_OUT)"
@@ -209,46 +235,173 @@ run-materialize: run-ingest
 		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 
-.PHONY: run-reports
-run-reports: run-materialize
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@echo "[RUN][REPORTS] freq=$(FREQ) parties='$(REPORT_PARTIES)' top=$(TOP) -> out=$(RUN_REPORTS_DIR)"
-	@mkdir -p "$(RUN_REPORTS_DIR)"
-
-	@bash -eu -o pipefail -c '\
-	mkdir -p "$(RUN_META_DIR)"; \
-	err="$(RUN_OUT)/reports.stderr.log"; \
-	$(PY) -m accounting.reports \
-		--out-dir "$(RUN_OUT)" \
-		--freq "$(FREQ)" \
-		--write-dir "$(RUN_REPORTS_DIR)" \
-		--top "$(TOP)" \
-		--parties "$(REPORT_PARTIES)" \
-		--summary-path "$(RUN_REPORTS_SUMMARY)" \
-		--mode run \
-		--run-id "$(RUN_RUN_ID)" \
-		> /dev/null 2> "$$err"; \
-	test -s "$(RUN_REPORTS_SUMMARY)" || (echo "ERROR: reports_summary.json missing/empty"; exit 2); \
-	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(RUN_REPORTS_SUMMARY)"; \
-	'
-	@$(MAKE) _check_reports OUT_DIR="$(RUN_OUT)" MODE="run" REPORTS_DIR="$(RUN_REPORTS_DIR)"
-
 .PHONY: run-views
-run-views: run-reports
+run-views: run-materialize
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@echo "[RUN][VIEWS] freq=$(FREQ) -> out=$(RUN_VIEWS_DIR)"
 	@mkdir -p "$(RUN_VIEWS_DIR)"
+	@mkdir -p "$(RUN_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
 	@bash -eu -o pipefail -c '\
 	err="$(RUN_OUT)/views.stderr.log"; \
 	$(PY) -m accounting.views \
 		--reports-dir "$(RUN_REPORTS_DIR)" \
 		--write-dir "$(RUN_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
+		--mode run \
+		--run-id "$(RUN_RUN_ID)" \
 		> /dev/null 2> "$$err"; \
-	test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
-	$(PY) -c "import json,sys; json.load(open(sys.argv[1],\"r\",encoding=\"utf-8\"))" "$(RUN_VIEWS_SANITY)"; \
 	'
+
+
+	test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: views_sanity.json missing/empty"; exit 2); \
+	$(PY) -c 'import json,sys; d=json.load(open(sys.argv[1],"r",encoding="utf-8")); errs=(d.get("invariants") or {}).get("errors") or []; assert len(errs)==0, "views invariant errors: "+str(errs)' "$(RUN_VIEWS_SANITY)"; \
+
+
+
+
+	@$(call _check_views_sanity,$(RUN_VIEWS_SANITY))
 	@$(MAKE) _check_views OUT_DIR="$(RUN_OUT)" MODE="run"
+
+
+
+.PHONY: run-metrics
+run-metrics: run-views
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@echo "[RUN][METRICS] -> out=$(RUN_METRICS_DIR)"
+	@mkdir -p "$(RUN_METRICS_DIR)"
+	@bash -eu -o pipefail -c '\
+		err="$(RUN_OUT)/metrics.stderr.log"; \
+		$(PY) -m accounting.build_metric_values \
+			--run-root "$(RUN_OUT)" \
+			--out-dir "$(RUN_METRICS_DIR)" \
+			> /dev/null 2> "$$err"; \
+		test -s "$(RUN_METRICS_DIR)/metric_registry.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metric_values.csv"; \
+		test -s "$(RUN_METRICS_DIR)/validation_report.csv"; \
+		test -s "$(RUN_METRICS_DIR)/build_manifest.json"; \
+	'
+	@echo "[RUN][METRICS] ok"
+
+
+
+
+.PHONY: run-human-balance
+run-human-balance: run-metrics
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@echo "[RUN][HUMAN] -> out=$(RUN_HUMAN_DIR)"
+	@mkdir -p "$(RUN_HUMAN_DIR)"
+	@bash -eu -o pipefail -c '\
+		err="$(RUN_OUT)/human_balance.stderr.log"; \
+		$(PY) -m accounting.human_balance_document_factory \
+			--run-root "$(RUN_OUT)" \
+			--metrics-dir "$(RUN_METRICS_DIR)" \
+			--write-dir "$(RUN_HUMAN_DIR)" \
+			--months 6 \
+			--rent-place-col Lugar \
+			--rent-detail-col Detalle \
+			--flow-rollup-groupby Flujo,Tipo \
+			--include-statuses pagado \
+			--noise-floor ARS:5000,USD:10 \
+			> /dev/null 2> "$$err"; \
+		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
+		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
+	'
+	@$(MAKE) _update_latest
+	@echo "[RUN][HUMAN] ok"
+
+	
+# ========================================
+# LEGACY REPORTING LAYER (deprecated)
+# - Kept only for comparison / rescue
+# - Not part of official accounting spine
+# ========================================
+	
+
+# # Add after run-views:
+
+# # run-storypack-cashflow_v1: run-views
+
+# # call $(PY) report_cashflow.py --in-dir "$(RUN_OUT)" --out-dir "$(RUN_OUT)/storypack/latest" or equivalent
+
+# # run-storypack-balance_v1: run-views
+
+# # same pattern
+
+# # ========================================
+# # STORYPACK (REPORT ARTIFACT CREATORS)
+# # ========================================
+
+# .PHONY: run-storypack-cashflow
+# run-storypack-cashflow: run-views
+# 	@$(call _guard_out_dir,$(RUN_OUT))
+# 	@echo "[LEGACY][RUN][STORYPACK][cashflow_v1] -> out=$(RUN_STORYPACK_DIR)/cashflow_v1"
+# 	@mkdir -p "$(RUN_STORYPACK_DIR)/cashflow_v1"
+# 	@bash -eu -o pipefail -c '\
+# 		err="$(RUN_OUT)/storypack_cashflow.stderr.log"; \
+# 		$(PY) accounting/report_cashflow.py \
+# 			--accounting-root "$(RUN_OUT)" \
+# 			--write-dir "$(RUN_STORYPACK_DIR)/cashflow_v1" \
+# 			--mode run \
+# 			--run-id "$(RUN_RUN_ID)" \
+# 			> /dev/null 2> "$$err"; \
+# 		test -s "$(RUN_STORYPACK_DIR)/cashflow_v1/story_manifest.json"; \
+# 	'
+
+# .PHONY: run-storypack-balance
+# run-storypack-balance: run-views
+# 	@$(call _guard_out_dir,$(RUN_OUT))
+# 	@echo "[LEGACY][RUN][STORYPACK][balance_v1] -> out=$(RUN_STORYPACK_DIR)/balance_v1"
+# 	@mkdir -p "$(RUN_STORYPACK_DIR)/balance_v1"
+# 	@bash -eu -o pipefail -c '\
+# 		err="$(RUN_OUT)/storypack_balance.stderr.log"; \
+# 		$(PY) accounting/report_balance.py \
+# 			--accounting-root "$(RUN_OUT)" \
+# 			--write-dir "$(RUN_STORYPACK_DIR)/balance_v1" \
+# 			--mode run \
+# 			--run-id "$(RUN_RUN_ID)" \
+# 			> /dev/null 2> "$$err"; \
+# 		test -s "$(RUN_STORYPACK_DIR)/balance_v1/story_manifest.json"; \
+# 	'
+
+# .PHONY: run-storypack
+# run-storypack: run-storypack-cashflow run-storypack-balance
+# 	@echo "[LEGACY][RUN][STORYPACK] done -> $(RUN_STORYPACK_DIR)"
+
+
+
+
+# # ========================================
+
+
+# .PHONY: run-compile-cashflow
+# run-compile-cashflow: run-storypack
+# 	@$(call _guard_out_dir,$(RUN_OUT))
+# 	@echo "[LEGACY][RUN][COMPILE][cashflow_v1] -> out=$(RUN_DOCS_DIR)/cashflow_v1"
+# 	@mkdir -p "$(RUN_DOCS_DIR)/cashflow_v1"
+# 	@$(PY) accounting/compile_reports.py \
+# 		--storypack-root "$(RUN_STORYPACK_DIR)" \
+# 		--template "templates/cashflow_template.md" \
+# 		--out-dir "$(RUN_DOCS_DIR)/cashflow_v1" \
+# 		--css "$(RUN_ASSETS_CSS)"
+
+# .PHONY: run-compile-balance
+# run-compile-balance: run-storypack
+# 	@$(call _guard_out_dir,$(RUN_OUT))
+# 	@echo "[LEGACY][RUN][COMPILE][balance_v1] -> out=$(RUN_DOCS_DIR)/balance_v1"
+# 	@mkdir -p "$(RUN_DOCS_DIR)/balance_v1"
+# 	@$(PY) accounting/compile_reports.py \
+# 		--storypack-root "$(RUN_STORYPACK_DIR)" \
+# 		--template "templates/balance_template.md" \
+# 		--out-dir "$(RUN_DOCS_DIR)/balance_v1" \
+# 		--css "$(RUN_ASSETS_CSS)"
+
+# .PHONY: run-compile
+# run-compile: run-compile-cashflow run-compile-balance
+# 	@echo "[RUN][COMPILE] done -> $(RUN_DOCS_DIR)"
+
+
+
+
 
 # ========================================
 # CHECKS
@@ -264,11 +417,6 @@ _check_materialize:
 	@$(call _guard_out_dir,$(OUT_DIR))
 	@OUT_DIR="$(OUT_DIR)" MODE="$(MODE)" FREQ="$(FREQ)" $(PY) scripts/check_materialize.py
 
-.PHONY: _check_reports
-_check_reports:
-	@$(call _guard_out_dir,$(OUT_DIR))
-	@OUT_DIR="$(OUT_DIR)" MODE="$(MODE)" REPORTS_DIR="$(REPORTS_DIR)" $(PY) scripts/check_reports.py
-
 .PHONY: _check_views
 _check_views:
 	@$(call _guard_out_dir,$(OUT_DIR))
@@ -277,16 +425,19 @@ _check_views:
 	test -s "$$sanity" || (echo "ERROR: views_sanity.json missing/empty at $$sanity"; exit 2); \
 	$(PY) -c 'import json,sys; json.load(open(sys.argv[1],"r",encoding="utf-8"))' "$$sanity"
 
+
+
+
 # ========================================
 # Aliases / convenience
 # ========================================
 
-.PHONY: smoke run-all run caps
+.PHONY: smoke run-all run
 smoke: smoke-accounting
-run-all: run-accounting
-
-# optional alias if you want the runner to call `run` not `run-all`
 run: run-accounting
+run-all: run-accounting
+	@echo "[RUN] done. latest -> $(RUN_RUN_ID)"
+
 
 # ----------------------------------------
 # Explicit env wrappers (no implicit .env include)
@@ -306,33 +457,3 @@ run-story-env:
 smoke-story-env:
 	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-storypack STORY_YEAR="$(STORY_YEAR)" STORY_FREQ="$(STORY_FREQ)"'
 
-# ========================================
-# Storypack layer (F) - depends on views (V)
-# ========================================
-
-STORY_YEAR ?= 2025
-STORY_FREQ ?= $(FREQ)
-STORY_WRITE_DIR ?= $(RUN_OUT)/storypack
-
-.PHONY: run-storypack smoke-storypack
-run-storypack: run-views
-	@echo "[RUN][STORY] year=$(STORY_YEAR) freq=$(STORY_FREQ) -> $(RUN_OUT)/storypack"
-	@$(PY) scripts/run_storypack.py \
-		--run-out "$(RUN_OUT)" \
-		--year "$(STORY_YEAR)" \
-		--freq "$(STORY_FREQ)" \
-		--report-parties "$(REPORT_PARTIES)" \
-		--write-dir "$(RUN_OUT)/storypack"
-
-smoke-storypack: smoke-views
-	@echo "[SMOKE][STORY] -> $(SMOKE_OUT)/storypack"
-	@$(PY) scripts/run_storypack.py \
-		--run-out "$(SMOKE_OUT)" \
-		--year "$(STORY_YEAR)" \
-		--freq "$(STORY_FREQ)" \
-		--report-parties "$(REPORT_PARTIES)" \
-		--write-dir "$(SMOKE_OUT)/storypack"
-
-# Notes:
-# notebooks should stay as assembly/visualization
-# reusable logic lives in accounting/views.py / reports.py

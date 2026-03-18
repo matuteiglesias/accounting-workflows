@@ -167,6 +167,148 @@ CHECK_MANIFEST_SCHEMA: JsonDict = {
 
 
 
+## Data structure hint for observability.
+
+### HELPERS
+
+import csv
+# import json
+# from pathlib import Path
+from typing import Set #Any, Dict, List, Optional, Set, Tuple, Union
+
+def _flatten_json_paths(
+    obj: Any,
+    prefix: str = "",
+    *,
+    max_depth: int = 6,
+    _depth: int = 0,
+    _out: Optional[Set[str]] = None,
+) -> Set[str]:
+    """
+    Flatten nested JSON structure into dotted key paths.
+    - Dict keys become ".key"
+    - Lists become "[]" and we inspect only the first element if it's a list of dicts
+    - Lists of scalars become "field[]" without enumerating values (avoid enum spam)
+    """
+    if _out is None:
+        _out = set()
+
+    if _depth >= max_depth:
+        if prefix:
+            _out.add(prefix + " (depth_limit)")
+        return _out
+
+    if isinstance(obj, dict):
+        if not obj and prefix:
+            _out.add(prefix)  # empty dict still a meaningful node
+        for k, v in obj.items():
+            k_str = str(k)
+            new_prefix = f"{prefix}.{k_str}" if prefix else k_str
+            _flatten_json_paths(v, new_prefix, max_depth=max_depth, _depth=_depth + 1, _out=_out)
+
+    elif isinstance(obj, list):
+        list_prefix = prefix + "[]" if prefix else "[]"
+        if not obj:
+            _out.add(list_prefix)
+            return _out
+
+        first = obj[0]
+
+        # list of dicts or list of lists: inspect first element shape only
+        if isinstance(first, (dict, list)):
+            _flatten_json_paths(first, list_prefix, max_depth=max_depth, _depth=_depth + 1, _out=_out)
+        else:
+            # list of scalars: record schema-level fact only, not values
+            _out.add(list_prefix)
+
+    else:
+        if prefix:
+            _out.add(prefix)
+
+    return _out
+
+
+def _csv_header(path: Path) -> List[str]:
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            # skip empty lines
+            if row and any(cell.strip() for cell in row):
+                return [c.strip() for c in row]
+    return []
+
+
+def _jsonl_first_record(path: Path, *, max_bytes: int = 256_000) -> Optional[Any]:
+    """
+    Read first non-empty JSON object line from JSONL.
+    Bounded read to avoid huge files.
+    """
+    read_bytes = 0
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            read_bytes += len(line.encode("utf-8", errors="ignore"))
+            if read_bytes > max_bytes:
+                return None
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError:
+                # If the first non-empty line isn't valid JSON, abort quietly
+                return None
+    return None
+
+
+def structure_hint_from_file(
+    path: Union[str, Path],
+    *,
+    max_depth: int = 6,
+    max_fields: int = 200,
+    max_json_bytes: int = 2_000_000,   # guard: avoid loading very large json into memory
+) -> Dict[str, Any]:
+    """
+    Return a compact structure hint for artifact manifests:
+    - CSV: header columns
+    - JSONL: flattened fields from first record
+    - JSON: flattened fields from parsed object (guarded by size)
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    size = path.stat().st_size
+
+    hint: Dict[str, Any] = {"kind": "other"}
+
+    if suffix == ".csv":
+        cols = _csv_header(path)
+        hint = {"kind": "csv", "columns": cols}
+
+    elif suffix == ".jsonl":
+        obj = _jsonl_first_record(path)
+        if obj is None:
+            hint = {"kind": "jsonl", "fields": [], "note": "no_valid_first_record_or_too_large"}
+        else:
+            fields = sorted(_flatten_json_paths(obj, max_depth=max_depth))
+            hint = {"kind": "jsonl", "fields": fields[:max_fields], "fields_truncated": len(fields) > max_fields}
+
+    elif suffix == ".json":
+        if size > max_json_bytes:
+            hint = {"kind": "json", "fields": [], "note": f"json_too_large>{max_json_bytes}_bytes"}
+        else:
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    obj = json.load(f)
+                fields = sorted(_flatten_json_paths(obj, max_depth=max_depth))
+                hint = {"kind": "json", "fields": fields[:max_fields], "fields_truncated": len(fields) > max_fields}
+            except Exception as e:
+                hint = {"kind": "json", "fields": [], "note": f"json_parse_failed:{type(e).__name__}"}
+
+    return hint
+
+
+
+###
+
 
 
 def artifact_from_path(
@@ -197,6 +339,8 @@ def artifact_from_path(
         guess, _enc = mimetypes.guess_type(path.name)
         content_type = guess or "application/octet-stream"
 
+    structure = structure_hint_from_file(path)  # <-- Structure hint
+
     return {
         "run_id": str(run_id),
         "stage": str(stage),
@@ -209,7 +353,9 @@ def artifact_from_path(
         "content_type": str(content_type),
         "created_at": _utc_now_iso(),
         "role": str(role),
+        "structure": structure,  # <--
     }
+
 
 
 def write_stage_manifest(meta_dir: Path, manifest_obj: Dict[str, Any], filename: Optional[str] = None) -> str:

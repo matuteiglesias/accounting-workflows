@@ -10,6 +10,11 @@ from typing import List, Sequence, Union, Callable, Optional, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
 
+
+# from accounting.utils import resolve_run_id
+
+# rid = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True)
+
 # Frequency normalization map (case-insensitive)
 _FREQ_MAP = {
     "d": "D",
@@ -113,7 +118,7 @@ def aggregate_per_flow(
     df = df.assign(TimePeriod=bins["TimePeriod"].values, TimePeriod_ts_end=bins["TimePeriod_ts_end"].values)
     # group columns
     grp_cols = []
-    for c in ("Flujo", "Tipo", "Currency"):
+    for c in ("Box", "Currency", "Flujo", "Tipo"):
         if c in df.columns:
             grp_cols.append(c)
         else:
@@ -133,7 +138,7 @@ def aggregate_per_flow(
     if "TimePeriod" in agg.columns:
         agg["TimePeriod_ts_end"] = agg["TimePeriod"].apply(lambda p: p.to_timestamp(how="end") if pd.notna(p) else pd.NaT)
     # reorder columns
-    cols = ["TimePeriod", "TimePeriod_ts_end", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
+    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
     return agg[cols]
 
 
@@ -172,6 +177,7 @@ def expand_party_rows(
         base = {
             "tx_id": tx_id,
             "Date": row.get(date_col),
+            "Box": row.get("Box") if "Box" in row.index else pd.NA,
             "Currency": row.get("Currency") if "Currency" in row.index else None,
             "Flujo": row.get("Flujo") if "Flujo" in row.index else None,
             "Tipo": row.get("Tipo") if "Tipo" in row.index else None,
@@ -226,13 +232,17 @@ def aggregate_per_party(
     bins = period_bins_for_dates(df[date_col], freq=freq)
     df = df.assign(TimePeriod=bins["TimePeriod"].values, TimePeriod_ts_end=bins["TimePeriod_ts_end"].values)
     # ensure columns present
-    for c in ("party", "role", "Flujo", "Tipo", "Currency", "tx_id"):
+    for c in ("Box", "party", "Currency", "role", "Flujo", "Tipo", "tx_id"):
         if c not in df.columns:
-            df[c] = "" if c != "tx_id" else pd.NA
+            df[c] = pd.NA
+
+
+
+
     # aggregate
     df["_amt"] = pd.to_numeric(df[amount_col], errors="coerce").fillna(0.0).astype(float)
     
-    group_cols = ["TimePeriod", "party", "Currency", "role", "Flujo", "Tipo"]
+    group_cols = ["TimePeriod", "Box", "party", "Currency", "role", "Flujo", "Tipo"]
 
 
     print(f"check 2B shape {df.shape}, columns: {df.columns}, count: {df.count()}")
@@ -253,7 +263,7 @@ def aggregate_per_party(
 
     agg = df.groupby(group_cols).agg(amount=("_amt", "sum"), n_tx=("tx_id", "nunique")).reset_index()
     agg["TimePeriod_ts_end"] = agg["TimePeriod"].apply(lambda p: p.to_timestamp(how="end") if pd.notna(p) else pd.NaT)
-    cols = ["TimePeriod", "TimePeriod_ts_end", "party", "Currency", "role", "Flujo", "Tipo", "amount", "n_tx"]
+    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "party", "Currency", "role", "Flujo", "Tipo", "amount", "n_tx"]
 
     print(f"check 2C shape {agg.shape}, columns: {agg.columns}")
 
@@ -268,79 +278,59 @@ def aggregate_per_party(
 # -----------------------
 # Daily cash (treasury) position
 # -----------------------
+
 def compute_daily_cash_position(
     ledger_df: pd.DataFrame,
-    opening_balances: Optional[Dict[str, float]] = None,
     freq: str = "D",
     amount_col: str = "amount",
     date_col: str = "Date",
 ) -> pd.DataFrame:
-    """
-    Compute per-party daily cash balances.
-
-    Args:
-      ledger_df: canonical ledger (one row per tx)
-      opening_balances: optional dict mapping party -> opening_balance (float) as of day before earliest tx
-      freq: frequency for date discretization (default daily)
-      amount_col: use 'amount' float (or fallback to 'amount_cents')
-      date_col: column with dates
-
-    Returns a DataFrame:
-      ['Date', 'party', 'balance', 'Currency', 'source_ledger_hash' (None)]
-    where 'balance' is cumulative sum of signed amounts (receiver positive, payer negative) plus opening balance.
-    """
     if date_col not in ledger_df.columns:
         raise KeyError(f"date_col '{date_col}' not present in ledger")
+
     expanded = expand_party_rows(ledger_df, amount_col=amount_col, date_col=date_col)
-    # group by Date and party summing signed_amount
     expanded["Date"] = pd.to_datetime(expanded["Date"], errors="coerce").dt.normalize()
 
+    # Ensure Box exists (and preserve missingness, do NOT invent "")
+    if "Box" not in expanded.columns:
+        expanded["Box"] = pd.NA
+
+    # Net flow per day and key
     daily = (
-        expanded
-        .groupby(["Date", "party", "Currency"], dropna=False)["signed_amount"]
+        expanded.groupby(["Box", "Date", "party", "Currency"], dropna=False)["signed_amount"]
         .sum()
         .reset_index()
-        .rename(columns={"signed_amount":"net_flow"})
+        .rename(columns={"signed_amount": "net_flow"})
     )
-    pairs = daily[["party","Currency"]].dropna().drop_duplicates()
-    
-    # create a complete calendar per party to ensure stable cumulative sums
-    parties = daily["party"].dropna().unique().tolist()
-    if len(parties) == 0:
-        return pd.DataFrame(columns=["Date", "party", "balance", "Currency", "source_ledger_hash"])
+
+    keys = daily[["Box", "party", "Currency"]].drop_duplicates()
+    if keys.empty:
+        return pd.DataFrame(columns=["Date", "Box", "party", "Currency", "balance", "source_ledger_hash"])
+
     min_date = daily["Date"].min()
     max_date = daily["Date"].max()
-    # daily date range
-    drange = pd.date_range(start=min_date, end=max_date, freq=_normalize_freq_token(freq) if freq.lower() in _FREQ_MAP else freq)
+    drange = pd.date_range(
+        start=min_date,
+        end=max_date,
+        freq=_normalize_freq_token(freq) if freq.lower() in _FREQ_MAP else freq,
+    )
 
     frames = []
-    for party, cur in pairs.itertuples(index=False):
-        sub = daily[(daily["party"]==party) & (daily["Currency"]==cur)].set_index("Date").reindex(drange, fill_value=0.0)
+    for box, party, cur in keys.itertuples(index=False):
+        sub = daily[(daily["Box"] == box) & (daily["party"] == party) & (daily["Currency"] == cur)][["Date", "net_flow"]]
+        sub = sub.set_index("Date").reindex(drange, fill_value=0.0)
         sub = sub.rename_axis("Date").reset_index()
+
+        sub["Box"] = box
         sub["party"] = party
-
-
-        # # opening balance
-        # opening = 0.0
-        # if opening_balances and p in opening_balances:
-        #     opening = float(opening_balances[p])
-        # # cumulative sum
-        # sub["balance"] = sub["net_flow"].cumsum() + opening
-
-        # sub["balance"] = sub["net_flow"].cumsum() + opening_for(party, cur)
-        sub["balance"] = sub["net_flow"].cumsum() + 0 # Shortcut, opening = 0
         sub["Currency"] = cur
-        frames.append(sub[["Date","party","Currency","balance"]])
+        sub["balance"] = sub["net_flow"].cumsum()  # opening balance intentionally excluded
+        frames.append(sub[["Date", "Box", "party", "Currency", "balance"]])
 
-
-        # # currency: try to infer most common currency for that party
-        # currencies = expanded[expanded["party"] == p]["Currency"].dropna().astype(str)
-        # cur = currencies.mode().iloc[0] if not currencies.empty else ""
-        # sub["Currency"] = cur
-        # frames.append(sub[["Date", "party", "balance", "Currency"]])
-    result = pd.concat(frames, ignore_index=True).sort_values(["party", "Date"]).reset_index(drop=True)
+    result = pd.concat(frames, ignore_index=True).sort_values(["Box", "party", "Currency", "Date"]).reset_index(drop=True)
     result["source_ledger_hash"] = None
     return result
+
 
 
 # -----------------------

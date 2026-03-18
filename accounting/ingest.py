@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from accounting.core_timeseries import period_bins_for_dates
-
+from accounting.utils import resolve_run_id
 
 LOG = logging.getLogger(__name__)
 
@@ -370,6 +370,9 @@ def _collect_anomalies(df: pd.DataFrame, fx_missing_mask: Optional[pd.Series] = 
 # -----------------------
 # Public API
 # -----------------------
+
+
+
 def build_ledger_base(
     fixture_path: Optional[str] = None,
     sheet_url: Optional[str] = None,
@@ -384,6 +387,9 @@ def build_ledger_base(
     add_time_period: bool = False,
     time_freq: str = "W",
 ) -> pd.DataFrame:
+    # sheet_url="https://docs.google.com/spreadsheets/d/1G92WIwtaayQ0MOSLH3vWph-7PKVseXF4vhiTOi2RVls/edit?gid=1682108108#gid=1682108108"
+
+
     if not fixture_path and not sheet_url:
         fixture_path = os.getenv("FIXTURE") or None
         sheet_url = os.getenv("SHEET_URL") or os.getenv("ACCOUNT_SHEET_URL") or None
@@ -534,6 +540,10 @@ def _parse_list_arg(s: str) -> Optional[List[str]]:
     return parts or None
 
 
+
+
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -582,7 +592,8 @@ def main() -> int:
             path=ledger_path,
             stage="A.ingest",
             mode=args.mode,
-            run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+            # run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+            run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True),
             role="output",
             root_dir=out_dir,
             content_type="text/csv",
@@ -596,7 +607,8 @@ def main() -> int:
                     path=(out_dir / "anomalies.csv"),
                     stage="A.ingest",
                     mode=args.mode,
-                    run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+                    # run_id=(args.run_id or "smoke" if args.mode == "smoke" else ""),
+                    run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True),
                     role="derived",
                     root_dir=out_dir,
                     content_type="text/csv",

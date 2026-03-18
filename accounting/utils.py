@@ -9,7 +9,91 @@ import logging
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# Reuires gspread
+
+
+# def _resolve_run_id(args: argparse.Namespace) -> str:
+#     if args.run_id:
+#         return str(args.run_id)
+#     return "smoke" if args.mode == "smoke" else ""
+
+
+
+# def _resolve_run_id(mode: str, run_id: str) -> str:
+#     rid = str(run_id or "").strip()
+#     if rid:
+#         return rid
+#     return "smoke" if str(mode).strip().lower() == "smoke" else ""
+
+ 
+
+# import os
+import re
+# from pathlib import Path
+from typing import Optional, Union
+
+_RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z$")  # e.g. 20260109T142110Z
+
+def _infer_run_id_from_path(root_dir: Union[str, Path]) -> Optional[str]:
+    """
+    Scan the directory and its parents for a folder name that looks like a RUN_ID.
+    This lets stages infer run_id when orchestrator didn't pass --run-id.
+    """
+    p = Path(root_dir).resolve()
+    for cand in [p, *p.parents]:
+        name = cand.name.strip()
+        if _RUN_ID_RE.match(name):
+            return name
+    return None
+
+def resolve_run_id(
+    *,
+    mode: str,
+    run_id: Optional[str] = None,
+    root_dir: Optional[Union[str, Path]] = None,
+    env_var: str = "RUN_ID",
+    strict: bool = True,
+) -> str:
+    """
+    Canonical RUN_ID resolution.
+
+    Precedence:
+      1) explicit run_id argument
+      2) environment variable RUN_ID (configurable)
+      3) infer from root_dir (or its parents)
+      4) if mode == smoke -> "smoke"
+      5) else: error (strict) or fallback "untracked"
+
+    In run mode, returning "" is forbidden.
+    """
+    m = (mode or "").strip().lower()
+
+    rid = (run_id or "").strip()
+    if rid and rid.lower() != "none":
+        return rid
+
+    env_rid = (os.getenv(env_var) or "").strip()
+    if env_rid:
+        return env_rid
+
+    if root_dir is not None:
+        inferred = _infer_run_id_from_path(root_dir)
+        if inferred:
+            return inferred
+
+    if m == "smoke":
+        return "smoke"
+
+    if strict:
+        raise ValueError(
+            "run_id missing for non-smoke run. "
+            "Pass --run-id, set RUN_ID, or run inside out/run/accounting/<RUN_ID>/"
+        )
+    return "untracked"
+
+
+
+
+# Requires gspread
 
 def sha256_file(path: Path) -> str:
     """Return sha256 hex digest for given file path."""
@@ -42,21 +126,68 @@ def _read_csv_if_exists(p: Path, **kwargs) -> pd.DataFrame:
         return pd.DataFrame()
     return pd.read_csv(p, low_memory=False, **kwargs)
 
-def _normalize_currency_col(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure a canonical 'currency' column (uppercase, 'NA' for missing).
-    Avoid creating multiple columns; always set 'currency' lowercase.
-    """
+
+# accounting/utils.py
+import pandas as pd
+
+def _normalize_currency_col(
+    df: pd.DataFrame,
+    *,
+    allow_missing: bool = False,
+    out_col: str = "Currency",
+) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
-    # accept 'Currency' or 'currency' or none
-    if "currency" in df.columns:
-        df["currency"] = df["currency"].astype(str).str.upper().fillna("NA").replace({"NAN": "NA"})
-    elif "Currency" in df.columns:
-        df["currency"] = df["Currency"].astype(str).str.upper().fillna("NA").replace({"NAN": "NA"})
+
+    out = df.copy()
+    if out_col in out.columns:
+        col = out_col
+    elif "currency" in out.columns:
+        out = out.rename(columns={"currency": out_col})
+        col = out_col
     else:
-        df["currency"] = "NA"
-    return df
+        # if allow_missing:
+        out[out_col] = pd.NA
+        return out
+        # raise KeyError(f"Missing required column '{out_col}' (or alias 'currency')")
+
+    s = out[col].astype("string").str.strip().str.upper()
+    s = s.replace({"": pd.NA, "NAN": pd.NA, "NA": pd.NA})
+    out[col] = s
+    return out
+
+def require_currency(df: pd.DataFrame, *, name: str, col: str = "Currency") -> pd.DataFrame:
+    out = _normalize_currency_col(df, allow_missing=False, out_col=col)
+    if out[col].isna().any():
+        # raise ValueError(f"{name} has null/empty values in '{col}'")
+        print(f"{name} has {str(out[col].isna().sum())} null/empty values in '{col}'")
+    return out
+
+
+
+
+
+# def _require_currency(df: pd.DataFrame, name: str) -> pd.DataFrame:
+#     """
+#     Enforce that a canonical `Currency` column exists, is non-null, and non-empty after normalization.
+#     This intentionally fails fast instead of patching.
+#     """
+#     out = _normalize_currency_col(df.copy())
+#     if "Currency" not in out.columns:
+#         raise KeyError(f"{name} missing required column 'Currency' after normalization")
+
+#     cur = out["Currency"]
+#     if cur.isna().any():
+#         raise ValueError(f"{name} has null values in 'Currency'")
+
+#     # Reject empty/blank strings (common leak path)
+#     cur_str = cur.astype(str).str.strip()
+#     if (cur_str == "").any():
+#         raise ValueError(f"{name} has blank/empty values in 'Currency'")
+
+#     out["Currency"] = cur_str
+#     return out
+
 
 
 def _ensure_amount(df: pd.DataFrame, amount_cols=("amount","signed_amount","_amt","Monto")) -> pd.DataFrame:

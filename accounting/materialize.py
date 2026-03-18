@@ -25,6 +25,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
+from accounting.utils import resolve_run_id
+
 from accounting.core_timeseries import (
     aggregate_per_flow,
     aggregate_per_party,
@@ -130,8 +132,12 @@ def materialize_per_flow(
     if "TimePeriod_ts_end" in df.columns:
         df["TimePeriod_ts_end"] = pd.to_datetime(df["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
 
-    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Flujo", "Tipo", "Currency", "amount", "n_tx"]
-    out_df = df[[c for c in cols if c in df.columns]].copy()
+    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Currency", "Flujo", "Tipo", "amount", "n_tx"]
+    missing_cols = [c for c in cols if c not in df.columns]
+    if missing_cols:
+        raise KeyError(f"per_flow_time_long missing columns from aggregate_per_flow: {missing_cols}. "
+                       f"Available={list(df.columns)}")
+    out_df = df[cols].copy()
 
     _atomic_write_csv(out_df, target)
     LOG.info("Wrote per_flow rows=%d -> %s", len(out_df), target)
@@ -170,10 +176,14 @@ def materialize_per_party(
     if "TimePeriod" in agg.columns:
         agg["TimePeriod"] = agg["TimePeriod"].astype(str)
     if "TimePeriod_ts_end" in agg.columns:
-        agg["TimePeriod_ts_end"] = pd.to_datetime(agg["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
+        agg["TimePeriod_end"] = pd.to_datetime(agg["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
 
-    cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "Flujo", "Tipo", "party", "role", "Currency", "amount", "n_tx"]
-    out_df = agg[[c for c in cols if c in agg.columns]].copy()
+    cols = ["TimePeriod", "TimePeriod_end", "Box", "Currency", "party", "role", "Flujo", "Tipo", "amount", "n_tx"]
+    missing_cols = [c for c in cols if c not in agg.columns]
+    if missing_cols:
+        raise KeyError(f"per_party_time_long missing columns from aggregate_per_party: {missing_cols}. "
+                       f"Available={list(agg.columns)}")
+    out_df = agg[cols].copy()
 
     _atomic_write_csv(out_df, target)
     LOG.info("Wrote per_party rows=%d -> %s", len(out_df), target)
@@ -181,37 +191,41 @@ def materialize_per_party(
 
 
 def materialize_daily_cash(
-    ledger: pd.DataFrame, out_dir: Path, as_of: Optional[pd.Timestamp] = None, force: bool = False
+    ledger: pd.DataFrame,
+    out_dir: Path,
+    as_of: Optional[pd.Timestamp] = None,
+    force: bool = False,
 ) -> Tuple[pd.DataFrame, Path]:
-    """
-    Produce daily_cash_position.csv. If as_of is provided, produce snapshot up to that date;
-    otherwise produce full daily series for the ledger range.
-    """
     _ = force
     ledger = _ensure_amount_float(ledger)
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / "daily_cash_position.csv"
 
     LOG.info("Materializing daily cash position -> %s", target)
-    df = compute_daily_cash_position(ledger, opening_balances=None, freq="D", amount_col="amount", date_col="Date")
+
+    df = compute_daily_cash_position(ledger, freq="D", amount_col="amount", date_col="Date")
 
     if as_of is not None:
         asof_date = pd.to_datetime(as_of).date()
         df = df[pd.to_datetime(df["Date"]).dt.date <= asof_date].copy()
 
-    if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date.astype(str)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date.astype(str)
 
-    out_df = (
-        df[["Date", "Box", "party", "balance", "Currency", "source_ledger_hash"]]
-        if all(c in df.columns for c in ["Date", "Box", "party", "balance", "Currency", "source_ledger_hash"])
-        else df.copy()
-    )
+    required = ["Date", "Box", "party", "Currency", "balance"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise KeyError(f"daily_cash_position missing columns: {missing}")
 
+    out_df = df[required].copy()
+    # Keep provenance hash if available (optional)
+    if "source_ledger_hash" in df.columns:
+        out_df["source_ledger_hash"] = df["source_ledger_hash"]
     _atomic_write_csv(out_df, target)
     LOG.info("Wrote daily_cash rows=%d -> %s", len(out_df), target)
     return out_df, target
+
 
 import re
 
@@ -242,13 +256,13 @@ def materialize_box_balance_time_long(
     Produce box_balance_time_long.freq=<freq>.csv
 
     Output columns:
-      TimePeriod, Date_end, Box, currency, in_amt, out_amt, net, cum_net
+      TimePeriod, TimePeriod_end, Box, Currency, in_amt, out_amt, net, cum_net
 
     Semántica:
       - in_amt: suma de amount donde receiver == BoxParty
       - out_amt: suma de amount donde payer == BoxParty
       - net = in_amt - out_amt
-      - cum_net: cumsum(net) por (Box, currency) ordenado por Date_end
+      - cum_net: cumsum(net) por (Box, Currency) ordenado por TimePeriod_end
     """
     _ = force
     ledger = _ensure_amount_float(ledger)
@@ -259,8 +273,8 @@ def materialize_box_balance_time_long(
 
     # Normalizar nombres de columnas
     ldf = ledger.copy()
-    if "Currency" not in ldf.columns and "currency" in ldf.columns:
-        ldf = ldf.rename(columns={"currency": "Currency"})
+    # if "Currency" not in ldf.columns and "currency" in ldf.columns:
+    #     ldf = ldf.rename(columns={"currency": "Currency"})
     if "amount" not in ldf.columns and "monto" in ldf.columns:
         ldf = ldf.rename(columns={"monto": "amount"})
 
@@ -269,9 +283,20 @@ def materialize_box_balance_time_long(
     if missing:
         raise ValueError(f"materialize_box_balance_time_long: ledger missing required columns: {missing}")
 
-    # BoxParty: prefer explícito
-    if "BoxParty" not in ldf.columns:
-        ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+
+    # # BoxParty is required to compute box-level motor flows correctly.
+    # # We allow an explicit, opt-in fallback heuristic only for transition periods.
+    # if "BoxParty" not in ldf.columns:
+    #     if str(os.getenv("BOXPARTY_FALLBACK", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}:
+    #         LOG.warning("BOXPARTY_FALLBACK enabled: inferring BoxParty from Box names. This is not decision-grade.")
+    #         ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    #     else:
+    #         raise ValueError(
+    #             "materialize_box_balance_time_long requires column 'BoxParty' in ledger. "
+    #             "Add it upstream (ingest / canonical mapping). "
+    #             "If you must use a heuristic temporarily, set BOXPARTY_FALLBACK=1."
+    #         )
 
     # Parseos
     ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce")
@@ -309,7 +334,7 @@ def materialize_box_balance_time_long(
         raise ValueError(f"materialize_box_balance_time_long: invalid freq={freq!r}: {e}")
 
     ldf["TimePeriod"] = period.astype(str)
-    ldf["Date_end"] = period.dt.end_time.dt.date.astype(str)
+    ldf["TimePeriod_end"] = period.dt.end_time.dt.date.astype(str)
 
     # Flujos
     ldf["in_amt"] = ldf["amount"].where(in_mask, 0.0)
@@ -317,21 +342,129 @@ def materialize_box_balance_time_long(
     ldf["net"] = ldf["in_amt"] - ldf["out_amt"]
 
     agg = (
-        ldf.groupby(["TimePeriod", "Date_end", "Box", "Currency"], as_index=False)[["in_amt", "out_amt", "net"]]
+        ldf.groupby(["TimePeriod", "TimePeriod_end", "Box", "Currency"], as_index=False)[["in_amt", "out_amt", "net"]]
         .sum()
-        .sort_values(["Box", "Currency", "Date_end", "TimePeriod"])
+        .sort_values(["Box", "Currency", "TimePeriod_end", "TimePeriod"])
         .reset_index(drop=True)
     )
     agg["cum_net"] = agg.groupby(["Box", "Currency"])["net"].cumsum()
 
-    out_df = agg.rename(columns={"Currency": "currency"})[
-        ["TimePeriod", "Date_end", "Box", "currency", "in_amt", "out_amt", "net", "cum_net"]
+    out_df = agg[["TimePeriod", "TimePeriod_end", "Box", "Currency", "in_amt", "out_amt", "net", "cum_net"]
     ].copy()
 
     _atomic_write_csv(out_df, target)
     LOG.info("Wrote box_balance rows=%d -> %s", len(out_df), target)
     return out_df, target
 
+
+BOXPARTY_FALLBACK=1
+
+def materialize_box_flow_balance_time_long(
+    ledger: pd.DataFrame, out_dir: Path, freq: str = "W", force: bool = False
+) -> Tuple[pd.DataFrame, Path]:
+    """
+    Produce box_flow_balance_time_long.freq=<freq>.csv
+
+    This is a generic, narrative-agnostic decomposition of the Box motor by (Flujo, Tipo).
+
+    Grain:
+      TimePeriod, TimePeriod_end, Box, Currency, Flujo, Tipo
+
+    Measures:
+      in_amt, out_amt, net, n_tx
+
+    Semantics:
+      - in_amt: sum(amount) where receiver == BoxParty
+      - out_amt: sum(amount) where payer == BoxParty
+      - net = in_amt - out_amt
+      - n_tx: count of ledger rows contributing to the group (after BoxParty match filter)
+    """
+    _ = force
+    ledger = _ensure_amount_float(ledger)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"box_flow_balance_time_long.freq={freq}.csv"
+
+    ldf = ledger.copy()
+    if "amount" not in ldf.columns and "monto" in ldf.columns:
+        ldf = ldf.rename(columns={"monto": "amount"})
+
+    required = ["Date", "amount", "Currency", "Box", "payer", "receiver", "Flujo", "Tipo"]
+    missing = [c for c in required if c not in ldf.columns]
+    if missing:
+        raise ValueError(f"materialize_box_flow_balance_time_long: ledger missing required columns: {missing}")
+
+    ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+
+    # # BoxParty required (opt-in heuristic fallback only)
+    # if "BoxParty" not in ldf.columns:
+    #     if str(os.getenv("BOXPARTY_FALLBACK", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}:
+    #         LOG.warning("BOXPARTY_FALLBACK enabled: inferring BoxParty from Box names. This is not decision-grade.")
+    #         ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    #     else:
+    #         raise ValueError(
+    #             "materialize_box_flow_balance_time_long requires column 'BoxParty' in ledger. "
+    #             "Add it upstream (ingest / canonical mapping). "
+    #             "If you must use a heuristic temporarily, set BOXPARTY_FALLBACK=1."
+    #         )
+
+    # Parse/coerce
+    ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce")
+    ldf = ldf[~ldf["Date"].isna()].copy()
+    ldf["amount"] = pd.to_numeric(ldf["amount"], errors="coerce")
+    ldf = ldf[~ldf["amount"].isna()].copy()
+
+    # Normalize strings for matching
+    payer = ldf["payer"].astype("string").str.strip().str.upper()
+    receiver = ldf["receiver"].astype("string").str.strip().str.upper()
+    box_party = ldf["BoxParty"].astype("string").str.strip().str.upper()
+
+    in_mask = receiver == box_party
+    out_mask = payer == box_party
+
+    unmatched = ~(in_mask | out_mask)
+    if unmatched.any():
+        LOG.warning(
+            "box_flow_balance: %d row(s) where BoxParty not in payer/receiver. Dropping them from box_flow_balance.",
+            int(unmatched.sum()),
+        )
+        ldf = ldf.loc[~unmatched].copy()
+        payer = payer.loc[~unmatched]
+        receiver = receiver.loc[~unmatched]
+        box_party = box_party.loc[~unmatched]
+        in_mask = receiver == box_party
+        out_mask = payer == box_party
+
+    # Periodization
+    try:
+        period = ldf["Date"].dt.to_period(freq)
+    except Exception as e:
+        raise ValueError(f"materialize_box_flow_balance_time_long: invalid freq={freq!r}: {e}")
+
+    ldf["TimePeriod"] = period.astype(str)
+    ldf["TimePeriod_end"] = period.dt.end_time.dt.date.astype(str)
+
+    # Motor flows per row
+    ldf["in_amt"] = ldf["amount"].where(in_mask, 0.0)
+    ldf["out_amt"] = ldf["amount"].where(out_mask, 0.0)
+    ldf["net"] = ldf["in_amt"] - ldf["out_amt"]
+    ldf["n_tx"] = 1
+
+    agg = (
+        ldf.groupby(["TimePeriod", "TimePeriod_end", "Box", "Currency", "Flujo", "Tipo"], as_index=False)[
+            ["in_amt", "out_amt", "net", "n_tx"]
+        ]
+        .sum()
+        .sort_values(["Box", "Currency", "TimePeriod_end", "TimePeriod", "Flujo", "Tipo"])
+        .reset_index(drop=True)
+    )
+
+    out_df = agg[["TimePeriod", "TimePeriod_end", "Box", "Currency", "Flujo", "Tipo", "in_amt", "out_amt", "net", "n_tx"]].copy()
+
+    _atomic_write_csv(out_df, target)
+    LOG.info("Wrote box_flow_balance rows=%d -> %s", len(out_df), target)
+    return out_df, target
 
 
 def materialize_loans(
@@ -383,8 +516,11 @@ def materialize_all(
       Outputs:
         - per_flow_time_long.freq=<freq>.csv
         - per_party_time_long.freq=<freq>.csv
+        - box_balance_time_long.freq=<freq>.csv
+        - box_flow_balance_time_long.freq=<freq>.csv
         - loans_time.freq=M.csv              (loans are always monthly)
         - daily_cash_position.csv
+
         - partitions.json                    (light metadata)
 
     Returns a dict with aggregate metadata (does NOT write a stage manifest file).
@@ -437,13 +573,21 @@ def materialize_all(
 
 
 
-    # 2.5) box balance
+    # 2.5) box balance (Box motor)
     try:
         bb_df, bb_path = materialize_box_balance_time_long(ledger_df, out_dir, freq=freq, force=force)
         aggregates[bb_path.name] = {"path": str(bb_path), "rows": len(bb_df), "sha256": _sha256_file(bb_path)}
     except Exception:
         LOG.exception("Failed materialize_box_balance_time_long")
         aggregates["box_balance_failed"] = {"error": "failed"}
+
+    # 2.6) box flow balance (motor decomposition by Flujo/Tipo)
+    try:
+        bfb_df, bfb_path = materialize_box_flow_balance_time_long(ledger_df, out_dir, freq=freq, force=force)
+        aggregates[bfb_path.name] = {"path": str(bfb_path), "rows": len(bfb_df), "sha256": _sha256_file(bfb_path)}
+    except Exception:
+        LOG.exception("Failed materialize_box_flow_balance_time_long")
+        aggregates["box_flow_balance_failed"] = {"error": "failed"}
 
 
 
@@ -514,12 +658,6 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _resolve_run_id(args: argparse.Namespace) -> str:
-    if args.run_id:
-        return str(args.run_id)
-    return "smoke" if args.mode == "smoke" else ""
-
-
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -556,7 +694,8 @@ def main() -> int:
 
     freq = args.freq or os.getenv("FREQ", "W")
     force_flag = bool(int(str(args.force)))
-    run_id = _resolve_run_id(args)
+    # run_id = _resolve_run_id(args)
+    run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True)
 
     # run materialization (no stage-manifest written here)
     result = materialize_all(ledger, out_dir=out_dir, freq=freq, force=force_flag)
@@ -629,7 +768,21 @@ def main() -> int:
             )
         )
 
-
+    # Box motor decomposition by (Flujo, Tipo)
+    box_flow_balance = out_dir / f"box_flow_balance_time_long.freq={freq}.csv"
+    if box_flow_balance.exists():
+        out_arts.append(
+            artifact_from_path(
+                name="box_flow_balance_time_long",
+                path=box_flow_balance,
+                stage="D.materialize",
+                mode=args.mode,
+                run_id=run_id,
+                role="derived",
+                root_dir=out_dir,
+                content_type="text/csv",
+            )
+        )
 
     loans = out_dir / "loans_time.freq=M.csv"
     if loans.exists():
