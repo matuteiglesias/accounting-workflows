@@ -69,6 +69,7 @@ RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 RUN_BASE := $(OUT)/run/accounting
 
 RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)
+RUN_REL   := $(notdir $(RUN_OUT))
 # Per-run out dir (you probably already have this, keep your existing one)
 # RUN_OUT := $(RUN_BASE)/$(RUN_RUN_ID)
 
@@ -98,7 +99,7 @@ RUN_REL := $(notdir $(RUN_OUT))
 
 .PHONY: _update_latest
 _update_latest:
-	@echo "[RUN][LATEST] run=$(RUN_RUN_ID)"
+	@echo "[RUN][LATEST] run=$(RUN_REL)"
 	@bash -eu -o pipefail -c '\
 		link_swap () { \
 			base="$$1"; \
@@ -460,7 +461,7 @@ _check_views:
 smoke: smoke-accounting
 run: run-accounting
 run-all: run-accounting
-	@echo "[RUN] done. latest -> $(RUN_RUN_ID)"
+	@echo "[RUN] done. latest -> $(RUN_REL)"
 
 
 # ----------------------------------------
