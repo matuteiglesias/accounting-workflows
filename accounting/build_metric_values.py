@@ -7,6 +7,8 @@ from typing import Optional
 
 import pandas as pd
 
+from accounting.logging_utils import configure_logging, get_logger
+
 from .metrics_builders import run_leaf_builders
 from .metrics_derive import derive_default_v1
 from .metrics_io import MetricsContext, ensure_metric_values_schema, write_table
@@ -23,6 +25,8 @@ from .metrics_views import (
 
 METRIC_VALUES_FILENAME = "metric_values.csv"
 METRIC_REGISTRY_FILENAME = "metric_registry.csv"
+
+LOG = get_logger("metrics")
 VALIDATION_REPORT_FILENAME = "validation_report.csv"
 BUILD_MANIFEST_FILENAME = "build_manifest.json"
 METRIC_VIEWS_DIRNAME = "metric_views"
@@ -223,6 +227,7 @@ def build_metric_view_exports(
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description="Build metric_values from accounting artifacts.")
     parser.add_argument(
         "--run-root",
@@ -262,6 +267,8 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    LOG.info("Stage start run_root=%s out_dir=%s months=%s", run_root, out_dir, args.months)
+
     registry = registry_from_specs(default_metric_specs_v1())
     ctx = load_context(run_root=run_root, run_id=run_id, as_of_date=args.as_of_date)
 
@@ -280,6 +287,7 @@ def main() -> None:
         metric_values.to_parquet(out_dir / "metric_values.parquet", index=False)
     except Exception as e:
         (out_dir / "parquet_error.txt").write_text(str(e), encoding="utf-8")
+        LOG.warning("Optional parquet export failed: %s", e)
 
     build_wide_views(metric_values, out_dir)
     build_statement_views(metric_values, out_dir)
@@ -317,16 +325,13 @@ def main() -> None:
         noise_floor_by_currency=noise_floor_by_currency,
     )
 
-    print("\n=== BUILD COMPLETE ===")
-    print("run_root:", run_root)
-    print("run_id:", run_id)
-    print("out_dir:", out_dir)
-    print("registry rows:", len(registry))
-    print("metric_values rows:", len(metric_values))
-    print("validation rows:", len(validation))
     if not validation.empty:
-        print("\n=== VALIDATION ===")
-        print(validation.to_string(index=False))
+        level_counts = validation.get("level", pd.Series(dtype="object")).fillna("UNKNOWN").astype(str).value_counts().to_dict()
+        LOG.warning("Validation report has rows=%d levels=%s artifact=%s", len(validation), level_counts, out_dir / VALIDATION_REPORT_FILENAME)
+    else:
+        LOG.info("Validation report clean artifact=%s", out_dir / VALIDATION_REPORT_FILENAME)
+
+    LOG.info("Stage finish run_id=%s registry_rows=%d metric_values_rows=%d validation_rows=%d manifest=%s", run_id, len(registry), len(metric_values), len(validation), out_dir / BUILD_MANIFEST_FILENAME)
 
 
 if __name__ == "__main__":

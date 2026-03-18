@@ -9,6 +9,7 @@ from typing import Dict, Optional, List, Any, Tuple
 
 import pandas as pd
 
+from accounting.logging_utils import configure_logging, get_logger
 from accounting.utils import atomic_write_df
 from accounting.utils import (
     _read_csv_if_exists,
@@ -50,7 +51,7 @@ _BOX_FLOW_BALANCE_PATTERNS = [
 _DAILY_CASH_FN = "daily_cash_position.csv"
 _MANIFEST_FN = "manifest.json"
 
-LOG = logging.getLogger(__name__)
+LOG = get_logger("views")
 
 def _legacy_zero_sum_outputs_enabled() -> bool:
     return str(os.getenv("KEEP_LEGACY_ZERO_SUM_OUTPUTS", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}
@@ -952,10 +953,13 @@ def _parse_args(argv=None):
 
 
 def main(argv=None) -> int:
+    configure_logging()
     args = _parse_args(argv)
 
     reports_dir = Path(args.reports_dir)
     write_dir = Path(args.write_dir)
+
+    LOG.info("Stage start mode=%s reports_dir=%s write_dir=%s freq=%s", args.mode, reports_dir, write_dir, args.freq)
 
     out = export_views(
         reports_dir,
@@ -1095,7 +1099,7 @@ def main(argv=None) -> int:
     except Exception:
         LOG.exception("Views manifest write failed (non-fatal)")
 
-    print(json.dumps(out, indent=2))
+    LOG.info("Stage finish outputs=%s", json.dumps(out, ensure_ascii=False, sort_keys=True))
     return 0
 
 

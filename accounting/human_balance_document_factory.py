@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from accounting.logging_utils import configure_logging, get_logger
+
 from accounting.build_metric_values import METRIC_VIEWS_DIRNAME, REQUIRED_METRIC_VIEW_FILES
 from accounting.metrics_views import parse_noise_floor
 
@@ -68,6 +70,8 @@ p { line-height: 1.45; color: var(--muted); }
 
 DEFAULT_NOISE_FLOOR = {"ARS": 5000.0, "USD": 10.0}
 DEFAULT_INCLUDE_STATUSES = ("pagado",)
+
+LOG = get_logger("human_balance")
 
 
 def _now_iso() -> str:
@@ -455,6 +459,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    configure_logging()
     args = parse_args()
     metrics_dir = Path(args.metrics_dir)
     write_dir = Path(args.write_dir)
@@ -463,8 +468,9 @@ def main() -> None:
     noise_floor_by_currency = parse_noise_floor(args.noise_floor)
     flow_rollup_groupby = [x.strip() for x in args.flow_rollup_groupby.split(",") if x.strip()]
 
+    LOG.info("Stage start run_root=%s metrics_dir=%s write_dir=%s months=%s", run_root, metrics_dir, write_dir, args.months)
+
     # ensure_metrics_exist(metrics_dir=metrics_dir, run_root=run_root, as_of_date=args.as_of_date)
-    arts = read_metrics_artifacts(metrics_dir)
     # inferred_run_root = _infer_run_root(arts["manifest"], run_root)
     inferred_run_root = Path(args.run_root)
 
@@ -480,12 +486,7 @@ def main() -> None:
         noise_floor_by_currency=noise_floor_by_currency,
     )
 
-    print("=== BUILD COMPLETE ===")
-    print("metrics_dir:", metrics_dir)
-    print("run_root:", inferred_run_root)
-    print("write_dir:", write_dir)
-    print("story_manifest:", write_dir / "story_manifest.json")
-    print("standalone_html:", write_dir / "balance_humano_v2.html")
+    LOG.info("Stage finish story_manifest=%s standalone_html=%s", write_dir / "story_manifest.json", write_dir / "balance_humano_v2.html")
 
 
 if __name__ == "__main__":

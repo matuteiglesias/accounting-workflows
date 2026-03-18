@@ -8,6 +8,8 @@ They prefer 'amount' (float) but accept 'amount_cents' when available.
 from __future__ import annotations
 from typing import List, Sequence, Union, Callable, Optional, Dict, Any, Tuple
 import pandas as pd
+
+from accounting.logging_utils import get_logger
 import numpy as np
 
 
@@ -207,6 +209,8 @@ def expand_party_rows(
         out = out.sort_values(["source_file", "source_row", "tx_id", "role"], na_position="last").reset_index(drop=True)
     return out
 
+LOG = get_logger("core_timeseries")
+
 
 def aggregate_per_party(
     expanded_df: pd.DataFrame,
@@ -225,7 +229,7 @@ def aggregate_per_party(
         raise KeyError(f"date_col '{date_col}' not present in expanded_df")
     df = expanded_df.copy()
 
-    print(f"check 2A shape {df.shape}, columns: {df.columns}")
+    LOG.debug("aggregate_per_party input rows=%d cols=%s", len(df), list(df.columns))
 
 
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -245,32 +249,18 @@ def aggregate_per_party(
     group_cols = ["TimePeriod", "Box", "party", "Currency", "role", "Flujo", "Tipo"]
 
 
-    print(f"check 2B shape {df.shape}, columns: {df.columns}, count: {df.count()}")
+    LOG.debug("aggregate_per_party prepared rows=%d group_cols=%s", len(df), group_cols)
 
-    # which grouping columns actually exist?
-    for c in group_cols:
-        exists = c in df.columns
-        print(f"col {c}: exists={exists}", end="")
-        if exists:
-            nulls = df[c].isna().sum()
-            nunique = df[c].nunique(dropna=True)
-            dtype = df[c].dtype
-            sample = df[c].dropna().unique()[:5].tolist()
-            print(f", nulls={nulls}, nunique={nunique}, dtype={dtype}, sample={sample}")
-        else:
-            print()
-            
 
     agg = df.groupby(group_cols).agg(amount=("_amt", "sum"), n_tx=("tx_id", "nunique")).reset_index()
     agg["TimePeriod_ts_end"] = agg["TimePeriod"].apply(lambda p: p.to_timestamp(how="end") if pd.notna(p) else pd.NaT)
     cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "party", "Currency", "role", "Flujo", "Tipo", "amount", "n_tx"]
 
-    print(f"check 2C shape {agg.shape}, columns: {agg.columns}")
+    LOG.debug("aggregate_per_party aggregated rows=%d", len(agg))
 
     out = agg[cols]
 
-    print(f"check 2D shape {out.shape}, columns: {out.columns}")
-
+    LOG.debug("aggregate_per_party output rows=%d cols=%s", len(out), list(out.columns))
 
     return out
 

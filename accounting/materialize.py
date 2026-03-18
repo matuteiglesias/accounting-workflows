@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
+from accounting.logging_utils import configure_logging, get_logger
 from accounting.utils import resolve_run_id
 
 from accounting.core_timeseries import (
@@ -35,7 +36,7 @@ from accounting.core_timeseries import (
     expand_party_rows,
 )
 
-LOG = logging.getLogger(__name__)
+LOG = get_logger("materialize")
 
 
 def _materialize_debug_enabled() -> bool:
@@ -659,15 +660,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    configure_logging()
 
     args = parse_args()
     out_dir = Path(args.out_dir)
     ledger_path = out_dir / "ledger_canonical.csv"
+    LOG.info("Stage start mode=%s out_dir=%s freq=%s", args.mode, out_dir, args.freq)
     if not ledger_path.exists():
         LOG.error("ledger_canonical.csv not found at %s", ledger_path)
         return 2
@@ -699,6 +697,7 @@ def main() -> int:
 
     # run materialization (no stage-manifest written here)
     result = materialize_all(ledger, out_dir=out_dir, freq=freq, force=force_flag)
+    aggregate_rows = {k: v.get("rows") for k, v in result.get("aggregates", {}).items() if isinstance(v, dict) and "rows" in v}
 
     meta_dir = out_dir / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
@@ -891,6 +890,7 @@ def main() -> int:
     }
 
     append_artifacts(meta_dir, [in_art, *out_arts, stage_meta_art])
+    LOG.info("Stage finish outputs=%s partitions=%s", aggregate_rows, result.get("partitions_path"))
     return 0
 
 
