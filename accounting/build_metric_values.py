@@ -9,6 +9,7 @@ import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
 
+from .metric_drilldown import build_metric_drilldown_artifacts
 from .metrics_builders import run_leaf_builders
 from .metrics_derive import derive_default_v1
 from .metrics_io import MetricsContext, ensure_metric_values_schema, write_table
@@ -323,6 +324,13 @@ def main() -> None:
         flow_rollup_groupby=flow_rollup_groupby,
         include_statuses=include_statuses,
         noise_floor_by_currency=noise_floor_by_currency,
+    )
+
+    build_metric_drilldown_artifacts(
+        run_root=run_root,
+        out_dir=out_dir,
+        run_id=run_id,
+        include_statuses=include_statuses,
     )
 
     if not validation.empty:
