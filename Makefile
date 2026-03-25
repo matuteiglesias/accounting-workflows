@@ -136,6 +136,10 @@ help:
 	@echo "  make run-metrics"
 	@echo "  make run-human-balance"
 	@echo "  make run-accounting           # wrapper for the official full path above"
+	@echo "  make run-accounting-full      # explicit full chain alias"
+	@echo "  make run-downstream-from-ledger # materialize -> views -> metrics -> human (reuse existing ledger_canonical.csv)"
+	@echo "  make run-metrics-and-human    # metrics -> human (reuse existing views)"
+	@echo "  make run-human-balance-only   # human balance only (reuse existing metrics)"
 	@echo "  make smoke-accounting         # fixture path through views only"
 	@echo ""
 	@echo "Per-step targets:"
@@ -151,9 +155,29 @@ help:
 # ----------------------------------------
 # Meta targets
 # ----------------------------------------
-.PHONY: smoke-accounting run-accounting
+.PHONY: smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
 smoke-accounting: smoke-views
-run-accounting: run-human-balance
+run-accounting: run-accounting-full
+run-accounting-full: run-human-balance
+
+run-downstream-from-ledger:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT). Run make run-ingest first or point RUN_STAMP to an existing run."; exit 2)
+	@$(MAKE) _run_materialize_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
+	@$(MAKE) _run_views_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
+	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+
+run-metrics-and-human:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY). Run make run-views first or point RUN_STAMP to an existing run."; exit 2)
+	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+
+run-human-balance-only:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR). Run make run-metrics first or point RUN_STAMP to an existing run."; exit 2)
+	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
 # ========================================
 # SMOKE MODE
@@ -219,9 +243,12 @@ run-ingest:
 		--sheet-name "$(ACCOUNT_SHEET_NAME)"
 	@$(MAKE) _check_ingest OUT_DIR="$(RUN_OUT)" MODE="run"
 
-.PHONY: run-materialize
-run-materialize: run-ingest
+.PHONY: run-materialize _run_materialize_action
+run-materialize: run-ingest _run_materialize_action
+
+_run_materialize_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT)"; exit 2)
 	@$(PY) -m accounting.materialize \
 		--out-dir "$(RUN_OUT)" \
 		--freq "$(FREQ)" \
@@ -230,9 +257,12 @@ run-materialize: run-ingest
 		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 
-.PHONY: run-views
-run-views: run-materialize
+.PHONY: run-views _run_views_action
+run-views: run-materialize _run_views_action
+
+_run_views_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_OUT)/per_flow_time_long.freq=$(FREQ).csv" || (echo "ERROR: missing materialized outputs at $(RUN_OUT). Run make run-materialize first or use run-downstream-from-ledger."; exit 2)
 	@mkdir -p "$(RUN_VIEWS_DIR)"
 	@mkdir -p "$(RUN_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
 	@$(PY) -m accounting.views \
@@ -250,9 +280,12 @@ run-views: run-materialize
 	@$(call _check_views_sanity,$(RUN_VIEWS_SANITY))
 	@$(MAKE) _check_views OUT_DIR="$(RUN_OUT)" MODE="run"
 
-.PHONY: run-metrics
-run-metrics: run-views
+.PHONY: run-metrics _run_metrics_action
+run-metrics: run-views _run_metrics_action
+
+_run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY)"; exit 2)
 	@mkdir -p "$(RUN_METRICS_DIR)"
 	@bash -eu -o pipefail -c '\
 		$(PY) -m accounting.build_metric_values \
@@ -278,9 +311,12 @@ run-metrics: run-views
 
 
 
-.PHONY: run-human-balance
-run-human-balance: run-metrics
+.PHONY: run-human-balance _run_human_balance_action
+run-human-balance: run-metrics _run_human_balance_action
+
+_run_human_balance_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR)"; exit 2)
 	@mkdir -p "$(RUN_HUMAN_DIR)"
 	@bash -eu -o pipefail -c '\
 		$(PY) -m accounting.human_balance_document_factory \

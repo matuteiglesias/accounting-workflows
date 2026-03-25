@@ -496,6 +496,99 @@ def build_ledger_base(
     return df[cols].copy()
 
 
+
+
+def build_stable_ledger_snapshot(
+    fixture_path: Optional[str] = None,
+    sheet_url: Optional[str] = None,
+    service_account_file: Optional[str] = None,
+    sheet_name: str = "LEDGERS",
+    party_map_path: Optional[str] = None,
+    fx_rates_path: Optional[str] = "",
+    base_currency: str = "ARS",
+    require_tx_id: bool = False,
+    exclude_household: bool = False,
+    only_status: Optional[Sequence[str]] = ("pagado",),
+    add_time_period: bool = False,
+    time_freq: str = "W",
+    drop_volatile: bool = True,
+) -> pd.DataFrame:
+    """
+    Build a deterministic ledger snapshot suitable for change detection.
+
+    This reuses build_ledger_base() and then removes volatile/non-business fields,
+    normalizes types, sorts rows deterministically, and sorts columns
+    alphabetically so equivalent ledger content yields the same serialized bytes.
+    """
+    df = build_ledger_base(
+        fixture_path=fixture_path,
+        sheet_url=sheet_url,
+        service_account_file=service_account_file,
+        sheet_name=sheet_name,
+        party_map_path=party_map_path,
+        fx_rates_path=fx_rates_path,
+        base_currency=base_currency,
+        require_tx_id=require_tx_id,
+        exclude_household=exclude_household,
+        only_status=only_status,
+        add_time_period=add_time_period,
+        time_freq=time_freq,
+    ).copy()
+
+    if drop_volatile:
+        df = df.drop(columns=[c for c in ["ingest_ts"] if c in df.columns], errors="ignore")
+
+    for c in df.columns:
+        if c == "Date":
+            df[c] = pd.to_datetime(df[c], errors="coerce").dt.date.astype("string")
+        else:
+            df[c] = df[c].astype("string")
+
+    df = df.fillna("")
+
+    sort_cols = [c for c in ["tx_id", "Date", "source_row"] if c in df.columns]
+    if not sort_cols:
+        sort_cols = list(df.columns)
+    df = df.sort_values(by=sort_cols, kind="mergesort").reset_index(drop=True)
+
+    return df.reindex(sorted(df.columns), axis=1)
+
+
+def compute_ledger_fingerprint(
+    fixture_path: Optional[str] = None,
+    sheet_url: Optional[str] = None,
+    service_account_file: Optional[str] = None,
+    sheet_name: str = "LEDGERS",
+    party_map_path: Optional[str] = None,
+    fx_rates_path: Optional[str] = "",
+    base_currency: str = "ARS",
+    require_tx_id: bool = False,
+    exclude_household: bool = False,
+    only_status: Optional[Sequence[str]] = ("pagado",),
+    add_time_period: bool = False,
+    time_freq: str = "W",
+) -> str:
+    """
+    Return a stable SHA-256 fingerprint for the business-relevant ledger content.
+    """
+    df = build_stable_ledger_snapshot(
+        fixture_path=fixture_path,
+        sheet_url=sheet_url,
+        service_account_file=service_account_file,
+        sheet_name=sheet_name,
+        party_map_path=party_map_path,
+        fx_rates_path=fx_rates_path,
+        base_currency=base_currency,
+        require_tx_id=require_tx_id,
+        exclude_household=exclude_household,
+        only_status=only_status,
+        add_time_period=add_time_period,
+        time_freq=time_freq,
+    )
+    payload = df.to_csv(index=False, lineterminator="\n")
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 # -----------------------
 # CLI (thin wrapper)
 # -----------------------
@@ -510,6 +603,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sheet-url", help="Google Sheet URL", default=os.getenv("SHEET_URL") or os.getenv("ACCOUNT_SHEET_URL"))
     p.add_argument("--sheet-name", help="Sheet/tab name (when using Google Sheets)", default=os.getenv("SHEET_NAME", "C. Long Ledger"))
     p.add_argument("--out-dir", help="Output directory", default=os.getenv("OUT_DIR", "./out"))
+    p.add_argument("--probe-fingerprint", action="store_true", default=False, help="Print stable ledger fingerprint and exit")
 
     p.add_argument("--exclude-household", action="store_true", default=False)
     p.add_argument("--require-tx-id", action="store_true", default=False)
@@ -549,12 +643,30 @@ def main() -> int:
     configure_logging()
 
     args = parse_args()
+    only_status = _parse_list_arg(args.only_status)
+
+    if args.probe_fingerprint:
+        fp = compute_ledger_fingerprint(
+            fixture_path=args.fixture or None,
+            sheet_url=args.sheet_url or None,
+            service_account_file=args.service_account or None,
+            sheet_name=args.sheet_name,
+            party_map_path=os.getenv("PARTY_MAP") or None,
+            fx_rates_path=(args.fx_rates or ""),
+            base_currency=args.base_currency,
+            require_tx_id=bool(args.require_tx_id),
+            exclude_household=bool(args.exclude_household),
+            only_status=only_status if only_status is not None else None,
+            add_time_period=bool(args.add_time_period),
+            time_freq=str(args.time_freq),
+        )
+        print(fp)
+        return 0
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     LOG.info("Stage start mode=%s out_dir=%s", args.mode, out_dir)
-
-    only_status = _parse_list_arg(args.only_status)
 
     ledger = build_ledger_base(
         fixture_path=args.fixture or None,
