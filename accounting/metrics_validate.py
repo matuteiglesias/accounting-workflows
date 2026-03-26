@@ -202,6 +202,7 @@ def run_basic_validations(metric_values: pd.DataFrame, registry_df: pd.DataFrame
         check_registry_metric_ids_unique(registry_df),
         check_leaf_builder_keys_present(registry_df),
         check_metric_ids_known(metric_values, registry_df),
+        check_sum_identity(metric_values, total_metric_id="IS.RENT.TOTAL", component_ids=["IS.RENT.CABA", "IS.RENT.TORCUATO"], check_name="is_rent_total"),
         check_sum_identity(metric_values, total_metric_id="IS.INCOME.TOTAL", component_ids=["IS.RENT.TOTAL", "IS.CONTRIB.TOTAL"], check_name="is_income_total"),
         check_formula_subtract_identity(metric_values, target_metric_id="IS.NET.AFTER_COSTS", minuend_id="IS.INCOME.TOTAL", subtrahend_ids=["IS.OPEX.TOTAL"], check_name="is_net_after_costs"),
         check_formula_subtract_identity(metric_values, target_metric_id="IS.NET.POST_DRAWS", minuend_id="IS.NET.AFTER_COSTS", subtrahend_ids=["IS.DRAWS.PERSONAL"], check_name="is_net_post_draws"),

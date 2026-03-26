@@ -12,7 +12,7 @@ from accounting.logging_utils import configure_logging, get_logger
 from .metric_drilldown import build_metric_drilldown_artifacts
 from .metrics_builders import run_leaf_builders
 from .metrics_derive import derive_default_v1
-from .metrics_io import MetricsContext, ensure_metric_values_schema, write_table
+from .metrics_io import MetricsContext, ensure_metric_values_schema
 from .metrics_registry import default_metric_specs_v1, registry_from_specs, normalize_registry
 from .metrics_validate import run_basic_validations
 from .metrics_views import (
@@ -39,6 +39,45 @@ REQUIRED_METRIC_VIEW_FILES = [
     "draws_discipline_monthly_last6.csv",
     "metric_views_manifest.csv",
 ]
+
+
+INCOME_STATEMENT_EXPORT_IDS = [
+    "IS.RENT.CABA",
+    "IS.RENT.TORCUATO",
+    "IS.RENT.TOTAL",
+    "IS.CONTRIB.MATIAS",
+    "IS.CONTRIB.ALEJANDRO",
+    "IS.CONTRIB.INQ_DIR",
+    "IS.CONTRIB.INQ_CAJA",
+    "IS.CONTRIB.TOTAL",
+    "IS.INCOME.TOTAL",
+    "IS.OPEX.TAX",
+    "IS.OPEX.LEGAL",
+    "IS.OPEX.SERVICES",
+    "IS.OPEX.MAINTENANCE",
+    "IS.OPEX.TOTAL",
+    "IS.NET.AFTER_COSTS",
+    "IS.DRAWS.PERSONAL",
+    "IS.DIVIDENDS",
+    "IS.NET.POST_DRAWS",
+]
+
+BALANCE_CASH_EXPORT_IDS = [
+    "BS.CASH.FB",
+    "BS.CASH.PM",
+    "BS.CASH.TOTAL",
+]
+
+
+def _ordered_metric_filter(df: pd.DataFrame, metric_ids: list[str]) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    wanted = [metric_id for metric_id in metric_ids if metric_id in set(df["metric_id"].astype(str))]
+    if not wanted:
+        return df.iloc[0:0].copy()
+    out = df.loc[df["metric_id"].astype(str).isin(wanted)].copy()
+    out["metric_id"] = pd.Categorical(out["metric_id"], categories=wanted, ordered=True)
+    return out.sort_values(["metric_id", "currency", "period"]).reset_index(drop=True)
 
 
 def find_latest_run_root(base: Path) -> Path:
@@ -109,41 +148,29 @@ def build_wide_views(metric_values: pd.DataFrame, out_dir: Path) -> None:
 def build_statement_views(metric_values: pd.DataFrame, out_dir: Path) -> None:
     mv = ensure_metric_values_schema(metric_values)
 
-    income_ids = [
-        "IS.RENT.TOTAL",
-        "IS.CONTRIB.TOTAL",
-        "IS.INCOME.TOTAL",
-        "IS.OPEX.TOTAL",
-        "IS.NET.AFTER_COSTS",
-        "IS.DRAWS.PERSONAL",
-        "IS.NET.POST_DRAWS",
-    ]
-    cash_ids = [
-        "BS.CASH.FB",
-        "BS.CASH.PM",
-        "BS.CASH.TOTAL",
+    statement_specs = [
+        ("income_statement_y.csv", INCOME_STATEMENT_EXPORT_IDS),
+        ("balance_cash_y.csv", BALANCE_CASH_EXPORT_IDS),
+        ("income_statement_q.csv", INCOME_STATEMENT_EXPORT_IDS),
+        ("balance_cash_q.csv", BALANCE_CASH_EXPORT_IDS),
     ]
 
-    for name, metric_ids in [
-        ("income_statement_y.csv", income_ids),
-        ("balance_cash_y.csv", cash_ids),
-        ("income_statement_q.csv", income_ids),
-        ("balance_cash_q.csv", cash_ids),
-    ]:
+    for name, metric_ids in statement_specs:
         grain = "Y" if name.endswith("_y.csv") else "Q"
-        sub = mv.loc[(mv["metric_id"].isin(metric_ids)) & (mv["period_grain"] == grain)].copy()
+        sub = mv.loc[mv["period_grain"] == grain].copy()
+        sub = _ordered_metric_filter(sub, metric_ids)
         if sub.empty:
             continue
 
         wide = (
-            sub.assign(metric_key=sub["metric_id"] + " [" + sub["currency"] + "]")
+            sub.assign(metric_key=sub["metric_id"].astype(str) + " [" + sub["currency"] + "]")
             .pivot_table(
                 index="metric_key",
                 columns="period",
                 values="value",
                 aggfunc="first",
+                sort=False,
             )
-            .sort_index()
             .reset_index()
         )
         wide.to_csv(out_dir / name, index=False)
