@@ -115,6 +115,14 @@ def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext
     views_dir = run_root / "views"
     debt_run_dir = run_root.parent.parent / "debt_resolution" / run_root.name
 
+
+    # TODO. build_metric_values.py busca deuda en una ruta sospechosa
+
+    # Tu load_context() arma:
+    # debt_run_dir = run_root.parent.parent / "debt_resolution" / run_root.name
+    # Si run_root es out/run/accounting/<run_id>, eso apunta a out/run/debt_resolution/<run_id>, no a out/debt_resolution/<run_id>.
+    # Ahí revisaría antes de confiar.
+
     ledger = load_ledger(run_root)
     per_flow = pd.read_csv(run_root / "per_flow_time_long.freq=M.csv")
     daily_cash_position = pd.read_csv(run_root / "daily_cash_position.csv")
@@ -245,7 +253,7 @@ def build_debt_metric_views(ctx: MetricsContext, out_dir: Path) -> None:
                 {
                     "pm_liabilities_to_mi": g.loc[
                         (g["debtor"].astype(str) == "Property Management")
-                        & (g["creditor"].astype(str) == "Matias"),
+                        & (g["creditor"].astype(str) == "MI"),
                         "open_total",
                     ].sum(),
                     "pm_liabilities_to_primos": g.loc[
