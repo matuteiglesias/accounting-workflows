@@ -92,6 +92,16 @@ RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
 METRICS_LATEST := $(OUT)/metrics/latest
 HUMAN_LATEST   := $(OUT)/human_reports/latest
 
+
+
+DEBT_CURRENCIES ?= USD
+DEBT_REPAYMENT_STATUSES ?= pagado
+DEBT_FULL_ONLY ?= 1
+RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_RUN_ID)
+DEBT_LATEST := $(OUT)/debt_resolution/latest
+
+
+
 # RUN_LATEST := $(OUT)/run/accounting/latest
 # STORY_LATEST := $(OUT)/storypack/latest
 
@@ -120,7 +130,7 @@ _update_latest:
 		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
 		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
 		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
-	'
+	'	link_swap "$(OUT)/debt_resolution" "$(RUN_REL)";
 
 
 # ----------------------------------------
@@ -133,6 +143,7 @@ help:
 	@echo "  make run-ingest"
 	@echo "  make run-materialize"
 	@echo "  make run-views"
+	@echo "  make run-debt                # resolve internal debt artifacts"
 	@echo "  make run-metrics"
 	@echo "  make run-human-balance"
 	@echo "  make run-accounting           # wrapper for the official full path above"
@@ -165,6 +176,7 @@ run-downstream-from-ledger:
 	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT). Run make run-ingest first or point RUN_STAMP to an existing run."; exit 2)
 	@$(MAKE) _run_materialize_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
 	@$(MAKE) _run_views_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
+	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
@@ -280,8 +292,45 @@ _run_views_action:
 	@$(call _check_views_sanity,$(RUN_VIEWS_SANITY))
 	@$(MAKE) _check_views OUT_DIR="$(RUN_OUT)" MODE="run"
 
+
+
+
+
+.PHONY: run-debt _run_debt_action
+run-debt: run-views _run_debt_action
+
+_run_debt_action:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@$(call require_var,ACCOUNT_SHEET_URL)
+	@$(call require_var,ACCOUNT_SA)
+	@mkdir -p "$(RUN_DEBT_DIR)"
+	@bash -eu -o pipefail -c '\
+		args=( \
+			--sheet-url "$(ACCOUNT_SHEET_URL)" \
+			--service-account "$(ACCOUNT_SA)" \
+			--sheet-name "$(ACCOUNT_SHEET_NAME)" \
+			--write-dir "$(RUN_DEBT_DIR)" \
+			--exclude-household \
+			--currencies "$(DEBT_CURRENCIES)" \
+			--repayment-statuses "$(DEBT_REPAYMENT_STATUSES)" \
+		); \
+		if [ "$(DEBT_FULL_ONLY)" = "1" ]; then \
+			args+=( --full-only ); \
+		fi; \
+		$(PY) -m accounting.resolve_internal_debt_v2 "$${args[@]}"; \
+		test -s "$(RUN_DEBT_DIR)/debt_open_items.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_allocations.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_repayment_events.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_resolution_timeline.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_status_reconciliation.csv"; \
+	'
+
+
+
+
+
 .PHONY: run-metrics _run_metrics_action
-run-metrics: run-views _run_metrics_action
+run-metrics: run-debt _run_metrics_action
 
 _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
