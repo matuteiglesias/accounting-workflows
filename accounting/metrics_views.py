@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 
-DEFAULT_NOISE_FLOOR = {"ARS": 5000.0, "USD": 10.0}
+DEFAULT_NOISE_FLOOR = {"ARS": 50.0, "USD": 1.0}
 DEFAULT_INCLUDE_STATUSES = ("pagado",)
 
 

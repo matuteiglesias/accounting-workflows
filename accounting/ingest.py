@@ -38,7 +38,7 @@ import pandas as pd
 
 from accounting.core_timeseries import period_bins_for_dates
 from accounting.logging_utils import configure_logging, get_logger
-from accounting.utils import resolve_run_id
+
 
 LOG = get_logger("ingest")
 
@@ -636,7 +636,8 @@ def _parse_list_arg(s: str) -> Optional[List[str]]:
 
 
 
-
+from accounting.utils import resolve_run_id
+from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
 
 
 def main() -> int:
@@ -696,12 +697,10 @@ def main() -> int:
         anoms.to_csv(anoms_path, index=False)
         LOG.info("Wrote anomalies rows=%d -> %s", len(anoms), anoms_path)
 
+    meta_dir = out_dir / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
     try:
-        meta_dir = out_dir / "meta"
-        meta_dir.mkdir(parents=True, exist_ok=True)
-
-        from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
-
         resolved_run_id = resolve_run_id(
             mode=args.mode,
             run_id=getattr(args, "run_id", None),
@@ -735,7 +734,7 @@ def main() -> int:
                 )
             )
 
-        stage_manifest: Dict[str, Any] = {
+        stage_manifest = {
             "stage": "A.ingest",
             "mode": args.mode,
             "run_id": resolved_run_id,
@@ -753,22 +752,24 @@ def main() -> int:
         }
 
         rel = write_stage_manifest(meta_dir, stage_manifest)
+
         stage_meta_art = artifact_from_path(
             name="stage_A_ingest",
             path=(out_dir / rel),
             stage="A.ingest",
             mode=args.mode,
-            run_id=stage_manifest["run_id"],
+            run_id=resolved_run_id,
             role="meta",
             root_dir=out_dir,
             content_type="application/json",
         )
-        append_artifacts(meta_dir, [*out_arts, stage_meta_art])
-    except Exception:
-        LOG.exception("Manifest write failed (non-fatal)")
 
-    LOG.info("Stage finish ledger_rows=%d ledger_path=%s anomalies=%d", len(ldf), ledger_path, 0 if not isinstance(anoms, pd.DataFrame) else len(anoms))
-    return 0
+        append_artifacts(meta_dir, [*out_arts, stage_meta_art])
+
+    except Exception:
+        if str(args.mode).strip().lower() == "run":
+            LOG.exception("Manifest write failed (fatal in run mode)")
+            return 4
 
 
 if __name__ == "__main__":
