@@ -296,11 +296,19 @@ def _ensure_paths(base: Path) -> FrontRenderPaths:
 
 
 def load_metric_views_manifest(metrics_dir: Path) -> Dict[str, Any]:
-    """Stub: load metric views manifest if present.
-
-    Should return a flat dict with run metadata and config values.
-    """
-    return {}
+    """Load metric views manifest (best-effort, non-fatal)."""
+    path = metrics_dir / "metric_views" / "metric_views_manifest.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        LOG.warning("Could not read metric views manifest from %s", path, exc_info=True)
+        return {}
+    if df.empty:
+        return {}
+    row = df.iloc[0].to_dict()
+    return {str(k): ("" if pd.isna(v) else v) for k, v in row.items()}
 
 
 def load_drilldown_index(metrics_dir: Path) -> pd.DataFrame:
@@ -355,7 +363,61 @@ def build_kpi_cards(ctx: FrontDataContext) -> List[Dict[str, str]]:
     Expected output:
     [{"label": "Caja total [ARS]", "value": "2,876,421"}, ...]
     """
-    return []
+    cash_snapshot = get_table(ctx, "cash_snapshot")
+    debt_snapshot = get_table(ctx, "debt_snapshot")
+    income_statement_m = get_table(ctx, "income_statement_monthly_last6")
+    draws_discipline_m = get_table(ctx, "draws_discipline_monthly_last6")
+
+    def _pick_row(df: pd.DataFrame, metric_id: str, currency: Optional[str] = None) -> Optional[pd.Series]:
+        if df.empty or "metric_id" not in df.columns:
+            return None
+        sub = df.loc[df["metric_id"].astype(str) == str(metric_id)]
+        if currency is not None and "currency" in sub.columns:
+            sub = sub.loc[sub["currency"].astype(str) == str(currency)]
+        return None if sub.empty else sub.iloc[0]
+
+    def _pick_metric(metric_id: str, fallback_label: str) -> Dict[str, str]:
+        if income_statement_m.empty or "metric_id" not in income_statement_m.columns:
+            return {"label": fallback_label, "value": "N/A"}
+        sub = income_statement_m.loc[income_statement_m["metric_id"].astype(str) == str(metric_id)]
+        if sub.empty:
+            return {"label": fallback_label, "value": "N/A"}
+        row = sub.iloc[0]
+        month_cols = sorted([str(c) for c in sub.columns if str(c).startswith("20")])
+        val = row[month_cols[-1]] if month_cols else pd.NA
+        label = str(row.get("label", fallback_label))
+        return {"label": f"{label} [{row.get('currency','')}]", "value": _fmt_num(val)}
+
+    cards: List[Dict[str, str]] = []
+
+    cash_row = _pick_row(cash_snapshot, "BS.CASH.TOTAL", "ARS") or _pick_row(cash_snapshot, "BS.CASH.TOTAL")
+    if cash_row is not None:
+        cards.append({"label": f"Caja total [{cash_row.get('currency','')}]", "value": _fmt_num(cash_row.get("value", pd.NA))})
+
+    for metric_id, label in [("IS.NET.AFTER_COSTS", "Neto después de costos"), ("IS.OPEX.TOTAL", "Opex")]:
+        item = _pick_metric(metric_id, label)
+        if item["value"] != "N/A":
+            cards.append(item)
+
+    debt_row = (
+        _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION", "USD")
+        or _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION", "ARS")
+        or _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION")
+    )
+    if debt_row is not None:
+        cards.append(
+            {
+                "label": f"Posición neta PM [{debt_row.get('currency','')}]",
+                "value": _fmt_num(debt_row.get("value", pd.NA)),
+            }
+        )
+
+    if not draws_discipline_m.empty:
+        row = draws_discipline_m.iloc[0]
+        distress = int(pd.to_numeric(row.get("distress_months", 0), errors="coerce") or 0)
+        cards.append({"label": f"Meses en distress [{row.get('currency','')}]", "value": str(distress)})
+
+    return cards[:6]
 
 
 def maybe_drilldown_link(
@@ -366,12 +428,34 @@ def maybe_drilldown_link(
     currency: str,
     value: Any,
 ) -> Optional[str]:
-    """Stub: return anchor HTML if a drilldown HTML exists for this key."""
-    return None
+    key = (str(metric_id), str(period_grain), str(period), str(currency))
+    row = ctx.drilldown_lookup_map.get(key)
+    if not row:
+        return None
+    html_relpath = str(row.get("detail_html_relpath", "")).strip()
+    if not html_relpath:
+        return None
+    href = html_relpath if html_relpath.startswith("../") else f"../{html_relpath.lstrip('./')}"
+    return f"<a href='{href}' target='_blank' rel='noopener noreferrer'>{_fmt_num(value)}</a>"
 
 
 def choose_primary_note_for_table(ctx: FrontDataContext, slug: str) -> str:
-    """Stub: attach human-readable subtitle or note to a table by slug."""
+    spec = ctx.table_specs_by_slug.get(slug)
+    if spec and spec.notes:
+        return spec.notes
+
+    mv = ctx.metric_views_manifest
+    if slug == "rent_rollup_by_place_m_last6":
+        return f"groupby = Box, Currency, {mv.get('rent_place_col', ctx.config.rent_place_col)}"
+    if slug == "rent_rollup_by_detail_m_last6":
+        return f"groupby = Box, Currency, {mv.get('rent_detail_col', ctx.config.rent_detail_col)}"
+    if slug == "flow_type_rollup_m_last6":
+        groupby = str(mv.get("flow_rollup_groupby", "")).strip()
+        groupby = groupby.replace(",", " , ") if groupby else " , ".join(ctx.config.flow_rollup_groupby)
+        return f"groupby = {groupby}"
+    if slug == "income_statement_monthly_last6":
+        statuses = mv.get("include_statuses", ",".join(ctx.config.include_statuses))
+        return f"Ventana mensual reciente. Estados incluidos: {statuses}."
     return ""
 
 
@@ -478,12 +562,21 @@ def build_block_executive_summary(ctx: FrontDataContext) -> FrontBlock:
 
 
 def build_block_cash_visibility(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    primary_df = get_table(ctx, "cash_snapshot")
+    status: BlockStatus = "ready" if not primary_df.empty else "partial"
+    key_message = "Caja visible disponible para lectura."
+    if not primary_df.empty and {"metric_id", "currency", "value"}.issubset(primary_df.columns):
+        sub = primary_df.loc[primary_df["metric_id"].astype(str) == "BS.CASH.TOTAL"]
+        if not sub.empty:
+            row = sub.iloc[0]
+            key_message = f"Caja total visible: {_fmt_num(row.get('value', pd.NA))} {row.get('currency', '')}."
+
+    block = FrontBlock(
         block_id="cash_visibility",
         title="Caja visible",
         layer="B",
         purpose="Mostrar liquidez visible actual y su evolución reciente.",
-        key_message="Stub key message for visible cash.",
+        key_message=key_message,
         order=20,
         narrative_html=narrative_cash_visibility(ctx),
         table_refs=[
@@ -496,15 +589,29 @@ def build_block_cash_visibility(ctx: FrontDataContext) -> FrontBlock:
         ],
         tags=["cash", "balance_sheet"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Falta la tabla principal de caja; el bloque queda parcial."))
+    return block
 
 
 def build_block_recent_performance(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    df = get_table(ctx, "income_statement_monthly_last6")
+    status: BlockStatus = "ready" if not df.empty else "partial"
+    key_message = "Lectura reciente de renta, costos y neto disponible."
+    if not df.empty and {"metric_id", "currency"}.issubset(df.columns):
+        sub = df.loc[df["metric_id"].astype(str) == "IS.NET.AFTER_COSTS"]
+        month_cols = sorted([str(c) for c in df.columns if str(c).startswith("20")])
+        if not sub.empty and month_cols:
+            row = sub.iloc[0]
+            key_message = f"Neto después de costos (último mes): {_fmt_num(row.get(month_cols[-1], pd.NA))} {row.get('currency', '')}."
+
+    block = FrontBlock(
         block_id="recent_performance",
         title="Resultado reciente",
         layer="B",
         purpose="Mostrar renta, costos, ingresos y neto en la ventana reciente.",
-        key_message="Stub key message for recent performance.",
+        key_message=key_message,
         order=30,
         narrative_html=narrative_recent_performance(ctx),
         table_refs=[
@@ -515,15 +622,26 @@ def build_block_recent_performance(ctx: FrontDataContext) -> FrontBlock:
         ],
         tags=["income_statement", "recent"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Sin P&L mensual reciente; este bloque queda parcial."))
+    return block
 
 
 def build_block_draws_discipline(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    df = get_table(ctx, "draws_discipline_monthly_last6")
+    status: BlockStatus = "ready" if not df.empty else "partial"
+    key_message = "Disciplina de retiros en seguimiento."
+    if not df.empty and "distress_months" in df.columns:
+        distress = int(pd.to_numeric(df["distress_months"], errors="coerce").fillna(0).max())
+        key_message = f"Meses en distress por retiros en ventana reciente: {distress}."
+
+    block = FrontBlock(
         block_id="draws_discipline",
         title="Retiros y disciplina",
         layer="B",
         purpose="Comparar retiros con neto mensual reciente.",
-        key_message="Stub key message for draws and discipline.",
+        key_message=key_message,
         order=40,
         narrative_html=narrative_draws_discipline(ctx),
         table_refs=[
@@ -534,15 +652,27 @@ def build_block_draws_discipline(ctx: FrontDataContext) -> FrontBlock:
         ],
         tags=["draws", "discipline"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Sin tabla de retiros/disciplinas; el bloque queda parcial."))
+    return block
 
 
 def build_block_cost_structure(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    df = get_table(ctx, "opex_by_category_m_last12")
+    status: BlockStatus = "ready" if not df.empty else "partial"
+    key_message = "Estructura de costos observada en los últimos meses."
+    if not df.empty and "total_6m" in df.columns:
+        top = df.sort_values("total_6m", ascending=False).iloc[0]
+        cat = str(top.get("Tipo", top.get("category", "categoría principal")))
+        key_message = f"Mayor presión reciente: {cat} con total 6m {_fmt_num(top.get('total_6m', pd.NA))}."
+
+    block = FrontBlock(
         block_id="cost_structure",
         title="Costos reales del sistema",
         layer="B",
         purpose="Mostrar rubros de costo relevantes y estructura reciente.",
-        key_message="Stub key message for cost structure.",
+        key_message=key_message,
         order=50,
         narrative_html=narrative_cost_structure(ctx),
         table_refs=[
@@ -555,15 +685,27 @@ def build_block_cost_structure(ctx: FrontDataContext) -> FrontBlock:
         callouts=[FrontCallout(level="warn", text="Stub: separar costos operativos, financieros e imputados cuando corresponda.")],
         tags=["opex", "costs"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Falta Opex por categoría mensual; bloque parcial."))
+    return block
 
 
 def build_block_rent_engines(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    df = get_table(ctx, "rent_rollup_by_place_m_last6")
+    status: BlockStatus = "ready" if not df.empty else "partial"
+    key_message = "La renta se concentra en pocos motores."
+    if not df.empty and "total_6m" in df.columns:
+        top = df.sort_values("total_6m", ascending=False).iloc[0]
+        place = top.get(ctx.config.rent_place_col, top.get("Lugar", "N/A"))
+        key_message = f"Motor líder en 6m: {place} ({_fmt_num(top.get('total_6m', pd.NA))})."
+
+    block = FrontBlock(
         block_id="rent_engines",
         title="Motores de renta",
         layer="B",
         purpose="Mostrar los principales lugares y detalles que explican la renta.",
-        key_message="Stub key message for rent engines.",
+        key_message=key_message,
         order=60,
         narrative_html=narrative_rent_engines(ctx),
         table_refs=[
@@ -575,15 +717,27 @@ def build_block_rent_engines(ctx: FrontDataContext) -> FrontBlock:
         ],
         tags=["rent", "engines"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Sin tabla principal de motores de renta; bloque parcial."))
+    return block
 
 
 def build_block_contributions_support(ctx: FrontDataContext) -> FrontBlock:
-    return FrontBlock(
+    df = get_table(ctx, "contrib_rollup_by_party_m_last12")
+    status: BlockStatus = "ready" if not df.empty else "partial"
+    key_message = "Las contribuciones visibles se presentan por parte."
+    if not df.empty and "total_6m" in df.columns:
+        top = df.sort_values("total_6m", ascending=False).iloc[0]
+        party = str(top.get("party", top.get("payer", top.get("receiver", "parte principal"))))
+        key_message = f"Parte con mayor soporte visible (6m): {party} ({_fmt_num(top.get('total_6m', pd.NA))})."
+
+    block = FrontBlock(
         block_id="contributions_support",
         title="Quién sostuvo el sistema",
         layer="B",
         purpose="Mostrar contribuciones visibles por parte y su historia reciente.",
-        key_message="Stub key message for contributions and support.",
+        key_message=key_message,
         order=70,
         narrative_html=narrative_contributions_support(ctx),
         table_refs=[
@@ -595,6 +749,10 @@ def build_block_contributions_support(ctx: FrontDataContext) -> FrontBlock:
         ],
         tags=["contributions", "support"],
     )
+    if status != "ready":
+        block.status = status
+        block.callouts.append(FrontCallout(level="warn", text="Sin tabla principal de contribuciones; bloque parcial."))
+    return block
 
 
 def build_block_flow_type_bridge(ctx: FrontDataContext) -> FrontBlock:
@@ -615,12 +773,22 @@ def build_block_flow_type_bridge(ctx: FrontDataContext) -> FrontBlock:
 
 
 def build_block_prudential_balance(ctx: FrontDataContext) -> FrontBlock:
+    debt_snapshot = get_table(ctx, "debt_snapshot")
+    cash_vs_debt = get_table(ctx, "cash_vs_debt_snapshot")
+    has_primary = (not debt_snapshot.empty) and (not cash_vs_debt.empty)
+    block_status: BlockStatus = "partial" if has_primary else "hidden"
+    callouts: List[FrontCallout] = []
+    if not has_primary:
+        callouts.append(
+            FrontCallout(level="warn", text="No hay tablas prudenciales de deuda completas; se oculta este bloque.")
+        )
+
     return FrontBlock(
         block_id="prudential_balance",
         title="Lectura prudencial de caja y deuda",
         layer="C",
         purpose="Pasar de caja visible a caja prudencialmente interpretable.",
-        key_message="Stub key message for prudential balance.",
+        key_message="Lectura prudencial disponible cuando existe base de deuda consistente.",
         order=90,
         narrative_html=narrative_prudential_balance(ctx),
         table_refs=[
@@ -634,8 +802,8 @@ def build_block_prudential_balance(ctx: FrontDataContext) -> FrontBlock:
         chart_specs=[
             FrontChartSpec(chart_id="cash_to_net_position", title="Caja visible vs posición prudente", kind="waterfall", source_slug="cash_vs_debt_snapshot"),
         ],
-        status="partial",
-        callouts=[FrontCallout(level="warn", text="Stub: this block should hide itself automatically if debt tables are unavailable.")],
+        status=block_status,
+        callouts=callouts,
         tags=["prudence", "debt", "claims"],
     )
 
@@ -769,10 +937,33 @@ def render_table_ref(ctx: FrontDataContext, paths: FrontRenderPaths, ref: FrontT
     note = ref.notes or choose_primary_note_for_table(ctx, ref.slug)
     title = ref.title or _slug_to_title(ref.slug)
 
+    def _cell_renderer(col: str, value: Any, row: pd.Series) -> Optional[str]:
+        col_s = str(col)
+        if ref.slug == "income_statement_monthly_last6" and col_s.startswith("20"):
+            return maybe_drilldown_link(
+                ctx,
+                metric_id=str(row.get("metric_id", "")),
+                period_grain="M",
+                period=col_s,
+                currency=str(row.get("currency", "")),
+                value=value,
+            )
+        if ref.slug == "draws_discipline_monthly_last6" and col_s.startswith("draws_"):
+            period = col_s.replace("draws_", "", 1)
+            return maybe_drilldown_link(
+                ctx,
+                metric_id="IS.DRAWS.PERSONAL",
+                period_grain="M",
+                period=period,
+                currency=str(row.get("currency", "")),
+                value=value,
+            )
+        return None
+
     if df.empty:
         body = "<p class='warn'>Tabla vacía.</p>"
     else:
-        body = render_df_html(df)
+        body = render_df_html(df, cell_renderer=_cell_renderer)
 
     links: List[str] = []
     if ref.include_csv_link:
