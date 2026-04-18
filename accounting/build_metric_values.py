@@ -111,9 +111,67 @@ def load_optional_csv_candidates(paths: list[Path]) -> Optional[pd.DataFrame]:
     return None
 
 
+DEBT_BALANCE_REQUIRED_COLUMNS = [
+    "period",
+    "currency",
+    "debtor",
+    "creditor",
+    "open_principal",
+    "open_interest",
+    "open_total",
+]
+
+
+def _debt_candidate_dirs(run_root: Path) -> list[Path]:
+    run_id = run_root.name
+    out_root = run_root
+    while out_root.name != "out" and out_root.parent != out_root:
+        out_root = out_root.parent
+    if out_root.name != "out":
+        out_root = run_root.parent
+
+    return [
+        run_root,
+        run_root.parent / "debt_resolution" / run_id,
+        run_root.parent.parent / "debt_resolution" / run_id,
+        out_root / "debt_resolution" / run_id,
+        out_root / "debt_resolution" / "latest",
+    ]
+
+
+def _validate_debt_schema(df: pd.DataFrame, label: str, source_path: Path) -> None:
+    missing = [c for c in DEBT_BALANCE_REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{label} is missing required columns: {missing}; source={source_path}"
+        )
+
+
+def _load_debt_artifact(run_root: Path, filename: str) -> Optional[pd.DataFrame]:
+    candidate_dirs = _debt_candidate_dirs(run_root)
+    candidates = [d / filename for d in candidate_dirs]
+
+    LOG.info("Debt artifact lookup %s candidate_paths=%s", filename, [str(p) for p in candidates])
+    for path in candidates:
+        exists = path.exists()
+        LOG.info("Debt artifact candidate %s exists=%s", path, exists)
+        if not exists:
+            continue
+        df = pd.read_csv(path)
+        LOG.info("Debt artifact loaded %s rows=%d", path, len(df))
+        _validate_debt_schema(df, filename, path)
+        return df
+
+    LOG.warning(
+        "Debt artifact not found filename=%s checked_paths=%s",
+        filename,
+        [str(p) for p in candidates],
+    )
+    return None
+
+
 def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext:
     views_dir = run_root / "views"
-    debt_run_dir = run_root.parent.parent / "debt_resolution" / run_root.name
 
 
     # TODO. build_metric_values.py busca deuda en una ruta sospechosa
@@ -129,15 +187,9 @@ def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext
     v_contributions_monthly = pd.read_csv(views_dir / "v_contributions_monthly.csv")
     v_opex_category_monthly = pd.read_csv(views_dir / "v_opex_category_monthly.csv")
     party_balance_detailed = load_optional_csv(views_dir / "party_balance_detailed.csv")
-    debt_balance_monthly = load_optional_csv_candidates(
-        [run_root / "debt_balance_monthly.csv", debt_run_dir / "debt_balance_monthly.csv"]
-    )
-    debt_balance_quarterly = load_optional_csv_candidates(
-        [run_root / "debt_balance_quarterly.csv", debt_run_dir / "debt_balance_quarterly.csv"]
-    )
-    debt_balance_yearly = load_optional_csv_candidates(
-        [run_root / "debt_balance_yearly.csv", debt_run_dir / "debt_balance_yearly.csv"]
-    )
+    debt_balance_monthly = _load_debt_artifact(run_root, "debt_balance_monthly.csv")
+    debt_balance_quarterly = _load_debt_artifact(run_root, "debt_balance_quarterly.csv")
+    debt_balance_yearly = _load_debt_artifact(run_root, "debt_balance_yearly.csv")
 
     return MetricsContext(
         ledger=ledger,
