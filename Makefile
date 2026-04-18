@@ -318,11 +318,17 @@ _run_debt_action:
 			args+=( --full-only ); \
 		fi; \
 		$(PY) -m accounting.resolve_internal_debt_v2 "$${args[@]}"; \
+		$(PY) -m accounting.build_debt_balance_views \
+			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
+			--write-dir "$(RUN_DEBT_DIR)"; \
 		test -s "$(RUN_DEBT_DIR)/debt_open_items.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_allocations.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_repayment_events.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_resolution_timeline.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_status_reconciliation.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_monthly.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_quarterly.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_yearly.csv"; \
 	'
 
 

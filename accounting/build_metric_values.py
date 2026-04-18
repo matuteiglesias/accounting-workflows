@@ -68,6 +68,16 @@ BALANCE_CASH_EXPORT_IDS = [
     "BS.CASH.TOTAL",
 ]
 
+BALANCE_DEBT_EXPORT_IDS = [
+    "BS.DEBT.PM_TO_MI.OPEN",
+    "BS.DEBT.PM_TO_PRIMOS.OPEN",
+    "BS.CLAIM.ALE_TO_PM.OPEN",
+    "BS.DEBT.PRINCIPAL.OPEN",
+    "BS.DEBT.INTEREST.OPEN",
+    "BS.DEBT.TOTAL.OPEN",
+    "BS.DEBT.NET_PM_POSITION",
+]
+
 
 def _ordered_metric_filter(df: pd.DataFrame, metric_ids: list[str]) -> pd.DataFrame:
     if df.empty:
@@ -94,8 +104,16 @@ def load_optional_csv(path: Path) -> Optional[pd.DataFrame]:
     return None
 
 
+def load_optional_csv_candidates(paths: list[Path]) -> Optional[pd.DataFrame]:
+    for path in paths:
+        if path.exists():
+            return pd.read_csv(path)
+    return None
+
+
 def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext:
     views_dir = run_root / "views"
+    debt_run_dir = run_root.parent.parent / "debt_resolution" / run_root.name
 
     ledger = load_ledger(run_root)
     per_flow = pd.read_csv(run_root / "per_flow_time_long.freq=M.csv")
@@ -103,6 +121,15 @@ def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext
     v_contributions_monthly = pd.read_csv(views_dir / "v_contributions_monthly.csv")
     v_opex_category_monthly = pd.read_csv(views_dir / "v_opex_category_monthly.csv")
     party_balance_detailed = load_optional_csv(views_dir / "party_balance_detailed.csv")
+    debt_balance_monthly = load_optional_csv_candidates(
+        [run_root / "debt_balance_monthly.csv", debt_run_dir / "debt_balance_monthly.csv"]
+    )
+    debt_balance_quarterly = load_optional_csv_candidates(
+        [run_root / "debt_balance_quarterly.csv", debt_run_dir / "debt_balance_quarterly.csv"]
+    )
+    debt_balance_yearly = load_optional_csv_candidates(
+        [run_root / "debt_balance_yearly.csv", debt_run_dir / "debt_balance_yearly.csv"]
+    )
 
     return MetricsContext(
         ledger=ledger,
@@ -111,6 +138,9 @@ def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext
         v_contributions_monthly=v_contributions_monthly,
         v_opex_category_monthly=v_opex_category_monthly,
         party_balance_detailed=party_balance_detailed,
+        debt_balance_monthly=debt_balance_monthly,
+        debt_balance_quarterly=debt_balance_quarterly,
+        debt_balance_yearly=debt_balance_yearly,
         run_id=run_id,
         as_of_date=as_of_date,
     )
@@ -151,8 +181,10 @@ def build_statement_views(metric_values: pd.DataFrame, out_dir: Path) -> None:
     statement_specs = [
         ("income_statement_y.csv", INCOME_STATEMENT_EXPORT_IDS),
         ("balance_cash_y.csv", BALANCE_CASH_EXPORT_IDS),
+        ("balance_debt_y.csv", BALANCE_DEBT_EXPORT_IDS),
         ("income_statement_q.csv", INCOME_STATEMENT_EXPORT_IDS),
         ("balance_cash_q.csv", BALANCE_CASH_EXPORT_IDS),
+        ("balance_debt_q.csv", BALANCE_DEBT_EXPORT_IDS),
     ]
 
     for name, metric_ids in statement_specs:
@@ -174,6 +206,79 @@ def build_statement_views(metric_values: pd.DataFrame, out_dir: Path) -> None:
             .reset_index()
         )
         wide.to_csv(out_dir / name, index=False)
+
+
+def build_debt_metric_views(ctx: MetricsContext, out_dir: Path) -> None:
+    views_dir = out_dir / METRIC_VIEWS_DIRNAME
+    views_dir.mkdir(parents=True, exist_ok=True)
+
+    monthly = ctx.debt_balance_monthly
+    if monthly is None or monthly.empty:
+        return
+
+    needed = ["period", "debtor", "creditor", "currency", "open_principal", "open_interest", "open_total"]
+    missing = [c for c in needed if c not in monthly.columns]
+    if missing:
+        return
+
+    work = monthly.copy()
+    for col in ["open_principal", "open_interest", "open_total"]:
+        work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0.0)
+
+    work = (
+        work.groupby(["period", "debtor", "creditor", "currency"], dropna=False)[["open_principal", "open_interest", "open_total"]]
+        .max()
+        .reset_index()
+        .sort_values(["period", "debtor", "creditor", "currency"])
+    )
+    periods = sorted(work["period"].astype(str).unique().tolist())
+    keep_periods = set(periods[-12:])
+    last12 = work.loc[work["period"].astype(str).isin(keep_periods)].copy()
+
+    last12.to_csv(views_dir / "debt_balance_monthly_last12.csv", index=False)
+    last12.to_csv(views_dir / "debt_by_counterparty_m_last12.csv", index=False)
+
+    net = (
+        last12.groupby(["period", "currency"], dropna=False)
+        .apply(
+            lambda g: pd.Series(
+                {
+                    "pm_liabilities_to_mi": g.loc[
+                        (g["debtor"].astype(str) == "Property Management")
+                        & (g["creditor"].astype(str) == "Matias"),
+                        "open_total",
+                    ].sum(),
+                    "pm_liabilities_to_primos": g.loc[
+                        (g["debtor"].astype(str) == "Property Management")
+                        & (g["creditor"].astype(str) == "Primos"),
+                        "open_total",
+                    ].sum(),
+                    "pm_claims_on_alejandro": g.loc[
+                        (g["debtor"].astype(str) == "Alejandro")
+                        & (g["creditor"].astype(str) == "Property Management"),
+                        "open_total",
+                    ].sum(),
+                }
+            )
+        )
+        .reset_index()
+    )
+    if net.empty:
+        net = pd.DataFrame(
+            columns=[
+                "period",
+                "currency",
+                "pm_liabilities_to_mi",
+                "pm_liabilities_to_primos",
+                "pm_claims_on_alejandro",
+                "pm_net_position",
+            ]
+        )
+    else:
+        net["pm_net_position"] = (
+            net["pm_liabilities_to_mi"] + net["pm_liabilities_to_primos"] - net["pm_claims_on_alejandro"]
+        )
+    net.to_csv(views_dir / "debt_net_position_m_last12.csv", index=False)
 
 
 def build_metric_view_exports(
@@ -352,6 +457,7 @@ def main() -> None:
         include_statuses=include_statuses,
         noise_floor_by_currency=noise_floor_by_currency,
     )
+    build_debt_metric_views(ctx, out_dir)
 
     build_metric_drilldown_artifacts(
         run_root=run_root,
