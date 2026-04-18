@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -11,7 +10,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
-
 from accounting.build_metric_values import METRIC_VIEWS_DIRNAME, REQUIRED_METRIC_VIEW_FILES
 from accounting.metric_drilldown import (
     DRILLDOWN_DIRNAME,
@@ -19,28 +17,15 @@ from accounting.metric_drilldown import (
     drilldown_lookup,
 )
 from accounting.metrics_views import parse_noise_floor
-
+from accounting.human_balance_tables import (
+    HumanTableSpec,
+    build_human_tables_with_specs,
+    default_human_table_specs_v1,
+    load_human_tables_context,
+)
 
 REPORT_ID = "balance_human_v2"
 METRIC_VIEWS_MANIFEST_FILENAME = "metric_views_manifest.csv"
-
-
-@dataclass(frozen=True)
-class ItemSpec:
-    item_id: str
-    kind: str
-    slug: str
-    title: str
-    notes: str = ""
-
-
-ITEMS: List[ItemSpec] = [
-    ItemSpec("1.1", "table", "cash_snapshot", "Snapshot de caja"),
-    ItemSpec("1.2", "table", "income_statement_monthly_last6", "P&L mensual últimos 6 meses"),
-    ItemSpec("1.3", "table", "rent_rollup_by_place_m_last6", "Renta por lugar, caja y moneda"),
-    ItemSpec("1.4", "table", "flow_type_rollup_m_last6", "Drilldown por flujo y tipo"),
-    ItemSpec("1.5", "table", "data_quality", "Calidad de datos y cobertura"),
-]
 
 DEFAULT_CSS = """
 :root {
@@ -154,93 +139,26 @@ def _df_to_html_fragment(
     return f"<h2>{title}</h2>\n{note_html}\n{body}\n"
 
 
-def _manifest_item(spec: ItemSpec, csv_path: Path, html_path: Path) -> Dict[str, Any]:
+def _manifest_item(spec: HumanTableSpec, csv_path: Path, html_path: Path) -> Dict[str, Any]:
     return {
         "item_id": spec.item_id,
-        "kind": spec.kind,
+        "kind": "table",
         "slug": spec.slug,
         "title": spec.title,
         "csv": str(csv_path),
         "html": str(html_path),
+        "group": spec.group,
+        "notes": spec.notes,
     }
-
-
-# def ensure_metrics_exist(metrics_dir: Path, run_root: Optional[Path], as_of_date: str) -> None:
-#     required = [
-#         metrics_dir / "metric_registry.csv",
-#         metrics_dir / "metric_values.csv",
-#         metrics_dir / "validation_report.csv",
-#         metrics_dir / "build_manifest.json",
-#     ]
-#     if all(p.exists() for p in required):
-#         return
-
-#     if run_root is None:
-#         missing = [str(p) for p in required if not p.exists()]
-#         raise FileNotFoundError(
-#             "Metrics artifacts missing and no --run-root provided to bootstrap them. Missing: "
-#             + ", ".join(missing)
-#         )
-
-#     cmd = [
-#         "python3",
-#         "-m",
-#         "accounting.build_metric_values",
-#         "--run-root",
-#         str(run_root),
-#         "--out-dir",
-#         str(metrics_dir),
-#         "--as-of-date",
-#         as_of_date,
-#     ]
-#     subprocess.run(cmd, check=True)
-
-
-# def read_metrics_artifacts(metrics_dir: Path) -> Dict[str, Any]:
-#     return {
-#         "registry": pd.read_csv(metrics_dir / "metric_registry.csv"),
-#         "metric_values": pd.read_csv(metrics_dir / "metric_values.csv"),
-#         "validation": pd.read_csv(metrics_dir / "validation_report.csv"),
-#         "manifest": json.loads((metrics_dir / "build_manifest.json").read_text(encoding="utf-8")),
-#     }
-
-
-def read_metrics_artifacts(metrics_dir: Path) -> Dict[str, Any]:
-    required = {
-        "registry": metrics_dir / "metric_registry.csv",
-        "metric_values": metrics_dir / "metric_values.csv",
-        "validation": metrics_dir / "validation_report.csv",
-        "manifest": metrics_dir / "build_manifest.json",
-    }
-    missing = [str(p) for p in required.values() if not p.exists()]
-    if missing:
-        raise FileNotFoundError(
-            "Missing required metrics artifacts in metrics_dir: " + ", ".join(missing)
-        )
-
-    return {
-        "registry": pd.read_csv(required["registry"]),
-        "metric_values": pd.read_csv(required["metric_values"]),
-        "validation": pd.read_csv(required["validation"]),
-        "manifest": json.loads(required["manifest"].read_text(encoding="utf-8")),
-    }
-
-def read_metric_view(metrics_dir: Path, filename: str) -> pd.DataFrame:
-    path = metrics_dir / METRIC_VIEWS_DIRNAME / filename
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Missing required metric view: {path}. Run accounting.build_metric_values to refresh metric_views."
-        )
-    return pd.read_csv(path)
-
 
 
 def read_metric_views_manifest(metrics_dir: Path) -> Dict[str, str]:
-    df = read_metric_view(metrics_dir, METRIC_VIEWS_MANIFEST_FILENAME)
+    path = metrics_dir / METRIC_VIEWS_DIRNAME / METRIC_VIEWS_MANIFEST_FILENAME
+    if not path.exists():
+        raise FileNotFoundError(f"Missing metric views manifest: {path}")
+    df = pd.read_csv(path)
     if df.empty:
-        raise FileNotFoundError(
-            f"Metric views manifest is empty: {metrics_dir / METRIC_VIEWS_DIRNAME / METRIC_VIEWS_MANIFEST_FILENAME}"
-        )
+        raise FileNotFoundError(f"Metric views manifest is empty: {path}")
     return {k: str(v) for k, v in df.iloc[0].to_dict().items()}
 
 
@@ -263,122 +181,66 @@ def ensure_required_metric_views(metrics_dir: Path) -> None:
         )
 
 
-def _infer_run_root(manifest: Dict[str, Any], explicit_run_root: Optional[Path]) -> Path:
-    if explicit_run_root is not None:
-        return explicit_run_root
-    run_root = manifest.get("run_root", "")
-    if not run_root:
-        raise FileNotFoundError("Could not infer run_root from manifest and none was provided.")
-    return Path(run_root)
+def build_summary_kpis(tables: Dict[str, pd.DataFrame]) -> List[Dict[str, str]]:
+    cash_snapshot = tables.get("cash_snapshot", pd.DataFrame())
+    debt_snapshot = tables.get("debt_snapshot", pd.DataFrame())
+    income_statement_m = tables.get("income_statement_monthly_last6", pd.DataFrame())
+    draws_discipline_m = tables.get("draws_discipline_monthly_last6", pd.DataFrame())
 
-def _latest_period(metric_values: pd.DataFrame, grain: str) -> Optional[str]:
-    vals = sorted(metric_values.loc[metric_values["period_grain"] == grain, "period"].dropna().astype(str).unique().tolist())
-    return vals[-1] if vals else None
-
-
-def _prev_y(period_y: Optional[str]) -> Optional[str]:
-    if not period_y:
-        return None
-    try:
-        return str(int(period_y) - 1)
-    except Exception:
-        return None
-
-
-def _lookup_metric(metric_values: pd.DataFrame, metric_id: str, grain: str, period: Optional[str]) -> pd.DataFrame:
-    if not period:
-        return metric_values.iloc[0:0].copy()
-    return metric_values.loc[
-        (metric_values["metric_id"] == metric_id)
-        & (metric_values["period_grain"] == grain)
-        & (metric_values["period"] == period)
-    ].copy()
-
-
-def _label_map(registry: pd.DataFrame) -> Dict[str, str]:
-    if "label" not in registry.columns:
-        return {}
-    return dict(zip(registry["metric_id"].astype(str), registry["label"].astype(str)))
-
-
-def build_cash_snapshot(registry: pd.DataFrame, metric_values: pd.DataFrame) -> pd.DataFrame:
-    metric_ids = ["BS.CASH.FB", "BS.CASH.PM", "BS.CASH.TOTAL"]
-    current_y = _latest_period(metric_values, "Y")
-    prev_y = _prev_y(current_y)
-    label_map = _label_map(registry)
-
-    rows = []
-    for metric_id in metric_ids:
-        cur = _lookup_metric(metric_values, metric_id, "Y", current_y)
-        prv = _lookup_metric(metric_values, metric_id, "Y", prev_y)
-        currencies = sorted(set(cur["currency"].astype(str)) | set(prv["currency"].astype(str))) or [""]
-        for currency in currencies:
-            c = cur.loc[cur["currency"].astype(str) == currency]
-            p = prv.loc[prv["currency"].astype(str) == currency]
-            cur_val = c["value"].iloc[0] if not c.empty else pd.NA
-            prev_val = p["value"].iloc[0] if not p.empty else pd.NA
-            delta = (cur_val - prev_val) if (pd.notna(cur_val) and pd.notna(prev_val)) else pd.NA
-            rows.append({
-                "metric_id": metric_id,
-                "label": label_map.get(metric_id, metric_id),
-                "currency": currency,
-                "period": current_y or "",
-                "value": cur_val,
-                "prev_y": prev_val,
-                "delta_vs_prev_y": delta,
-            })
-    return pd.DataFrame(rows)
-
-
-def build_data_quality(registry: pd.DataFrame, metric_values: pd.DataFrame, validation: pd.DataFrame, manifest: Dict[str, Any]) -> pd.DataFrame:
-    active_leaf = registry.loc[
-        registry.get("is_leaf", pd.Series(False, index=registry.index)).astype(bool)
-        & (registry.get("status", pd.Series("active", index=registry.index)).astype(str) == "active")
-    ].copy()
-    built_metric_ids = set(metric_values["metric_id"].astype(str).tolist())
-    missing_leaf = active_leaf.loc[~active_leaf["metric_id"].astype(str).isin(built_metric_ids)]
-
-    errors = validation.loc[validation.get("level", pd.Series("", index=validation.index)).astype(str).str.lower() == "error"]
-    warnings = validation.loc[validation.get("level", pd.Series("", index=validation.index)).astype(str).str.lower() == "warning"]
-
-    rows = [
-        {"check_name": "registry_rows", "value": int(len(registry)), "status": "ok", "detail": ""},
-        {"check_name": "metric_values_rows", "value": int(len(metric_values)), "status": "ok", "detail": ""},
-        {"check_name": "validation_errors", "value": int(len(errors)), "status": "error" if len(errors) else "ok", "detail": "; ".join(errors.get("check_name", pd.Series(dtype=str)).astype(str).tolist())},
-        {"check_name": "validation_warnings", "value": int(len(warnings)), "status": "warning" if len(warnings) else "ok", "detail": "; ".join(warnings.get("check_name", pd.Series(dtype=str)).astype(str).tolist())},
-        {"check_name": "missing_active_leaf_metrics", "value": int(len(missing_leaf)), "status": "warning" if len(missing_leaf) else "ok", "detail": ", ".join(missing_leaf["metric_id"].astype(str).tolist())},
-        {"check_name": "source_run_root", "value": manifest.get("run_root", ""), "status": "ok", "detail": ""},
-        {"check_name": "source_run_id", "value": manifest.get("run_id", ""), "status": "ok", "detail": ""},
-        {"check_name": "as_of_date", "value": manifest.get("as_of_date", ""), "status": "ok", "detail": ""},
-    ]
-    return pd.DataFrame(rows)
-
-
-def build_summary_kpis(cash_snapshot: pd.DataFrame, income_statement_m: pd.DataFrame, draws_discipline_m: pd.DataFrame) -> List[Dict[str, str]]:
-    def _pick_cash() -> Dict[str, str]:
-        sub = cash_snapshot.loc[cash_snapshot["metric_id"] == "BS.CASH.TOTAL"]
+    def _pick_row(df: pd.DataFrame, metric_id: str, currency: Optional[str] = None) -> Optional[pd.Series]:
+        if df.empty or "metric_id" not in df.columns:
+            return None
+        sub = df.loc[df["metric_id"] == metric_id]
+        if currency is not None and "currency" in sub.columns:
+            sub = sub.loc[sub["currency"].astype(str) == str(currency)]
         if sub.empty:
+            return None
+        return sub.iloc[0]
+
+    def _pick_cash_total() -> Dict[str, str]:
+        row = _pick_row(cash_snapshot, "BS.CASH.TOTAL", "ARS")
+        if row is None:
+            row = _pick_row(cash_snapshot, "BS.CASH.TOTAL")
+        if row is None:
             return {"label": "Caja total", "value": "N/A"}
-        row = sub.iloc[0]
         return {"label": f"Caja total [{row.get('currency','')}]", "value": _fmt_num(row.get("value", pd.NA))}
 
+    def _pick_debt_net() -> Dict[str, str]:
+        row = _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION", "USD")
+        if row is None:
+            row = _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION", "ARS")
+        if row is None:
+            row = _pick_row(debt_snapshot, "BS.DEBT.NET_PM_POSITION")
+        if row is None:
+            return {"label": "Posición neta PM", "value": "N/A"}
+        return {"label": f"Posición neta PM [{row.get('currency','')}]", "value": _fmt_num(row.get("value", pd.NA))}
+
     def _pick_metric(metric_id: str, label: str) -> Dict[str, str]:
+        if income_statement_m.empty or "metric_id" not in income_statement_m.columns:
+            return {"label": label, "value": "N/A"}
         sub = income_statement_m.loc[income_statement_m["metric_id"] == metric_id]
         if sub.empty:
             return {"label": label, "value": "N/A"}
         row = sub.iloc[0]
-        last_cols = [c for c in sub.columns if c.startswith("20")]
+        last_cols = [c for c in sub.columns if str(c).startswith("20")]
         val = row[last_cols[-1]] if last_cols else pd.NA
         return {"label": f"{label} [{row.get('currency','')}]", "value": _fmt_num(val)}
 
     kpis = [
-        _pick_cash(),
+        _pick_cash_total(),
+        _pick_debt_net(),
         _pick_metric("IS.NET.AFTER_COSTS", "Neto después de costos"),
         _pick_metric("IS.OPEX.TOTAL", "Opex"),
     ]
+
     if not draws_discipline_m.empty:
         row = draws_discipline_m.iloc[0]
-        kpis.append({"label": f"Meses en distress [{row.get('currency','')}]", "value": str(int(row.get("distress_months", 0)))})
+        kpis.append(
+            {
+                "label": f"Meses en distress [{row.get('currency','')}]",
+                "value": str(int(row.get("distress_months", 0))),
+            }
+        )
     return kpis
 
 
@@ -394,35 +256,18 @@ def build_human_balance_report(
     include_statuses: Sequence[str],
     noise_floor_by_currency: Dict[str, float],
 ) -> None:
-    arts = read_metrics_artifacts(metrics_dir)
     ensure_required_metric_views(metrics_dir)
     metric_views_manifest = read_metric_views_manifest(metrics_dir)
     drilldown_index = read_metric_drilldown_index(metrics_dir)
     dd_lookup = drilldown_lookup(drilldown_index)
-    registry = arts["registry"]
-    metric_values = arts["metric_values"]
-    validation = arts["validation"]
-    manifest_in = arts["manifest"]
 
-    cash_snapshot = build_cash_snapshot(registry, metric_values)
-    income_statement_monthly_last6 = read_metric_view(metrics_dir, "income_statement_monthly_last6.csv")
-    rent_rollup_by_place = read_metric_view(metrics_dir, "rent_rollup_by_place_m_last6.csv")
-    flow_type_rollup = read_metric_view(metrics_dir, "flow_type_rollup_m_last6.csv")
-    draws_discipline_monthly = read_metric_view(metrics_dir, "draws_discipline_monthly_last6.csv")
-    data_quality = build_data_quality(registry, metric_values, validation, manifest_in)
-
-    tables = {
-        "cash_snapshot": cash_snapshot,
-        "income_statement_monthly_last6": income_statement_monthly_last6,
-        "rent_rollup_by_place_m_last6": rent_rollup_by_place,
-        "flow_type_rollup_m_last6": flow_type_rollup,
-        "data_quality": data_quality,
-    }
-    item_by_slug = {x.slug: x for x in ITEMS}
+    ctx = load_human_tables_context(metrics_dir)
+    specs, tables = build_human_tables_with_specs(ctx)
 
     dirs = _ensure_dirs(write_dir)
     drilldown_html_dir = write_dir / "drilldown"
     drilldown_html_dir.mkdir(parents=True, exist_ok=True)
+
     manifest: Dict[str, Any] = {
         "report_id": REPORT_ID,
         "created_at_utc": _now_iso(),
@@ -446,13 +291,13 @@ def build_human_balance_report(
         return f"<a href='{html_relpath}' target='_blank' rel='noopener noreferrer'>{_fmt_num(value)}</a>"
 
     def _income_statement_renderer(col: str, value: Any, row: pd.Series) -> Optional[str]:
-        if col.startswith("20"):
-            return _drilldown_link(str(row.get("metric_id", "")), "M", col, str(row.get("currency", "")), value)
+        if str(col).startswith("20"):
+            return _drilldown_link(str(row.get("metric_id", "")), "M", str(col), str(row.get("currency", "")), value)
         return None
 
     def _draws_renderer(col: str, value: Any, row: pd.Series) -> Optional[str]:
-        if col.startswith("draws_"):
-            period = col.replace("draws_", "", 1)
+        if str(col).startswith("draws_"):
+            period = str(col).replace("draws_", "", 1)
             return _drilldown_link("IS.DRAWS.PERSONAL", "M", period, str(row.get("currency", "")), value)
         return None
 
@@ -462,9 +307,11 @@ def build_human_balance_report(
         detail_slug = Path(detail_csv_relpath).stem if detail_csv_relpath else ""
         if not detail_slug:
             continue
+
         detail_html_relpath = f"drilldown/{detail_slug}.html"
         detail_df = pd.read_csv(detail_csv_path) if detail_csv_path.exists() else pd.DataFrame()
         filter_json = str(dd_row.get("filter_json", ""))
+
         metadata_html = (
             f"<h1>{dd_row.get('metric_id', '')}</h1>"
             f"<p>run_id: {dd_row.get('run_id', '')}<br>"
@@ -482,6 +329,7 @@ def build_human_balance_report(
             f"<h2>Filter spec</h2><div class='pre'>{filter_json}</div>"
             f"<p><a href='../../{detail_csv_relpath}' target='_blank' rel='noopener noreferrer'>Abrir CSV detalle</a></p>"
         )
+
         detail_html = (
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             f"<title>{dd_row.get('metric_id', '')}</title><style>{DEFAULT_CSS}</style>"
@@ -504,21 +352,31 @@ def build_human_balance_report(
             dd_lookup = drilldown_lookup(drilldown_index)
             drilldown_index.to_csv(metrics_dir / DRILLDOWN_DIRNAME / DRILLDOWN_INDEX_FILENAME, index=False)
 
-    for slug, df in tables.items():
-        spec = item_by_slug[slug]
+    renderer_by_slug: Dict[str, Callable[[str, Any, pd.Series], Optional[str]]] = {
+        "income_statement_monthly_last6": _income_statement_renderer,
+        "draws_discipline_monthly_last6": _draws_renderer,
+    }
+
+    spec_by_slug = {s.slug: s for s in specs}
+
+    for spec in specs:
+        df = tables.get(spec.slug, pd.DataFrame())
         base = f"{spec.item_id}__{spec.slug}"
         csv_path = dirs["tables"] / f"{base}.csv"
         html_path = dirs["html"] / f"{base}.html"
         _write_csv(df, csv_path)
-        cell_renderer = None
-        if slug == "income_statement_monthly_last6":
-            cell_renderer = _income_statement_renderer
-        elif slug == "draws_discipline_monthly_last6":
-            cell_renderer = _draws_renderer
-        _write_text(_df_to_html_fragment(df, spec.title, spec.notes, cell_renderer=cell_renderer), html_path)
+        _write_text(
+            _df_to_html_fragment(
+                df,
+                spec.title,
+                spec.notes,
+                cell_renderer=renderer_by_slug.get(spec.slug),
+            ),
+            html_path,
+        )
         manifest["items"].append(_manifest_item(spec, csv_path, html_path))
 
-    kpis = build_summary_kpis(cash_snapshot, income_statement_monthly_last6, draws_discipline_monthly)
+    kpis = build_summary_kpis(tables)
     kpi_html = "\n".join(
         f"<div class='kpi'><div class='label'>{x['label']}</div><div class='value'>{x['value']}</div></div>"
         for x in kpis
@@ -526,15 +384,32 @@ def build_human_balance_report(
 
     standalone_sections = [
         "<h1>Balance humano v2</h1>",
-        f"<p>run_id: {manifest_in.get('run_id', '')}<br>as_of_date: {manifest_in.get('as_of_date', '')}<br>run_root: {run_root}<br>months: {metric_views_manifest.get('months', months)}</p>",
+        f"<p>run_id: {ctx.manifest.get('run_id', '')}<br>"
+        f"as_of_date: {ctx.manifest.get('as_of_date', '')}<br>"
+        f"run_root: {run_root}<br>"
+        f"months: {metric_views_manifest.get('months', months)}</p>",
         f"<div class='kpi-grid'>{kpi_html}</div>",
-        _df_to_html_fragment(cash_snapshot, "Snapshot de caja"),
-        _df_to_html_fragment(income_statement_monthly_last6, f"P&L mensual últimos {months} meses", cell_renderer=_income_statement_renderer),
-        _df_to_html_fragment(rent_rollup_by_place, "Renta por lugar, caja y moneda", f"groupby = Box, Currency, {metric_views_manifest.get('rent_place_col', rent_place_col)}"),
-        _df_to_html_fragment(flow_type_rollup, "Drilldown por flujo y tipo", f"groupby = {metric_views_manifest.get('flow_rollup_groupby', '').replace(',', ' , ') or ' , '.join(flow_rollup_groupby)}"),
-        _df_to_html_fragment(draws_discipline_monthly, "Retiros y disciplina, últimos 6 meses", cell_renderer=_draws_renderer),
-        _df_to_html_fragment(data_quality, "Calidad de datos y cobertura"),
     ]
+
+    for spec in specs:
+        df = tables.get(spec.slug, pd.DataFrame())
+        note = spec.notes
+        if spec.slug == "rent_rollup_by_place_m_last6":
+            note = note or f"groupby = Box, Currency, {metric_views_manifest.get('rent_place_col', rent_place_col)}"
+        elif spec.slug == "rent_rollup_by_detail_m_last6":
+            note = note or f"groupby = Box, Currency, {metric_views_manifest.get('rent_detail_col', rent_detail_col)}"
+        elif spec.slug == "flow_type_rollup_m_last6":
+            note = note or f"groupby = {metric_views_manifest.get('flow_rollup_groupby', '').replace(',', ' , ') or ' , '.join(flow_rollup_groupby)}"
+
+        standalone_sections.append(
+            _df_to_html_fragment(
+                df,
+                spec.title,
+                note,
+                cell_renderer=renderer_by_slug.get(spec.slug),
+            )
+        )
+
     standalone_html = (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         "<title>Balance humano v2</title>"
@@ -543,29 +418,19 @@ def build_human_balance_report(
         + "\n".join(standalone_sections)
         + "</main></body></html>"
     )
+
     _write_text(standalone_html, dirs["base"] / "balance_humano_v2.html")
     _write_text(DEFAULT_CSS, dirs["base"] / "report.css")
     _write_text(json.dumps(manifest, indent=2, ensure_ascii=False), dirs["base"] / "story_manifest.json")
 
-    # useful extra drilldown not in manifest
-    rent_rollup_by_detail = read_metric_view(metrics_dir, "rent_rollup_by_detail_m_last6.csv")
-    _write_csv(rent_rollup_by_detail, dirs["tables"] / "extra__rent_rollup_by_detail_m_last6.csv")
-    _write_text(
-        _df_to_html_fragment(
-            rent_rollup_by_detail,
-            "Renta por detalle, caja y moneda",
-            f"groupby = Box, Currency, {metric_views_manifest.get('rent_detail_col', rent_detail_col)}",
-        ),
-        dirs["html"] / "extra__rent_rollup_by_detail_m_last6.html",
-    )
-
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build a human-oriented balance report from metrics artifacts and metric_views outputs.")
+    p = argparse.ArgumentParser(
+        description="Build a human-oriented balance report from metrics artifacts and metric_views outputs."
+    )
     p.add_argument("--run-root", required=True, help="Accounting run root containing ledger_canonical.csv")
     p.add_argument("--metrics-dir", required=True, help="Directory with metric_registry.csv / metric_values.csv etc.")
     p.add_argument("--write-dir", required=True, help="Output balance report directory.")
-    # p.add_argument("--as-of-date", default=pd.Timestamp.today().date().isoformat(), help="Used if metrics bootstrap is needed.")
     p.add_argument("--months", type=int, default=6, help="Number of monthly periods to surface.")
     p.add_argument("--rent-place-col", default="Lugar", help="Column used for rent rollup by place.")
     p.add_argument("--rent-detail-col", default="Detalle", help="Column used for rent rollup by detail.")
@@ -575,27 +440,29 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-
 def main() -> None:
     configure_logging()
     args = parse_args()
+
     metrics_dir = Path(args.metrics_dir)
     write_dir = Path(args.write_dir)
-    run_root = Path(args.run_root) if args.run_root else None
+    run_root = Path(args.run_root)
     include_statuses = tuple(x.strip() for x in args.include_statuses.split(",") if x.strip())
     noise_floor_by_currency = parse_noise_floor(args.noise_floor)
     flow_rollup_groupby = [x.strip() for x in args.flow_rollup_groupby.split(",") if x.strip()]
 
-    LOG.info("Stage start run_root=%s metrics_dir=%s write_dir=%s months=%s", run_root, metrics_dir, write_dir, args.months)
-
-    # ensure_metrics_exist(metrics_dir=metrics_dir, run_root=run_root, as_of_date=args.as_of_date)
-    # inferred_run_root = _infer_run_root(arts["manifest"], run_root)
-    inferred_run_root = Path(args.run_root)
+    LOG.info(
+        "Stage start run_root=%s metrics_dir=%s write_dir=%s months=%s",
+        run_root,
+        metrics_dir,
+        write_dir,
+        args.months,
+    )
 
     build_human_balance_report(
         metrics_dir=metrics_dir,
         write_dir=write_dir,
-        run_root=inferred_run_root,
+        run_root=run_root,
         months=args.months,
         rent_place_col=args.rent_place_col,
         rent_detail_col=args.rent_detail_col,
@@ -604,7 +471,11 @@ def main() -> None:
         noise_floor_by_currency=noise_floor_by_currency,
     )
 
-    LOG.info("Stage finish story_manifest=%s standalone_html=%s", write_dir / "story_manifest.json", write_dir / "balance_humano_v2.html")
+    LOG.info(
+        "Stage finish story_manifest=%s standalone_html=%s",
+        write_dir / "story_manifest.json",
+        write_dir / "balance_humano_v2.html",
+    )
 
 
 if __name__ == "__main__":
