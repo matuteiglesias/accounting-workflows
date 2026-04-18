@@ -14,6 +14,23 @@ MAKEFLAGS += --no-print-directory
 PY ?= python3
 export PYTHONUNBUFFERED := 1
 
+-include .env
+export ACCOUNT_SHEET_URL ACCOUNT_SA ACCOUNT_SHEET_NAME
+
+
+# ----------------------------------------
+# Explicit env wrappers (no implicit .env include)
+# ----------------------------------------
+ENV_FILE ?= private/accounting.env
+
+.PHONY: run-env smoke-env
+run-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-accounting'
+
+smoke-env:
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-accounting'
+
+	
 # ----------------------------------------
 # Resolve repo root (assumes Makefile in repo root)
 # ----------------------------------------
@@ -92,13 +109,15 @@ RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
 METRICS_LATEST := $(OUT)/metrics/latest
 HUMAN_LATEST   := $(OUT)/human_reports/latest
 
+RUN_DEBT_DIR          := $(OUT)/debt_resolution/$(RUN_RUN_ID)
+RUN_DEBT_BALANCE_DIR  := $(OUT)/debt_resolution/$(RUN_RUN_ID)
 
+DEBT_LATEST := $(OUT)/debt_resolution/latest
 
 DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
 DEBT_FULL_ONLY ?= 1
-RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_RUN_ID)
-DEBT_LATEST := $(OUT)/debt_resolution/latest
+DEBT_EXCLUDE_HOUSEHOLD ?= 1
 
 
 
@@ -132,7 +151,6 @@ _update_latest:
 		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
 	'	link_swap "$(OUT)/debt_resolution" "$(RUN_REL)";
 
-
 # ----------------------------------------
 # Help
 # ----------------------------------------
@@ -144,6 +162,7 @@ help:
 	@echo "  make run-materialize"
 	@echo "  make run-views"
 	@echo "  make run-debt                # resolve internal debt artifacts"
+	@echo "  make run-debt-balance        # build canonical debt balance views"
 	@echo "  make run-metrics"
 	@echo "  make run-human-balance"
 	@echo "  make run-accounting           # wrapper for the official full path above"
@@ -155,7 +174,7 @@ help:
 	@echo ""
 	@echo "Per-step targets:"
 	@echo "  make smoke-ingest | smoke-materialize | smoke-views"
-	@echo "  make run-ingest   | run-materialize   | run-views | run-metrics | run-human-balance"
+	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-balance | run-metrics | run-human-balance"
 	@echo ""	
 	@echo "Key vars:"
 	@echo "  OUT=out  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
@@ -167,7 +186,9 @@ help:
 # Meta targets
 # ----------------------------------------
 .PHONY: smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
+
 smoke-accounting: smoke-views
+
 run-accounting: run-accounting-full
 run-accounting-full: run-human-balance
 
@@ -176,13 +197,16 @@ run-downstream-from-ledger:
 	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT). Run make run-ingest first or point RUN_STAMP to an existing run."; exit 2)
 	@$(MAKE) _run_materialize_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
 	@$(MAKE) _run_views_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
-	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
+	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
+	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
 run-metrics-and-human:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY). Run make run-views first or point RUN_STAMP to an existing run."; exit 2)
+	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
+	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
@@ -295,7 +319,6 @@ _run_views_action:
 
 
 
-
 .PHONY: run-debt _run_debt_action
 run-debt: run-views _run_debt_action
 
@@ -310,33 +333,41 @@ _run_debt_action:
 			--service-account "$(ACCOUNT_SA)" \
 			--sheet-name "$(ACCOUNT_SHEET_NAME)" \
 			--write-dir "$(RUN_DEBT_DIR)" \
-			--exclude-household \
 			--currencies "$(DEBT_CURRENCIES)" \
 			--repayment-statuses "$(DEBT_REPAYMENT_STATUSES)" \
 		); \
+		if [ "$(DEBT_EXCLUDE_HOUSEHOLD)" = "1" ]; then \
+			args+=( --exclude-household ); \
+		fi; \
 		if [ "$(DEBT_FULL_ONLY)" = "1" ]; then \
 			args+=( --full-only ); \
 		fi; \
 		$(PY) -m accounting.resolve_internal_debt_v2 "$${args[@]}"; \
-		$(PY) -m accounting.build_debt_balance_views \
-			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
-			--write-dir "$(RUN_DEBT_DIR)"; \
 		test -s "$(RUN_DEBT_DIR)/debt_open_items.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_allocations.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_repayment_events.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_resolution_timeline.csv"; \
-		test -s "$(RUN_DEBT_DIR)/debt_status_reconciliation.csv"; \
-		test -s "$(RUN_DEBT_DIR)/debt_balance_monthly.csv"; \
-		test -s "$(RUN_DEBT_DIR)/debt_balance_quarterly.csv"; \
-		test -s "$(RUN_DEBT_DIR)/debt_balance_yearly.csv"; \
+	'
+
+.PHONY: run-debt-balance _run_debt_balance_action
+run-debt-balance: run-debt _run_debt_balance_action
+
+_run_debt_balance_action:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_DEBT_DIR)/debt_open_items.csv" || (echo "ERROR: missing debt_open_items.csv at $(RUN_DEBT_DIR)"; exit 2)
+	@bash -eu -o pipefail -c '\
+		$(PY) -m accounting.build_debt_balance_views \
+			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
+			--write-dir "$(RUN_DEBT_BALANCE_DIR)"; \
+		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_daily.csv"; \
+		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_monthly.csv"; \
+		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_quarterly.csv"; \
+		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_yearly.csv"; \
 	'
 
 
-
-
-
 .PHONY: run-metrics _run_metrics_action
-run-metrics: run-debt _run_metrics_action
+run-metrics: run-debt-balance _run_metrics_action
 
 _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -363,7 +394,6 @@ _run_metrics_action:
 		test -s "$(RUN_METRICS_DIR)/metric_views/draws_discipline_monthly_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/metric_views_manifest.csv"; \
 	'
-
 
 
 .PHONY: run-human-balance _run_human_balance_action
@@ -523,15 +553,3 @@ run: run-accounting
 run-all: run-accounting
 	@echo "[RUN] done. latest -> $(RUN_REL)"
 
-
-# ----------------------------------------
-# Explicit env wrappers (no implicit .env include)
-# ----------------------------------------
-ENV_FILE ?= private/accounting.env
-
-.PHONY: run-env smoke-env
-run-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-accounting'
-
-smoke-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-accounting'

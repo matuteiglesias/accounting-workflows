@@ -16,6 +16,15 @@ DEFAULT_REPAYMENT_STATUSES = "pagado"
 RULE_VERSION = "interest_first_fifo_full_only_skip_if_insufficient_v2"
 
 
+
+from accounting.logging_utils import configure_logging, get_logger
+
+LOG = get_logger("debt")
+
+from dataclasses import asdict
+from typing import Dict, List, Tuple
+
+
 @dataclass
 class OpenItem:
     debt_id: str
@@ -219,6 +228,10 @@ def build_open_items(df: pd.DataFrame, verbose: bool = False) -> List[OpenItem]:
         if verbose:
             print(*args)
 
+    # def tprint(*args):
+    # if trace:
+    #     LOG.debug(" ".join(str(x) for x in args))
+
     debt_rows = df.loc[df["Tipo"].isin(VALID_DEBT_TYPES)].copy()
     vprint(f"[build_open_items] total_rows={len(df)} debt_rows={len(debt_rows)}")
 
@@ -293,19 +306,38 @@ def resolve_repayments(
     full_only: bool = True,
     rule_version: str = RULE_VERSION,
     verbose: bool = False,
+    trace: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    def vprint(*args):
+    """
+    Resolve repayments against open debt items.
+
+    Logging policy:
+      - INFO: stage-level summaries and per-repayment compact summaries when verbose=True
+      - DEBUG: previews and per-item allocation decisions when trace=True
+      - WARNING: suspicious operational situations (no candidates, large leftovers, etc.)
+    """
+
+    def dlog(msg: str, *args) -> None:
+        if trace:
+            LOG.debug(msg, *args)
+
+    def vlog(msg: str, *args) -> None:
         if verbose:
-            print(*args)
+            LOG.info(msg, *args)
 
     items = sort_open_items(open_items)
     allocations: List[Allocation] = []
     repayment_events: List[RepaymentEvent] = []
     timeline: List[TimelineEvent] = []
 
-    vprint("\n[resolve] ===== START =====")
-    vprint(f"[resolve] open_items_in={len(open_items)} sorted_items={len(items)} repayments_in={len(repayments)}")
-    vprint(f"[resolve] rule_version={rule_version} full_only={full_only}")
+    LOG.info(
+        "Resolve start open_items_in=%d sorted_items=%d repayments_in=%d rule_version=%s full_only=%s",
+        len(open_items),
+        len(items),
+        len(repayments),
+        rule_version,
+        full_only,
+    )
 
     if items:
         preview = [
@@ -321,11 +353,9 @@ def resolve_repayments(
             }
             for x in items[:10]
         ]
-        vprint("[resolve] first open items preview:")
-        for row in preview:
-            vprint("  ", row)
+        dlog("First open items preview=%s", preview)
     else:
-        vprint("[resolve] WARNING: no open items were provided to resolver")
+        LOG.warning("Resolver received no open items")
 
     by_key: Dict[Tuple[str, str, str], List[OpenItem]] = {}
     for item in items:
@@ -346,12 +376,21 @@ def resolve_repayments(
             )
         )
 
-    vprint(f"[resolve] candidate key count={len(by_key)}")
-    if by_key:
-        vprint("[resolve] candidate keys and counts:")
-        for key, vals in sorted(by_key.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
-            total_open = sum(float(x.open_amount) for x in vals if x.engine_status != "closed")
-            vprint(f"  key={key} n_items={len(vals)} total_open={total_open:.2f}")
+    key_summary = []
+    for key, vals in sorted(by_key.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
+        total_open = sum(float(x.open_amount) for x in vals if x.engine_status != "closed")
+        key_summary.append(
+            {
+                "debtor": key[0],
+                "creditor": key[1],
+                "currency": key[2],
+                "n_items": len(vals),
+                "total_open": round(total_open, 2),
+            }
+        )
+
+    LOG.info("Resolver candidate_key_count=%d", len(by_key))
+    dlog("Resolver candidate_key_summary=%s", key_summary)
 
     alloc_counter = 1
 
@@ -367,14 +406,20 @@ def resolve_repayments(
         candidates = by_key.get(key, [])
         initial_amount = remaining
         n_allocs = 0
+        skipped_closed = 0
+        skipped_nonpositive = 0
+        skipped_full_only = 0
 
-        vprint("\n[resolve] --- repayment start ---")
-        vprint(
-            f"[resolve] repayment_tx_id={repayment_tx_id} "
-            f"date={repayment_date} debtor={debtor} creditor={creditor} "
-            f"currency={currency} amount={initial_amount:.2f}"
+        vlog(
+            "Repayment start tx_id=%s date=%s debtor=%s creditor=%s currency=%s amount=%.2f candidate_count=%d",
+            repayment_tx_id,
+            repayment_date,
+            debtor,
+            creditor,
+            currency,
+            initial_amount,
+            len(candidates),
         )
-        vprint(f"[resolve] lookup_key={key} candidate_count={len(candidates)}")
 
         timeline.append(
             TimelineEvent(
@@ -392,7 +437,13 @@ def resolve_repayments(
         )
 
         if not candidates:
-            vprint("[resolve] no candidates found for this repayment key")
+            LOG.warning(
+                "Repayment has no candidates tx_id=%s date=%s key=%s amount=%.2f",
+                repayment_tx_id,
+                repayment_date,
+                key,
+                initial_amount,
+            )
             repayment_events.append(
                 RepaymentEvent(
                     repayment_tx_id=repayment_tx_id,
@@ -411,36 +462,49 @@ def resolve_repayments(
 
         for item in candidates:
             if remaining <= 0:
-                vprint("[resolve] repayment fully consumed, break")
+                dlog("Repayment fully consumed tx_id=%s", repayment_tx_id)
                 break
 
-            vprint(
-                f"[resolve] inspecting debt_id={item.debt_id} "
-                f"type={item.item_type} opened_at={item.opened_at} "
-                f"open_amount={float(item.open_amount):.2f} "
-                f"engine_status={item.engine_status}"
+            dlog(
+                "Inspect debt_id=%s type=%s opened_at=%s open_amount=%.2f engine_status=%s repayment_tx_id=%s",
+                item.debt_id,
+                item.item_type,
+                item.opened_at,
+                float(item.open_amount),
+                item.engine_status,
+                repayment_tx_id,
             )
 
             if item.engine_status == "closed":
-                vprint("[resolve] skip: already closed")
+                skipped_closed += 1
+                dlog("Skip closed debt_id=%s", item.debt_id)
                 continue
 
             if item.open_amount <= 0:
-                vprint("[resolve] skip: non-positive open_amount")
+                skipped_nonpositive += 1
+                dlog("Skip nonpositive debt_id=%s open_amount=%.2f", item.debt_id, float(item.open_amount))
                 continue
 
             needed = float(item.open_amount)
 
             if full_only and remaining < needed:
-                vprint(
-                    f"[resolve] skip: full_only=True and remaining={remaining:.2f} < needed={needed:.2f}"
+                skipped_full_only += 1
+                dlog(
+                    "Skip full_only debt_id=%s remaining=%.2f needed=%.2f",
+                    item.debt_id,
+                    remaining,
+                    needed,
                 )
                 continue
 
             alloc_amt = needed if full_only else min(remaining, needed)
-            vprint(
-                f"[resolve] allocate: alloc_amt={alloc_amt:.2f} "
-                f"remaining_before={remaining:.2f}"
+
+            dlog(
+                "Allocate repayment_tx_id=%s debt_id=%s alloc_amt=%.2f remaining_before=%.2f",
+                repayment_tx_id,
+                item.debt_id,
+                alloc_amt,
+                remaining,
             )
 
             item.open_amount = float(item.open_amount - alloc_amt)
@@ -451,14 +515,9 @@ def resolve_repayments(
                 item.open_amount = 0.0
                 item.engine_status = "closed"
                 item.closed_at = repayment_date
-                vprint(
-                    f"[resolve] debt closed: debt_id={item.debt_id} closed_at={repayment_date}"
-                )
+                dlog("Debt closed debt_id=%s closed_at=%s", item.debt_id, repayment_date)
             else:
-                vprint(
-                    f"[resolve] debt partially reduced: debt_id={item.debt_id} "
-                    f"open_amount_now={item.open_amount:.2f}"
-                )
+                dlog("Debt reduced debt_id=%s open_amount_now=%.2f", item.debt_id, item.open_amount)
 
             allocations.append(
                 Allocation(
@@ -493,10 +552,31 @@ def resolve_repayments(
             )
             alloc_counter += 1
 
-        vprint(
-            f"[resolve] repayment end: allocated={initial_amount - remaining:.2f} "
-            f"leftover={remaining:.2f} n_allocations={n_allocs}"
+        allocated_amount = initial_amount - remaining
+
+        vlog(
+            "Repayment end tx_id=%s allocated=%.2f leftover=%.2f n_allocations=%d skipped_closed=%d skipped_nonpositive=%d skipped_full_only=%d",
+            repayment_tx_id,
+            allocated_amount,
+            remaining,
+            n_allocs,
+            skipped_closed,
+            skipped_nonpositive,
+            skipped_full_only,
         )
+
+        if remaining > 0:
+            LOG.warning(
+                "Repayment leftover tx_id=%s debtor=%s creditor=%s currency=%s amount=%.2f allocated=%.2f leftover=%.2f n_allocations=%d",
+                repayment_tx_id,
+                debtor,
+                creditor,
+                currency,
+                initial_amount,
+                allocated_amount,
+                remaining,
+                n_allocs,
+            )
 
         repayment_events.append(
             RepaymentEvent(
@@ -506,7 +586,7 @@ def resolve_repayments(
                 creditor=creditor,
                 currency=currency,
                 repayment_amount=initial_amount,
-                allocated_amount=initial_amount - remaining,
+                allocated_amount=allocated_amount,
                 leftover_amount=remaining,
                 n_allocations=n_allocs,
                 rule_version=rule_version,
@@ -553,14 +633,34 @@ def resolve_repayments(
 
     reconciliation_df = pd.DataFrame([asdict(x) for x in reconciliation_rows])
 
-    vprint("\n[resolve] ===== FINISH =====")
-    vprint(
-        f"[resolve] final shapes: open_items={len(open_items_df)} "
-        f"allocations={len(allocations_df)} repayments={len(repayment_events_df)} "
-        f"timeline={len(timeline_df)} reconciliation={len(reconciliation_df)}"
+    if not reconciliation_df.empty and "reconciliation_note" in reconciliation_df.columns:
+        mismatch_mask = reconciliation_df["reconciliation_note"] != "aligned"
+        n_mismatch = int(mismatch_mask.sum())
+        if n_mismatch:
+            mismatch_counts = (
+                reconciliation_df.loc[mismatch_mask, "reconciliation_note"]
+                .value_counts(dropna=False)
+                .to_dict()
+            )
+            LOG.warning(
+                "Resolver reconciliation mismatches=%d breakdown=%s",
+                n_mismatch,
+                mismatch_counts,
+            )
+        else:
+            LOG.info("Resolver reconciliation aligned rows=%d", len(reconciliation_df))
+
+    LOG.info(
+        "Resolve finish open_items=%d allocations=%d repayments=%d timeline=%d reconciliation=%d",
+        len(open_items_df),
+        len(allocations_df),
+        len(repayment_events_df),
+        len(timeline_df),
+        len(reconciliation_df),
     )
 
     return open_items_df, allocations_df, repayment_events_df, timeline_df, reconciliation_df
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -589,20 +689,27 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     print("[DEBUG] entered main")
     args = parse_args()
-    print(f"[DEBUG] args={args}")
+    # print(f"[DEBUG] args={args}")
 
     write_dir = Path(args.write_dir)
     write_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[DEBUG] write_dir={write_dir}")
+    # print(f"[DEBUG] write_dir={write_dir}")
 
     df = load_debt_ledger(args)
-    print(f"[DEBUG] loaded ledger rows={len(df)} cols={list(df.columns)}")
+    # print(f"[DEBUG] loaded ledger rows={len(df)} cols={list(df.columns)}")
 
     open_items = build_open_items(df, verbose=True)
-    print(f"[DEBUG] open_items={len(open_items)}")
+    # print(f"[DEBUG] open_items={len(open_items)}")
 
     repayments = build_repayments(df, repayment_statuses=_parse_list_arg(args.repayment_statuses))
-    print(f"[DEBUG] repayments={len(repayments)}")
+    # print(f"[DEBUG] repayments={len(repayments)}")
+
+    LOG.info("Stage start write_dir=%s", write_dir)
+    # LOG.info("Loaded ledger rows=%d cols=%s", len(ledger), list(ledger.columns))
+    LOG.info("Open items built rows=%d", len(open_items))
+    LOG.info("Repayments filtered rows=%d", len(repayments))
+
+    # LOG.debug("Filtered ledger preview=%s", preview_records)
 
     open_items_df, allocations_df, repayment_events_df, timeline_df, reconciliation_df = resolve_repayments(
         open_items=open_items,

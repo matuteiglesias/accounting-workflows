@@ -341,7 +341,7 @@ def build_bs_debt_pm_to_mi_open(ctx: MetricsContext) -> pd.DataFrame:
         ctx,
         metric_id="BS.DEBT.PM_TO_MI.OPEN",
         debt_filter=lambda df: (df["debtor"].astype(str) == "Property Management")
-        & (df["creditor"].astype(str) == "Matias"),
+        & (df["creditor"].astype(str) == "MI"),
         value_col="open_total",
     )
 
@@ -371,7 +371,7 @@ def build_bs_debt_principal_open(ctx: MetricsContext) -> pd.DataFrame:
         ctx,
         metric_id="BS.DEBT.PRINCIPAL.OPEN",
         debt_filter=lambda df: (df["debtor"].astype(str) == "Property Management")
-        & (df["creditor"].astype(str).isin(["Matias", "Primos"])),
+        & (df["creditor"].astype(str).isin(["MI", "Primos"])),
         value_col="open_principal",
     )
 
@@ -381,7 +381,7 @@ def build_bs_debt_interest_open(ctx: MetricsContext) -> pd.DataFrame:
         ctx,
         metric_id="BS.DEBT.INTEREST.OPEN",
         debt_filter=lambda df: (df["debtor"].astype(str) == "Property Management")
-        & (df["creditor"].astype(str).isin(["Matias", "Primos"])),
+        & (df["creditor"].astype(str).isin(["MI", "Primos"])),
         value_col="open_interest",
     )
 
@@ -391,7 +391,7 @@ def build_bs_debt_total_open(ctx: MetricsContext) -> pd.DataFrame:
         ctx,
         metric_id="BS.DEBT.TOTAL.OPEN",
         debt_filter=lambda df: (df["debtor"].astype(str) == "Property Management")
-        & (df["creditor"].astype(str).isin(["Matias", "Primos"])),
+        & (df["creditor"].astype(str).isin(["MI", "Primos"])),
         value_col="open_total",
     )
 
