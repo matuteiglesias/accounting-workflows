@@ -144,4 +144,11 @@ def default_metric_specs_v1() -> list[MetricSpec]:
         MetricSpec("BS.CASH.FB", "BS", "CASH", "Fondos FB al cierre", "last", True, "daily_cash_position", "build_bs_cash_fb", "BS.CASH.TOTAL", "BS.1.1", 810),
         MetricSpec("BS.CASH.PM", "BS", "CASH", "Fondos PM al cierre", "last", True, "daily_cash_position", "build_bs_cash_pm", "BS.CASH.TOTAL", "BS.1.2", 820),
         MetricSpec("BS.CASH.TOTAL", "BS", "CASH", "Activos líquidos totales", "sum_components", False, "", "", "BS.ASSETS.TOTAL", "BS.1", 800),
+        MetricSpec("BS.DEBT.PM_TO_MI.OPEN", "BS", "DEBT", "Deuda PM con MI (abierta)", "last", True, "debt_balance", "build_bs_debt_pm_to_mi_open", "BS.DEBT.TOTAL.OPEN", "BS.2.1", 910),
+        MetricSpec("BS.DEBT.PM_TO_PRIMOS.OPEN", "BS", "DEBT", "Deuda PM con Primos (abierta)", "last", True, "debt_balance", "build_bs_debt_pm_to_primos_open", "BS.DEBT.TOTAL.OPEN", "BS.2.2", 920),
+        MetricSpec("BS.CLAIM.ALE_TO_PM.OPEN", "BS", "CLAIM", "Crédito PM contra Alejandro (abierto)", "last", True, "debt_balance", "build_bs_claim_ale_to_pm_open", "BS.DEBT.NET_PM_POSITION", "BS.2.3", 930),
+        MetricSpec("BS.DEBT.PRINCIPAL.OPEN", "BS", "DEBT", "Principal deuda PM (abierto)", "last", True, "debt_balance", "build_bs_debt_principal_open", "BS.DEBT.TOTAL.OPEN", "BS.2.4", 940),
+        MetricSpec("BS.DEBT.INTEREST.OPEN", "BS", "DEBT", "Interés deuda PM (abierto)", "last", True, "debt_balance", "build_bs_debt_interest_open", "BS.DEBT.TOTAL.OPEN", "BS.2.5", 950),
+        MetricSpec("BS.DEBT.TOTAL.OPEN", "BS", "DEBT", "Deuda total PM (abierta)", "sum", True, "debt_balance", "build_bs_debt_total_open", "BS.LIAB.TOTAL", "BS.2", 900),
+        MetricSpec("BS.DEBT.NET_PM_POSITION", "BS", "DEBT", "Posición neta PM frente a deuda", "formula", True, "debt_balance", "build_bs_debt_net_pm_position", "BS.NET.TOTAL", "BS.2.6", 960),
     ]

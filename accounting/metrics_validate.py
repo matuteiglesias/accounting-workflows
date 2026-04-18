@@ -197,6 +197,13 @@ def check_formula_subtract_identity(
 
 
 def run_basic_validations(metric_values: pd.DataFrame, registry_df: pd.DataFrame) -> pd.DataFrame:
+    present_metric_ids = set(ensure_metric_values_schema(metric_values)["metric_id"].astype(str).tolist())
+
+    def _check_if_any_present(required_metric_ids: list[str], check_df: pd.DataFrame) -> pd.DataFrame:
+        if present_metric_ids.intersection(required_metric_ids):
+            return check_df
+        return pd.DataFrame(columns=["level", "check_name", "message", "n_rows"])
+
     checks = [
         check_metric_values_unique(metric_values),
         check_registry_metric_ids_unique(registry_df),
@@ -207,6 +214,34 @@ def run_basic_validations(metric_values: pd.DataFrame, registry_df: pd.DataFrame
         check_formula_subtract_identity(metric_values, target_metric_id="IS.NET.AFTER_COSTS", minuend_id="IS.INCOME.TOTAL", subtrahend_ids=["IS.OPEX.TOTAL"], check_name="is_net_after_costs"),
         check_formula_subtract_identity(metric_values, target_metric_id="IS.NET.POST_DRAWS", minuend_id="IS.NET.AFTER_COSTS", subtrahend_ids=["IS.DRAWS.PERSONAL"], check_name="is_net_post_draws"),
         check_sum_identity(metric_values, total_metric_id="BS.CASH.TOTAL", component_ids=["BS.CASH.FB", "BS.CASH.PM"], check_name="bs_cash_total"),
+        _check_if_any_present(
+            ["BS.DEBT.TOTAL.OPEN", "BS.DEBT.PM_TO_MI.OPEN", "BS.DEBT.PM_TO_PRIMOS.OPEN"],
+            check_sum_identity(
+                metric_values,
+                total_metric_id="BS.DEBT.TOTAL.OPEN",
+                component_ids=["BS.DEBT.PM_TO_MI.OPEN", "BS.DEBT.PM_TO_PRIMOS.OPEN"],
+                check_name="bs_debt_total_open",
+            ),
+        ),
+        _check_if_any_present(
+            ["BS.DEBT.NET_PM_POSITION", "BS.DEBT.TOTAL.OPEN", "BS.CLAIM.ALE_TO_PM.OPEN"],
+            check_formula_subtract_identity(
+                metric_values,
+                target_metric_id="BS.DEBT.NET_PM_POSITION",
+                minuend_id="BS.DEBT.TOTAL.OPEN",
+                subtrahend_ids=["BS.CLAIM.ALE_TO_PM.OPEN"],
+                check_name="bs_debt_net_pm_position",
+            ),
+        ),
+        _check_if_any_present(
+            ["BS.DEBT.TOTAL.OPEN", "BS.DEBT.PRINCIPAL.OPEN", "BS.DEBT.INTEREST.OPEN"],
+            check_sum_identity(
+                metric_values,
+                total_metric_id="BS.DEBT.TOTAL.OPEN",
+                component_ids=["BS.DEBT.PRINCIPAL.OPEN", "BS.DEBT.INTEREST.OPEN"],
+                check_name="bs_debt_total_components",
+            ),
+        ),
     ]
     out = pd.concat(checks, ignore_index=True) if checks else pd.DataFrame()
     return out.reset_index(drop=True)

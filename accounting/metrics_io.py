@@ -30,6 +30,9 @@ class MetricsContext:
     v_contributions_monthly: Optional[pd.DataFrame] = None
     v_opex_category_monthly: Optional[pd.DataFrame] = None
     party_balance_detailed: Optional[pd.DataFrame] = None
+    debt_balance_monthly: Optional[pd.DataFrame] = None
+    debt_balance_quarterly: Optional[pd.DataFrame] = None
+    debt_balance_yearly: Optional[pd.DataFrame] = None
     deposits: Optional[pd.DataFrame] = None
     debts: Optional[pd.DataFrame] = None
     run_id: str = ""
