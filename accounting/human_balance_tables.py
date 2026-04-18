@@ -32,21 +32,30 @@ class HumanTableSpec:
 def default_human_table_specs_v1() -> List[HumanTableSpec]:
     return [
         HumanTableSpec("1.1", "cash_snapshot", "Snapshot de caja", "cash_snapshot", "liquidity"),
-        HumanTableSpec("1.2", "debt_snapshot", "Snapshot de deuda", "debt_snapshot", "debt"),
-        HumanTableSpec("1.3", "cash_vs_debt_snapshot", "Caja vs deuda", "cash_vs_debt_snapshot", "liquidity"),
-        HumanTableSpec("1.4", "income_statement_monthly_last6", "P&L mensual últimos 6 meses", "income_statement_monthly_last6", "income"),
-        HumanTableSpec("1.5", "income_statement_y", "P&L anual", "income_statement_y", "income"),
-        HumanTableSpec("1.6", "rent_rollup_by_place_m_last6", "Renta por lugar, caja y moneda", "rent_rollup_by_place_m_last6", "income"),
-        HumanTableSpec("1.7", "rent_rollup_by_detail_m_last6", "Renta por detalle, caja y moneda", "rent_rollup_by_detail_m_last6", "income"),
-        HumanTableSpec("1.8", "flow_type_rollup_m_last6", "Drilldown por flujo y tipo", "flow_type_rollup_m_last6", "flows"),
-        HumanTableSpec("1.9", "draws_discipline_monthly_last6", "Retiros y disciplina, últimos 6 meses", "draws_discipline_monthly_last6", "flows"),
-        HumanTableSpec("1.10", "debt_balance_monthly_last12", "Deuda abierta mensual últimos 12 meses", "debt_balance_monthly_last12", "debt"),
-        HumanTableSpec("1.11", "debt_by_counterparty_m_last12", "Deuda por contraparte últimos 12 meses", "debt_by_counterparty_m_last12", "debt"),
-        HumanTableSpec("1.12", "debt_net_position_m_last12", "Posición neta PM últimos 12 meses", "debt_net_position_m_last12", "debt"),
-        HumanTableSpec("1.13", "validation_report_expanded", "Validaciones expandidas", "validation_report_expanded", "qa"),
-        HumanTableSpec("1.14", "metric_coverage_registry", "Cobertura del registry", "metric_coverage_registry", "qa"),
-        HumanTableSpec("1.15", "drilldown_availability", "Disponibilidad de drilldown", "drilldown_availability", "qa"),
-        HumanTableSpec("1.16", "data_quality", "Calidad de datos y cobertura", "data_quality", "qa"),
+        HumanTableSpec("1.2", "cash_by_box_y", "Caja por box (anual)", "cash_by_box_y", "liquidity"),
+        HumanTableSpec("1.3", "cash_by_box_q", "Caja por box (trimestral)", "cash_by_box_q", "liquidity"),
+        HumanTableSpec("1.4", "cash_position_monthly_last12", "Posición de caja mensual últimos 12 meses", "cash_position_monthly_last12", "liquidity"),
+        HumanTableSpec("1.5", "debt_snapshot", "Snapshot de deuda", "debt_snapshot", "debt"),
+        HumanTableSpec("1.6", "debt_principal_vs_interest_snapshot", "Deuda: principal vs interés", "debt_principal_vs_interest_snapshot", "debt"),
+        HumanTableSpec("1.7", "cash_vs_debt_snapshot", "Caja vs deuda", "cash_vs_debt_snapshot", "liquidity"),
+        HumanTableSpec("1.8", "income_statement_monthly_last6", "P&L mensual últimos 6 meses", "income_statement_monthly_last6", "income"),
+        HumanTableSpec("1.9", "income_statement_y", "P&L anual", "income_statement_y", "income"),
+        HumanTableSpec("1.10", "income_statement_q", "P&L trimestral", "income_statement_q", "income"),
+        HumanTableSpec("1.11", "opex_by_category_m_last12", "Opex por categoría últimos 12 meses", "opex_by_category_m_last12", "income"),
+        HumanTableSpec("1.12", "opex_by_category_y", "Opex por categoría (anual)", "opex_by_category_y", "income"),
+        HumanTableSpec("1.13", "rent_rollup_by_place_m_last6", "Renta por lugar, caja y moneda", "rent_rollup_by_place_m_last6", "income"),
+        HumanTableSpec("1.14", "rent_rollup_by_detail_m_last6", "Renta por detalle, caja y moneda", "rent_rollup_by_detail_m_last6", "income"),
+        HumanTableSpec("1.15", "contrib_rollup_by_party_m_last12", "Contribuciones por parte últimos 12 meses", "contrib_rollup_by_party_m_last12", "income"),
+        HumanTableSpec("1.16", "contrib_rollup_by_party_y", "Contribuciones por parte (anual)", "contrib_rollup_by_party_y", "income"),
+        HumanTableSpec("1.17", "flow_type_rollup_m_last6", "Drilldown por flujo y tipo", "flow_type_rollup_m_last6", "flows"),
+        HumanTableSpec("1.18", "draws_discipline_monthly_last6", "Retiros y disciplina, últimos 6 meses", "draws_discipline_monthly_last6", "flows"),
+        HumanTableSpec("1.19", "debt_balance_monthly_last12", "Deuda abierta mensual últimos 12 meses", "debt_balance_monthly_last12", "debt"),
+        HumanTableSpec("1.20", "debt_by_counterparty_m_last12", "Deuda por contraparte últimos 12 meses", "debt_by_counterparty_m_last12", "debt"),
+        HumanTableSpec("1.21", "debt_net_position_m_last12", "Posición neta PM últimos 12 meses", "debt_net_position_m_last12", "debt"),
+        HumanTableSpec("1.22", "validation_report_expanded", "Validaciones expandidas", "validation_report_expanded", "qa"),
+        HumanTableSpec("1.23", "metric_coverage_registry", "Cobertura del registry", "metric_coverage_registry", "qa"),
+        HumanTableSpec("1.24", "drilldown_availability", "Disponibilidad de drilldown", "drilldown_availability", "qa"),
+        HumanTableSpec("1.25", "data_quality", "Calidad de datos y cobertura", "data_quality", "qa"),
     ]
 
 
@@ -329,6 +338,15 @@ def build_debt_snapshot_table(ctx: HumanTablesContext) -> pd.DataFrame:
     return _build_snapshot_from_metric_ids(ctx.registry, ctx.metric_values, present_ids, grain="Y")
 
 
+def build_debt_principal_vs_interest_snapshot_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    metric_ids = [
+        "BS.DEBT.PRINCIPAL.OPEN",
+        "BS.DEBT.INTEREST.OPEN",
+    ]
+    present_ids = [m for m in metric_ids if m in set(ctx.registry.get("metric_id", pd.Series(dtype=str)).astype(str))]
+    return _build_snapshot_from_metric_ids(ctx.registry, ctx.metric_values, present_ids, grain="Y")
+
+
 def build_cash_vs_debt_snapshot_table(ctx: HumanTablesContext) -> pd.DataFrame:
     cash = build_cash_snapshot_table(ctx)
     debt = build_debt_snapshot_table(ctx)
@@ -371,6 +389,25 @@ def build_income_statement_monthly_last6_table(ctx: HumanTablesContext) -> pd.Da
 def build_income_statement_y_table(ctx: HumanTablesContext) -> pd.DataFrame:
     path = ctx.metrics_dir / "income_statement_y.csv"
     return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def build_income_statement_q_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    path = ctx.metrics_dir / "income_statement_q.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def build_cash_by_box_y_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    path = ctx.metrics_dir / "balance_cash_y.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def build_cash_by_box_q_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    path = ctx.metrics_dir / "balance_cash_q.csv"
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
+def build_cash_position_monthly_last12_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    return _safe_read_metric_view_cached(ctx, "cash_position_monthly_last12.csv")
 
 
 def build_rent_rollup_by_place_table(ctx: HumanTablesContext) -> pd.DataFrame:
@@ -417,6 +454,22 @@ def build_debt_net_position_m_last12_table(ctx: HumanTablesContext) -> pd.DataFr
     return _safe_read_metric_view_cached(ctx, "debt_net_position_m_last12.csv")
 
 
+def build_opex_by_category_m_last12_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    return _safe_read_metric_view_cached(ctx, "opex_by_category_m_last12.csv")
+
+
+def build_opex_by_category_y_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    return _safe_read_metric_view_cached(ctx, "opex_by_category_y.csv")
+
+
+def build_contrib_rollup_by_party_m_last12_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    return _safe_read_metric_view_cached(ctx, "contrib_rollup_by_party_m_last12.csv")
+
+
+def build_contrib_rollup_by_party_y_table(ctx: HumanTablesContext) -> pd.DataFrame:
+    return _safe_read_metric_view_cached(ctx, "contrib_rollup_by_party_y.csv")
+
+
 def build_validation_report_expanded_table(ctx: HumanTablesContext) -> pd.DataFrame:
     return _build_validation_report_expanded(ctx)
 
@@ -439,12 +492,21 @@ def build_data_quality_table(ctx: HumanTablesContext) -> pd.DataFrame:
 
 HUMAN_TABLE_BUILDERS: Dict[str, Callable[[HumanTablesContext], pd.DataFrame]] = {
     "cash_snapshot": build_cash_snapshot_table,
+    "cash_by_box_y": build_cash_by_box_y_table,
+    "cash_by_box_q": build_cash_by_box_q_table,
+    "cash_position_monthly_last12": build_cash_position_monthly_last12_table,
     "debt_snapshot": build_debt_snapshot_table,
+    "debt_principal_vs_interest_snapshot": build_debt_principal_vs_interest_snapshot_table,
     "cash_vs_debt_snapshot": build_cash_vs_debt_snapshot_table,
     "income_statement_monthly_last6": build_income_statement_monthly_last6_table,
     "income_statement_y": build_income_statement_y_table,
+    "income_statement_q": build_income_statement_q_table,
+    "opex_by_category_m_last12": build_opex_by_category_m_last12_table,
+    "opex_by_category_y": build_opex_by_category_y_table,
     "rent_rollup_by_place_m_last6": build_rent_rollup_by_place_table,
     "rent_rollup_by_detail_m_last6": build_rent_rollup_by_detail_table,
+    "contrib_rollup_by_party_m_last12": build_contrib_rollup_by_party_m_last12_table,
+    "contrib_rollup_by_party_y": build_contrib_rollup_by_party_y_table,
     "flow_type_rollup_m_last6": build_flow_type_rollup_table,
     "draws_discipline_monthly_last6": build_draws_discipline_monthly_last6_table,
     "debt_balance_monthly_last12": build_debt_balance_monthly_last12_table,

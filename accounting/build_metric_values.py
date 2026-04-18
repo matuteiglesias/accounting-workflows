@@ -281,6 +281,127 @@ def build_debt_metric_views(ctx: MetricsContext, out_dir: Path) -> None:
     net.to_csv(views_dir / "debt_net_position_m_last12.csv", index=False)
 
 
+def _build_cash_position_monthly_last12(ctx: MetricsContext, views_dir: Path) -> None:
+    daily = ctx.daily_cash_position
+    if daily is None or daily.empty:
+        return
+
+    work = daily.copy()
+    date_col = next((c for c in ["Date", "date", "fecha", "as_of_date"] if c in work.columns), None)
+    box_col = next((c for c in ["Box", "box"] if c in work.columns), None)
+    currency_col = next((c for c in ["Currency", "currency"] if c in work.columns), None)
+    value_col = next((c for c in ["cash_position", "balance", "amount", "value", "cash"] if c in work.columns), None)
+    if not all([date_col, box_col, currency_col, value_col]):
+        return
+
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+    work = work.loc[work[date_col].notna()].copy()
+    if work.empty:
+        return
+
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    work = work.loc[work[value_col].notna()].copy()
+    if work.empty:
+        return
+
+    work["period"] = work[date_col].dt.to_period("M").astype(str)
+    work = work.sort_values([box_col, currency_col, date_col])
+    monthly = (
+        work.groupby(["period", box_col, currency_col], as_index=False)[value_col]
+        .last()
+        .rename(columns={box_col: "box", currency_col: "currency", value_col: "cash_position_end"})
+    )
+    periods = sorted(monthly["period"].astype(str).unique().tolist())
+    keep_periods = set(periods[-12:])
+    monthly = monthly.loc[monthly["period"].astype(str).isin(keep_periods)].copy()
+    monthly.to_csv(views_dir / "cash_position_monthly_last12.csv", index=False)
+
+
+def _build_contrib_rollup_views(ctx: MetricsContext, views_dir: Path) -> None:
+    contrib = ctx.v_contributions_monthly
+    if contrib is None or contrib.empty:
+        return
+
+    needed = ["TimePeriod", "Currency", "contributor_party", "amount"]
+    if any(c not in contrib.columns for c in needed):
+        return
+
+    work = contrib.copy()
+    work["amount"] = pd.to_numeric(work["amount"], errors="coerce").fillna(0.0)
+    work["TimePeriod"] = work["TimePeriod"].astype(str)
+
+    periods = sorted(work["TimePeriod"].unique().tolist())
+    keep_periods = set(periods[-12:])
+    last12 = work.loc[work["TimePeriod"].isin(keep_periods)].copy()
+
+    monthly = (
+        last12.groupby(["contributor_party", "Currency", "TimePeriod"], as_index=False)["amount"]
+        .sum()
+        .sort_values(["contributor_party", "Currency", "TimePeriod"])
+    )
+    latest_period = monthly["TimePeriod"].max() if not monthly.empty else ""
+    rollup = (
+        monthly.groupby(["contributor_party", "Currency"], as_index=False)
+        .agg(
+            months=("TimePeriod", "nunique"),
+            total_12m=("amount", "sum"),
+            avg_m=("amount", "mean"),
+        )
+    )
+    if not rollup.empty:
+        last_vals = (
+            monthly.loc[monthly["TimePeriod"] == latest_period, ["contributor_party", "Currency", "amount"]]
+            .rename(columns={"amount": "last_m"})
+        )
+        rollup = rollup.merge(last_vals, on=["contributor_party", "Currency"], how="left")
+        rollup["last_period"] = latest_period
+    rollup.to_csv(views_dir / "contrib_rollup_by_party_m_last12.csv", index=False)
+
+    yearly = (
+        work.assign(year=work["TimePeriod"].str.slice(0, 4))
+        .groupby(["year", "contributor_party", "Currency"], as_index=False)["amount"]
+        .sum()
+        .rename(columns={"Currency": "currency", "amount": "total_y"})
+        .sort_values(["year", "contributor_party", "currency"])
+    )
+    yearly.to_csv(views_dir / "contrib_rollup_by_party_y.csv", index=False)
+
+
+def _build_opex_rollup_views(ctx: MetricsContext, views_dir: Path) -> None:
+    opex = ctx.v_opex_category_monthly
+    if opex is None or opex.empty:
+        return
+
+    category_col = "Tipo" if "Tipo" in opex.columns else ("category" if "category" in opex.columns else None)
+    amount_col = "amount_out" if "amount_out" in opex.columns else ("amount" if "amount" in opex.columns else None)
+    if category_col is None or amount_col is None or "TimePeriod" not in opex.columns or "Currency" not in opex.columns:
+        return
+
+    work = opex.copy()
+    work[amount_col] = pd.to_numeric(work[amount_col], errors="coerce").fillna(0.0)
+    work["TimePeriod"] = work["TimePeriod"].astype(str)
+
+    periods = sorted(work["TimePeriod"].unique().tolist())
+    keep_periods = set(periods[-12:])
+    last12 = work.loc[work["TimePeriod"].isin(keep_periods)].copy()
+    monthly = (
+        last12.groupby([category_col, "Currency", "TimePeriod"], as_index=False)[amount_col]
+        .sum()
+        .rename(columns={category_col: "category", "Currency": "currency", amount_col: "amount_out"})
+        .sort_values(["category", "currency", "TimePeriod"])
+    )
+    monthly.to_csv(views_dir / "opex_by_category_m_last12.csv", index=False)
+
+    yearly = (
+        work.assign(year=work["TimePeriod"].str.slice(0, 4))
+        .groupby(["year", category_col, "Currency"], as_index=False)[amount_col]
+        .sum()
+        .rename(columns={category_col: "category", "Currency": "currency", amount_col: "amount_out_y"})
+        .sort_values(["year", "category", "currency"])
+    )
+    yearly.to_csv(views_dir / "opex_by_category_y.csv", index=False)
+
+
 def build_metric_view_exports(
     run_root: Path,
     metric_values: pd.DataFrame,
@@ -458,6 +579,10 @@ def main() -> None:
         noise_floor_by_currency=noise_floor_by_currency,
     )
     build_debt_metric_views(ctx, out_dir)
+    views_dir = out_dir / METRIC_VIEWS_DIRNAME
+    _build_cash_position_monthly_last12(ctx, views_dir)
+    _build_contrib_rollup_views(ctx, views_dir)
+    _build_opex_rollup_views(ctx, views_dir)
 
     build_metric_drilldown_artifacts(
         run_root=run_root,
