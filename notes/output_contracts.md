@@ -1,42 +1,46 @@
-
----
-
-## `src/notes/output_contracts.md`
-
-```markdown
 # Accounting Backend Output Contracts
 
-Status: draft  
-Scope: stable and emerging accounting artifacts  
+Status: authority draft
 Last reviewed: 2026-05-10
 
 ## Purpose
 
-This document defines the main output contracts in the accounting backend.
-
-The goal is to prevent downstream consumers from reading arbitrary intermediate files and to make the stable seams explicit.
+This document names the stable and emerging output contracts in the accounting backend. Downstream consumers should depend on these artifacts instead of arbitrary intermediate files.
 
 ## Stability vocabulary
 
 | Stability | Meaning |
 |---|---|
 | stable | Safe for downstream modules to depend on |
-| current | Used today, but may still evolve |
+| current | Used today but still evolving |
 | experimental | Future-facing or incomplete |
-| legacy | Historical, avoid new dependencies |
-| unknown | Requires runtime/Makefile verification |
+| legacy | Historical; avoid new dependencies |
+| unknown | Needs runtime verification |
 
----
+## Contract summary
 
-# 1. Canonical ledger
+| Contract | Level | Stability | Producer | Typical path |
+|---|---:|---|---|---|
+| `ledger_canonical` | 1 | stable candidate | `accounting.ingest` | `out/run/accounting/<run_id>/ledger_canonical.csv` |
+| `stage_d_materialized_views` | 2 | current/stable candidate | `accounting.materialize` | `out/run/accounting/<run_id>/*.csv` |
+| `metric_values` | 3 | stable | `accounting.metrics.build` | `out/metrics/<run_id>/metric_values.csv` |
+| `metric_registry` | 3 | stable | `accounting.metrics.registry` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_registry.csv` |
+| `validation_report` | 3 | stable candidate | `accounting.metrics.validate` via `accounting.metrics.build` | `out/metrics/<run_id>/validation_report.csv` |
+| `metric_views` | 3 | current | `accounting.metrics.views` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_views/*` |
+| `metric_drilldown` | 3/4 | current | `accounting.metrics.drilldown` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_drilldown/*` |
+| `debt_open_items` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_open_items.csv` |
+| `debt_allocations` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_allocations.csv` |
+| `debt_repayment_events` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_repayment_events.csv` |
+| `debt_balance_views` | 3 | current | `accounting.build_debt_balance_views` | `out/debt_resolution/<run_id>/debt_balance_*.csv` |
+| `human_table_specs` | 4 | current/stable seam | `accounting.human_balance_tables` | generated in human/front report outputs |
+| `human_balance_report` | 4 | current/canonical | `accounting.human_balance_document_factory` | `out/human_reports/<run_id>/balance_human_v2/*` |
+| `frontend_snapshot_manifest` | 5 | current | `accounting.publish_latest` | `public/accounting/latest/manifest.json` |
 
-## `ledger_canonical.csv`
+## `ledger_canonical`
 
-Producer:  
-`accounting.ingest` and/or the pipeline wrapper that persists the DataFrame returned by `build_ledger_base(...)`.
+Producer: `accounting.ingest`.
 
-Consumer:  
-`materialize.py`, `metrics_views.py`, `resolve_internal_debt_v2.py`, `metric_drilldown.py`, report builders.
+Consumers: `accounting.materialize`, debt resolution, metric/drilldown builders, report evidence loaders.
 
 Required columns:
 
@@ -57,47 +61,58 @@ ingest_ts
 notes
 ```
 
-
 Common optional columns:
 
+```text
 amount_cents
 base_amount
 Detalle
 Lugar
 medio
 tag
+```
 
-Validation:
+Validation expectations:
 
-Required accounting fields must exist before downstream materialization.
-Date must parse as date/datetime.
-amount must parse as numeric.
-Currency must be non-empty.
-tx_id should be stable and non-empty when require_tx_id=True.
-Ingest anomalies should be captured separately and not silently ignored.
+- Required accounting fields exist before materialization.
+- `Date` parses as date/datetime.
+- `amount` parses as numeric.
+- `Currency` is non-empty.
+- `tx_id` is stable and non-empty when required.
+- Ingest anomalies are visible and not silently ignored.
 
-Example path:
+## `stage_d_materialized_views`
 
-out/run/accounting/<run_id>/ledger_canonical.csv
+Producer: `accounting.materialize`.
 
-Stability:
-stable candidate.
+Consumers: `accounting.views`, metrics, human tables, report factories.
 
-Notes:
+Required representative artifacts:
 
-The canonical ledger is the most important accounting contract. Everything else should be traceable back to this artifact.
+```text
+per_flow_time_long.freq=*.csv
+per_party_time_long.freq=*.csv
+daily_cash_position.csv
+box_balance_time_long.freq=*.csv
+box_flow_balance_time_long.freq=*.csv
+```
 
-2. Metric values
-metric_values.csv
+Validation expectations:
 
-Producer:
-accounting.build_metric_values.
+- Required Stage D files exist for the requested frequency.
+- Period/date columns parse cleanly.
+- Amount columns remain numeric and currency-aware.
+- View/report layers treat these as authoritative over legacy report files.
 
-Consumer:
-human_balance_tables.py, human_balance_document_factory.py, human_balance_front_factory.py, frontend/viewer surfaces, validation, statement views.
+## `metric_values`
+
+Producer: `accounting.metrics.build`.
+
+Consumers: human tables, report factories, validation, statement views, and frontend surfaces.
 
 Required columns:
 
+```text
 metric_id
 period_grain
 period
@@ -108,47 +123,25 @@ as_of_date
 source_layer
 build_status
 build_detail
+```
 
-Validation:
+Validation expectations:
 
-Enforced by ensure_metric_values_schema(...).
-Duplicate keys should be checked across:
-metric_id
-period_grain
-period
-currency
-run_id
-as_of_date
-metric_id should exist in metric_registry.csv.
-value should be numeric.
-build_status should default to ok when not set.
+- Schema is normalized by the metrics I/O layer.
+- Duplicate keys are checked across metric, period, currency, run, and as-of dimensions.
+- `metric_id` exists in `metric_registry.csv`.
+- `value` is numeric.
+- `build_status` defaults to `ok` when not set.
 
-Example path:
+## `metric_registry`
 
-out/metrics/latest/metric_values.csv
+Producer: `accounting.metrics.registry` via `accounting.metrics.build`.
 
-or:
-
-out/metrics/<run_id>/metric_values.csv
-
-Stability:
-stable.
-
-Notes:
-
-This is the central numeric read model for accounting metrics. Downstream reports should prefer this over recomputing metrics from raw ledger rows.
-
-3. Metric registry
-metric_registry.csv
-
-Producer:
-accounting.metrics_registry through accounting.build_metric_values.
-
-Consumer:
-metric validation, report labels, statement views, frontend display logic.
+Consumers: metric validation, labels, ordering, grouping, statement views, reports, and frontend display.
 
 Required columns:
 
+```text
 metric_id
 statement
 section
@@ -163,70 +156,56 @@ sort_key
 currency_mode
 status
 notes
+```
 
-Validation:
+Validation expectations:
 
-metric_id must be unique.
-active leaf metrics should have builder_key.
-derived metrics should have enough metadata to explain construction.
-status should default to active.
-currency_mode should default to by_currency.
+- `metric_id` is unique.
+- Active leaf metrics have a `builder_key`.
+- Derived metrics have enough metadata to explain construction.
+- `status` defaults to active.
+- `currency_mode` defaults to by-currency behavior unless specified otherwise.
 
-Example path:
+## `validation_report`
 
-out/metrics/latest/metric_registry.csv
+Producer: `accounting.metrics.validate` via `accounting.metrics.build`.
 
-Stability:
-stable.
-
-Notes:
-
-The registry is the semantic layer for metrics. It should become the source for labels, ordering, grouping, and report interpretation.
-
-4. Validation report
-validation_report.csv
-
-Producer:
-accounting.metrics_validate through accounting.build_metric_values.
-
-Consumer:
-human balance reports, QA checks, pipeline health checks, release gates.
+Consumers: human report, QA, support checks, and future release gates.
 
 Required columns:
 
+```text
 level
 check_name
 message
 n_rows
+```
 
-Validation:
+Validation expectations:
 
-The file may be empty or contain zero rows if no issues are found.
-level should distinguish at least error and warning.
-Any error level issue should be treated as a failed or degraded build unless explicitly waived.
+- The file may be empty or have zero rows when clean.
+- `level` distinguishes warnings and errors.
+- Error rows should fail or degrade the build unless explicitly waived.
 
-Example path:
+## Debt contracts
 
-out/metrics/latest/validation_report.csv
+Producer: `accounting.resolve_internal_debt_v2`.
 
-Stability:
-stable candidate.
+Consumers: `accounting.build_debt_balance_views`, metrics, human tables, reports, and frontend snapshot packaging.
 
-Notes:
+Required primary artifacts:
 
-This should become part of the pipeline gate. Reports should show or link validation status instead of hiding it.
-
-5. Debt open items
+```text
 debt_open_items.csv
+debt_allocations.csv
+debt_repayment_events.csv
+debt_resolution_timeline.csv
+debt_status_reconciliation.csv
+```
 
-Producer:
-accounting.resolve_internal_debt_v2.
+Important `debt_open_items.csv` columns:
 
-Consumer:
-build_debt_balance_views.py, metrics, human balance tables, debt reports.
-
-Required columns:
-
+```text
 debt_id
 source_tx_id
 opened_at
@@ -242,166 +221,112 @@ issuer
 ledger_status
 engine_status
 closed_at
+```
 
-Validation:
+Validation expectations:
 
-opened_at must parse as date.
-debtor, creditor, currency, and item_type must be non-empty.
-original_amount and open_amount must be numeric.
-engine_status should be one of open or closed.
-item_type should be one of the valid debt types, currently Prestamo or Interes.
-Closed items should have closed_at when available.
-Reconciliation with ledger status should be inspected through the resolver's reconciliation output.
+- `opened_at` parses as a date.
+- Parties, currency, and item type are non-empty.
+- Amounts parse as numeric.
+- `engine_status` is explicit.
+- Reconciliation output is inspected when ledger status and engine status diverge.
 
-Example path:
+## `debt_balance_views`
 
-out/debt_resolution/<run_id>/debt_open_items.csv
+Producer: `accounting.build_debt_balance_views`.
 
-or latest pointer:
+Consumers: metrics and human reports.
 
-out/debt_resolution/latest/debt_open_items.csv
+Required artifacts:
 
-Stability:
-current/canonical candidate.
+```text
+debt_balance_daily.csv
+debt_balance_monthly.csv
+debt_balance_quarterly.csv
+debt_balance_yearly.csv
+```
 
-Notes:
+Validation expectations:
 
-This is the main debt-state contract. Debt balance views should consume this or its derived balance artifacts, not re-resolve debts independently.
+- Inputs come from `debt_open_items.csv` or an equivalent resolved debt contract.
+- Period/date fields parse cleanly.
+- Open balances remain numeric and currency-aware.
 
-6. Human tables
-Human table artifacts
+## `human_table_specs`
 
-Producer:
-accounting.human_balance_tables.
+Producer: `accounting.human_balance_tables`.
 
-Consumer:
-human_balance_document_factory.py, human_balance_front_factory.py, report pages, frontend surfaces.
+Consumers: current human document factory and future front report factory.
 
-Required structure:
+Expected structure:
 
-Each human table should have:
-
+```text
 slug
 title
 builder_key
 group
 notes
 enabled_by_default
+```
 
-Expected output shape:
+Validation expectations:
 
-tables keyed by slug
-table specs keyed by slug
-optional CSV/HTML exports per table
+- Every generated table has a corresponding spec.
+- Empty tables are hidden, marked partial, or included with an explicit note.
+- Report factories do not invent new accounting semantics outside table builders/contracts.
+- Table slugs remain stable because report blocks depend on them.
 
-Important table groups include:
+## `human_balance_report`
 
-liquidity
-income
-flows
-debt
-validation
-methodology
+Producer: `accounting.human_balance_document_factory`.
 
-Validation:
+Consumers: humans and `accounting.publish_latest`.
 
-Every generated table should have a corresponding HumanTableSpec.
-Empty tables should be either hidden, marked partial, or explicitly included with a note.
-Report factories should not invent accounting semantics outside table builders.
-Table slugs should be stable because front/report blocks depend on them.
+Required representative artifacts:
 
-Example paths:
-
-out/human_reports/<run_id>/tables/*.csv
-out/front/<run_id>/tables/*.csv
-out/front/<run_id>/html/*.html
-
-Stability:
-current/stable seam.
-
-Notes:
-
-This is the best decomposition seam for human-facing reporting. Report factories should compose human tables into narratives, not become the main business-logic layer.
-
-7. Frontend snapshot
-Frontend/public accounting snapshot
-
-Producer:
-publish_latest.py or equivalent publish/sync step.
-
-Consumer:
-accounting-viewer, static/public surfaces, human review UI.
-
-Expected contents:
-
-manifest.json
+```text
+balance_humano_v2.html
 story_manifest.json
-metrics/*
-debt/*
-human reports or front pages
-latest pointers
+report.css
+```
 
-Required fields for manifest:
+Validation expectations:
 
-built_at
-source_run_id
-source_paths
-metrics_dir
-debt_dir
-report_dir
-status
-files
+- The report is built from metric, debt, drilldown, and human-table contracts.
+- The story manifest identifies report items and provenance.
+- Missing/partial upstream data is visible rather than silently hidden.
 
-Validation:
+## `frontend_snapshot_manifest`
 
-Snapshot should only expose frontend-safe artifacts.
-It should not expose raw private input credentials, service account paths, or local-only source paths.
-It should contain enough provenance to trace back to the source run.
-It should be atomically replaceable or versioned with a latest pointer.
+Producer: `accounting.publish_latest`.
 
-Example paths:
+Consumer: accounting viewer/static frontend.
 
-public/accounting/latest/*
-accounting-viewer/public/accounting/latest/*
-accounting-viewer/accounting_surface/data/*
+Required representative location:
 
-Stability:
-unknown/current, pending inspection of publish_latest.py.
+```text
+public/accounting/latest/manifest.json
+```
 
-Notes:
+Expected manifest fields in the current implementation include:
 
-This is the accounting equivalent of a public snapshot layer. It should be read-only for the frontend. The frontend should not become the source of truth.
+```text
+surface_id
+published_at_utc
+publish_mode
+run_id
+as_of_date
+months
+include_statuses
+report
+metrics
+debt
+navigation
+```
 
-Contract ladder summary
-Level 1
-  ledger_canonical.csv
+Governance expectations:
 
-Level 2
-  per_flow_time_long.freq=*.csv
-  per_party_time_long.freq=*.csv
-  daily_cash_position.csv
-  views/*
-
-Level 3
-  metric_values.csv
-  metric_registry.csv
-  validation_report.csv
-  debt_open_items.csv
-  debt_balance_*.csv
-  metric_drilldown/*
-
-Level 4
-  human tables
-  human balance reports
-  front report pages
-
-Level 5
-  public/accounting/latest/*
-  accounting-viewer data
-Next contract work
- Inspect publish_latest.py.
- Confirm exact output paths from Makefile.
- Add a build_manifest.json contract.
- Add explicit debt_reconciliation.csv contract.
- Decide whether debt_balance_monthly.csv, debt_balance_quarterly.csv, and debt_balance_yearly.csv are stable contracts.
- Add schema checks for frontend snapshot manifest.
+- Snapshot exposes only frontend-safe artifacts.
+- Snapshot does not expose credentials or private local source paths.
+- Snapshot contains enough provenance to trace back to the source run.
+- Frontend reads this snapshot instead of arbitrary producer internals.

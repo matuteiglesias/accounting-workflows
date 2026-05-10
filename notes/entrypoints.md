@@ -1,84 +1,103 @@
 # Accounting Backend Entrypoints
 
-Status: draft  
-Scope: accounting-backend current command surface  
+Status: authority draft
 Last reviewed: 2026-05-10
 
 ## Purpose
 
-This document identifies the current operational entrypoints for the accounting backend.
+This document identifies the current operational entrypoints for the accounting backend and distinguishes canonical, support, legacy, and experimental commands.
 
-The goal is to distinguish:
-
-- canonical commands: expected current production or main workflow commands
-- support commands: useful downstream, diagnostic, or auxiliary commands
-- legacy commands: retained for historical or compatibility reasons
-- experimental commands: promising but not yet canonical
-
-This file should be reconciled against the Makefile. When Makefile targets and module CLIs disagree, the Makefile may describe operational habit, while the module CLIs describe available implementation surfaces.
+The Makefile is the command authority. Module CLIs remain useful implementation entrypoints, but users should start with `make help`.
 
 ## Status vocabulary
 
 | Status | Meaning |
 |---|---|
-| canonical | Preferred command or module entrypoint for the current pipeline |
-| support | Useful supporting command, but not the primary spine |
-| legacy | Historical or superseded entrypoint |
-| experimental | Future or incomplete surface, not yet a reliable dependency |
-| unknown | Needs Makefile/run evidence |
+| canonical | Preferred current command/module for the pipeline |
+| support | Useful diagnostic, validation, partial, or packaging command |
+| legacy | Historical or compatibility surface; avoid new dependencies |
+| experimental | Future/incomplete surface, not yet a reliable dependency |
 
-## Entrypoints
+## Canonical Make targets
 
-| Command | Layer | Purpose | Status |
+| Target | Layer | Expands to / purpose |
+|---|---|---|
+| `make ledger` | Level 1 | Build the live canonical ledger via `run-ingest`. |
+| `make materialize` | Level 2 | Build live materialized Stage D artifacts via `run-materialize`. |
+| `make debt` | Level 3 | Resolve live internal debt artifacts via `run-debt`. |
+| `make debt-views` | Level 3 | Build debt balance views via `run-debt-balance`. |
+| `make metrics` | Level 3 | Build metric values, registry, validation, views, and drilldowns via `run-metrics`. |
+| `make human-report` | Level 4 | Build the current human balance report via `run-human-balance`. |
+| `make publish` | Level 5 | Publish latest producer artifacts to `public/accounting/latest/*`. |
+| `make build-all` | composite | Run the full canonical build through publish. |
+| `make build-report` | composite | Run through the current human report without publishing. |
+| `make build-front` | composite | Publish the latest report/metrics/debt snapshot for frontend consumption. |
+
+## Support Make targets
+
+| Target | Purpose |
+|---|---|
+| `make doctor` | Compile-check key command modules and print Python version. |
+| `make smoke` / `make smoke-accounting` | Run the fixture/offline smoke path through views. |
+| `make validate` | Run lightweight command-surface checks. |
+| `make clean-derived` | Remove derived accounting outputs under `out/` and `public/accounting/latest`. |
+| `make run-downstream-from-ledger` | Reuse an existing canonical ledger and rebuild downstream artifacts. |
+| `make run-metrics-and-human` | Reuse existing views and rebuild debt, metrics, and human report. |
+| `make run-human-balance-only` | Reuse existing metrics and rebuild only the current human report. |
+
+## Experimental Make targets
+
+| Target | Purpose |
+|---|---|
+| `make front-report` | Build the future/front-oriented human report using `human_balance_front_factory.py`. This is not canonical yet. |
+
+## Legacy aliases and compatibility targets
+
+The older `run-*` targets remain available as compatibility aliases and implementation targets. They should be considered lower-level than the canonical target names above.
+
+| Existing target | Current classification |
+|---|---|
+| `run-ingest` | compatibility implementation for `ledger` |
+| `run-materialize` | compatibility implementation for `materialize` |
+| `run-views` | support bridge for Stage D view composition |
+| `run-debt` | compatibility implementation for `debt` |
+| `run-debt-balance` | compatibility implementation for `debt-views` |
+| `run-metrics` | compatibility implementation for `metrics` |
+| `run-human-balance` | compatibility implementation for `human-report` |
+| `run-accounting` / `run-accounting-full` | compatibility implementation for `build-report` |
+| `run` / `run-all` | legacy convenience aliases for `run-accounting` |
+
+## Canonical module CLIs
+
+| Module command | Layer | Status | Notes |
 |---|---|---|---|
-| `python -m accounting.ingest ...` | Level 1 - canonical ledger | Build canonical ledger from fixture, Google Sheet, or source ledger rows | canonical candidate |
-| `python -m accounting.materialize ...` | Level 2 - materialized views | Materialize canonical ledger into per-flow, per-party, daily cash, loan, and manifest artifacts | canonical candidate |
-| `python -m accounting.views ...` | Level 2/3 - report views | Build or load report/view tables from materialized Stage D artifacts | support |
-| `python -m accounting.resolve_internal_debt_v2 --write-dir ...` | Level 3 - debt resolution | Resolve internal debts, repayments, allocations, timeline, and reconciliation from canonical ledger or ledger CSV | canonical candidate |
-| `python -m accounting.build_debt_balance_views ...` | Level 3 - debt analytical views | Build debt balance views over time from resolved debt open items | support |
-| `python -m accounting.build_metric_values --run-root ... --out-dir ...` | Level 3 - metrics | Build `metric_values.csv`, `metric_registry.csv`, validation report, wide views, statement views, metric views, and drilldown artifacts | canonical |
-| `python -m accounting.human_balance_document_factory ...` | Level 4 - human report | Build the current human balance report/document from metrics, human tables, and drilldowns | canonical current |
-| `python -m accounting.human_balance_front_factory --run-root ... --metrics-dir ... --write-dir ...` | Level 4/5 - front report | Build front-oriented human balance report pages and manifest | experimental |
-| `python -m accounting.publish_latest ...` | Level 5 - frontend handoff | Publish or sync latest accounting artifacts for frontend/viewer consumption | unknown, likely support/canonical once verified |
-| `make ...` | orchestration | Makefile target surface for the full or partial pipeline | unknown until Makefile reconciliation |
+| `python -m accounting.ingest ...` | Level 1 | canonical implementation | Builds canonical ledger from fixture or Google Sheet. |
+| `python -m accounting.materialize ...` | Level 2 | canonical implementation | Materializes the canonical ledger into Stage D CSV artifacts. |
+| `python -m accounting.views ...` | Level 2/3 | support | Builds view tables from Stage D artifacts. |
+| `python -m accounting.resolve_internal_debt_v2 ...` | Level 3 | canonical implementation | Current debt resolver. |
+| `python -m accounting.build_debt_balance_views ...` | Level 3 | support | Builds debt balance view CSVs. |
+| `python -m accounting.metrics.build ...` | Level 3 | canonical implementation | Main metric artifact builder. |
+| `python -m accounting.build_metric_values ...` | Level 3 | compatibility wrapper | Preserved old metric-builder command path. |
+| `python -m accounting.human_balance_document_factory ...` | Level 4 | current canonical implementation | Current human report factory. |
+| `python -m accounting.publish_latest ...` | Level 5 | current support/canonical publish implementation | Builds frontend-safe latest snapshot. |
+| `python -m accounting.human_balance_front_factory ...` | Level 4/5 | experimental | Future/front-oriented report factory. |
 
-## Probable canonical spine
+## Operational rule
 
-The current canonical spine is probably:
+A future user should normally run:
 
 ```text
-ingest
-  → materialize
-  → resolve_internal_debt_v2
-  → build_debt_balance_views
-  → build_metric_values
-  → human_balance_document_factory
-  → publish_latest / accounting-viewer
+make build-all
 ```
 
+For partial rebuilds, use the named layer targets in order:
 
-This should be confirmed against the Makefile and latest successful run artifacts.
-
-Notes on known command risks
-Makefile drift
-
-The Makefile may contain shortcuts or historical targets that no longer reflect the clean architecture. Treat Make targets as operational evidence, not necessarily architectural truth.
-
-Debt resolver
-
-resolve_internal_debt_v2.py is the current debt resolver candidate. The old resolve_internal_debt.py has been removed and should not appear as an active entrypoint.
-
-Human balance front
-
-human_balance_front_factory.py is not yet the current report authority. It is a future/front-oriented architecture. Use human_balance_document_factory.py as current unless a runbook or Makefile target says otherwise.
-
-Reconciliation checklist
- Inspect Makefile targets.
- Mark each target as canonical/support/legacy/experimental.
- Confirm the latest full pipeline run path.
- Confirm whether publish_latest.py is currently used.
- Confirm whether human_balance_front_factory.py is called anywhere.
- Confirm the exact output root for current production artifacts.
- 
- 
- 
+```text
+make ledger
+make materialize
+make debt
+make debt-views
+make metrics
+make human-report
+make publish
+```

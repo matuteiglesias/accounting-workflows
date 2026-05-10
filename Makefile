@@ -157,25 +157,36 @@ _update_latest:
 .PHONY: help
 help:
 	@echo ""
-	@echo "Accounting spine v3:"
-	@echo "  make run-ingest"
-	@echo "  make run-materialize"
-	@echo "  make run-views"
-	@echo "  make run-debt                # resolve internal debt artifacts"
-	@echo "  make run-debt-balance        # build canonical debt balance views"
-	@echo "  make run-metrics"
-	@echo "  make run-human-balance"
-	@echo "  make run-accounting           # wrapper for the official full path above"
-	@echo "  make run-accounting-full      # explicit full chain alias"
-	@echo "  make run-downstream-from-ledger # materialize -> views -> metrics -> human (reuse existing ledger_canonical.csv)"
-	@echo "  make run-metrics-and-human    # metrics -> human (reuse existing views)"
-	@echo "  make run-human-balance-only   # human balance only (reuse existing metrics)"
-	@echo "  make smoke-accounting         # fixture path through views only"
+	@echo "Accounting backend command surface"
 	@echo ""
-	@echo "Per-step targets:"
-	@echo "  make smoke-ingest | smoke-materialize | smoke-views"
-	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-balance | run-metrics | run-human-balance"
-	@echo ""	
+	@echo "Core pipeline (canonical):"
+	@echo "  make ledger         # source inputs -> canonical ledger"
+	@echo "  make materialize    # canonical ledger -> Stage D analytical artifacts"
+	@echo "  make debt           # resolve internal debt contracts"
+	@echo "  make debt-views     # debt contracts -> balance views"
+	@echo "  make metrics        # analytical artifacts -> metric contracts"
+	@echo "  make human-report   # metric/debt contracts -> current human report"
+	@echo "  make publish        # latest artifacts -> public/accounting/latest snapshot"
+	@echo ""
+	@echo "Composite:"
+	@echo "  make build-all      # full canonical path through publish"
+	@echo "  make build-report   # full current report path, no publish"
+	@echo "  make build-front    # publish latest frontend snapshot"
+	@echo ""
+	@echo "Support:"
+	@echo "  make doctor         # compile-check key command modules"
+	@echo "  make smoke          # fixture/offline smoke path through views"
+	@echo "  make validate       # lightweight command-surface checks"
+	@echo "  make clean-derived  # remove derived accounting outputs"
+	@echo ""
+	@echo "Experimental:"
+	@echo "  make front-report   # future/stub front-oriented report factory"
+	@echo ""
+	@echo "Compatibility / lower-level run targets:"
+	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-balance"
+	@echo "  make run-metrics | run-human-balance | run-accounting | run-accounting-full"
+	@echo "  make run-downstream-from-ledger | run-metrics-and-human | run-human-balance-only"
+	@echo ""
 	@echo "Key vars:"
 	@echo "  OUT=out  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
 	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
@@ -185,6 +196,75 @@ help:
 # ----------------------------------------
 # Meta targets
 # ----------------------------------------
+# Canonical names: these are the preferred operational surface.
+.PHONY: ledger materialize debt debt-views metrics human-report publish
+ledger: run-ingest
+
+materialize: run-materialize
+
+debt: run-debt
+
+debt-views: run-debt-balance
+
+metrics: run-metrics
+
+human-report: run-human-balance
+
+publish:
+	@$(PY) -m accounting.publish_latest --project-root "$(ROOT)" --clean
+
+# Composite names: one clear path for full builds and frontend handoff.
+.PHONY: build-all build-report build-front
+build-all: build-report publish
+
+build-report: human-report
+
+build-front: publish
+
+# Support and experimental command surface.
+.PHONY: doctor validate clean-derived front-report
+doctor:
+	@$(PY) --version
+	@$(PY) -m py_compile \
+		accounting/ingest.py \
+		accounting/materialize.py \
+		accounting/views.py \
+		accounting/resolve_internal_debt_v2.py \
+		accounting/metrics/io.py \
+		accounting/metrics/registry.py \
+		accounting/metrics/builders.py \
+		accounting/metrics/derive.py \
+		accounting/metrics/validate.py \
+		accounting/metrics/views.py \
+		accounting/metrics/drilldown.py \
+		accounting/metrics/build.py \
+		accounting/build_metric_values.py \
+		accounting/human_balance_document_factory.py \
+		accounting/publish_latest.py
+	@echo "accounting command modules compile ok"
+
+validate: doctor
+	@$(MAKE) help >/dev/null
+	@echo "make help ok"
+
+clean-derived:
+	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest"
+
+front-report:
+	@$(call _guard_out_dir,$(RUN_OUT))
+	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR). Run make metrics first or point RUN_STAMP to an existing run."; exit 2)
+	@mkdir -p "$(OUT)/front/$(RUN_RUN_ID)"
+	@$(PY) -m accounting.human_balance_front_factory \
+		--run-root "$(RUN_OUT)" \
+		--metrics-dir "$(RUN_METRICS_DIR)" \
+		--write-dir "$(OUT)/front/$(RUN_RUN_ID)" \
+		--months "$(METRIC_MONTHS)" \
+		--rent-place-col "$(RENT_PLACE_COL)" \
+		--rent-detail-col "$(RENT_DETAIL_COL)" \
+		--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
+		--include-statuses "$(INCLUDE_STATUSES)" \
+		--noise-floor "$(NOISE_FLOOR)"
+
 .PHONY: smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
 
 smoke-accounting: smoke-views
@@ -374,7 +454,7 @@ _run_metrics_action:
 	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY)"; exit 2)
 	@mkdir -p "$(RUN_METRICS_DIR)"
 	@bash -eu -o pipefail -c '\
-		$(PY) -m accounting.build_metric_values \
+		$(PY) -m accounting.metrics.build \
 			--run-root "$(RUN_OUT)" \
 			--out-dir "$(RUN_METRICS_DIR)" \
 			--months "$(METRIC_MONTHS)" \

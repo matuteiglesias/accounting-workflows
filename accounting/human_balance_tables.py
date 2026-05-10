@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 import pandas as pd
 
-from accounting.build_metric_values import METRIC_VIEWS_DIRNAME
-from accounting.metric_drilldown import DRILLDOWN_DIRNAME, DRILLDOWN_INDEX_FILENAME
+from accounting.metrics.build import METRIC_VIEWS_DIRNAME
+from accounting.metrics.drilldown import DRILLDOWN_DIRNAME, DRILLDOWN_INDEX_FILENAME
 
 
 # -----------------------

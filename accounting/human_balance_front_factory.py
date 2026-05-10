@@ -26,12 +26,12 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Seque
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
-from accounting.metric_drilldown import (
+from accounting.metrics.drilldown import (
     DRILLDOWN_DIRNAME,
     DRILLDOWN_INDEX_FILENAME,
     drilldown_lookup,
 )
-from accounting.metrics_views import parse_noise_floor
+from accounting.metrics.views import parse_noise_floor
 from accounting.human_balance_tables import (
     HumanTableSpec,
     build_human_tables_with_specs,
