@@ -8,7 +8,7 @@ The supported local execution order is:
 2. `make run-materialize`
 3. `make run-views`
 4. `make run-metrics`
-5. `make run-human-balance`
+5. `make run-human-report`
 
 `run-accounting` is just the wrapper target for the same happy path. Legacy storypack / compile targets are not part of the supported path.
 
@@ -19,7 +19,7 @@ Writes to `out/run/accounting/<RUN_ID>/`.
 
 Required outputs:
 - `ledger_canonical.csv`
-- ingest-side metadata/check files produced by `accounting.ingest`
+- ingest-side metadata/check files produced by `accounting.ledger.ingest`
 
 ### 2. `run-materialize`
 Writes to the same run root: `out/run/accounting/<RUN_ID>/`.
@@ -67,7 +67,7 @@ Optional outputs:
 - `balance_cash_q.csv`
 - `balance_cash_y.csv`
 
-### 5. `run-human-balance`
+### 5. `run-human-report`
 Reads from:
 - run root: `out/run/accounting/<RUN_ID>/`
 - metrics root: `out/metrics/<RUN_ID>/`
@@ -96,7 +96,7 @@ make run-ingest
 make run-materialize
 make run-views
 make run-metrics
-make run-human-balance
+make run-human-report
 ```
 
 At the end, confirm these paths exist for the active `<RUN_ID>`:

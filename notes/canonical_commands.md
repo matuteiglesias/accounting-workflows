@@ -7,7 +7,7 @@ Last reviewed: 2026-05-10
 
 This file is the command authority companion to `notes/entrypoints.md`. It maps the desired command surface to current Makefile targets.
 
-Run `make help` for the live command list.
+Run `make help` for the live command list. The canonical debt module CLIs are `python -m accounting.debt.resolve` and `python -m accounting.debt.balance_views`; the old flat module paths remain compatibility wrappers.
 
 ## Core pipeline
 
@@ -18,7 +18,7 @@ make debt          # canonical ledger/views → resolved debt contracts
 make debt-views    # debt contracts → debt balance views
 make metrics       # analytical artifacts → metric contracts
 make human-report  # metric/debt contracts → current human report
-make publish       # latest artifacts → frontend snapshot
+make publish-latest # latest artifacts → frontend snapshot
 ```
 
 ## Composite commands
@@ -44,7 +44,7 @@ make clean-derived
 make front-report
 ```
 
-`front-report` calls `human_balance_front_factory.py`. It remains experimental until the front report has a stable consumer and output contract.
+`front-report` calls `accounting.human.front`. It remains experimental until the front report has a stable consumer and output contract.
 
 ## Legacy/compatibility command surface
 

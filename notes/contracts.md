@@ -1,6 +1,6 @@
 
 Purpose: Build canonical ledger dataframe and write ledger_canonical.csv (plus preserve anomalies).
-Command: python -m src.accounting.ingest --fixture <csv> --out-dir <dir> [--require-tx-id]
+Command: python -m accounting.ledger.ingest --fixture <csv> --out-dir <dir> [--require-tx-id]
 Inputs: fixture CSV (preferred) OR Google Sheet URL + service account JSON.
 Flags: --fixture, --out-dir, --sheet-url, --service-account, --sheet-name, --require-tx-id.
 Env: FIXTURE, OUT_DIR, SHEET_URL, SERVICE_ACCOUNT (fallbacks).  (live mode requires sheet+SA)
@@ -15,7 +15,7 @@ Log lines/counters: "Built ledger_base rows=%d anomalies=%d" (rows, anomalies).
 
 
 Purpose: Produce “public” CSV artifacts + partitions.json + manifest.json from ledger_canonical.csv.
-Command: python -m src.accounting.materialize --out-dir <dir> --freq {W|M} --force {0|1}
+Command: python -m accounting.stage_d.materialize --out-dir <dir> --freq {W|M} --force {0|1}
 Inputs: <out-dir>/ledger_canonical.csv (must exist).
 Flags: --out-dir, --freq, --force.
 Env: OUT_DIR, FREQ, FORCE (defaults).

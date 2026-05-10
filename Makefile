@@ -1,5 +1,5 @@
 # Makefile.v3 - Accounting spine
-# Official path: run-ingest -> run-materialize -> run-views -> run-metrics -> run-human-balance
+# Official path: run-ingest -> run-materialize -> run-views -> run-metrics -> run-human-report
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
 # - Explicit out-dir passed to all Python entrypoints
@@ -118,6 +118,7 @@ DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
 DEBT_FULL_ONLY ?= 1
 DEBT_EXCLUDE_HOUSEHOLD ?= 1
+DRY_RUN ?= 0
 
 
 
@@ -166,7 +167,7 @@ help:
 	@echo "  make debt-views     # debt contracts -> balance views"
 	@echo "  make metrics        # analytical artifacts -> metric contracts"
 	@echo "  make human-report   # metric/debt contracts -> current human report"
-	@echo "  make publish        # latest artifacts -> public/accounting/latest snapshot"
+	@echo "  make publish-latest # latest artifacts -> public/accounting/latest snapshot"
 	@echo ""
 	@echo "Composite:"
 	@echo "  make build-all      # full canonical path through publish"
@@ -183,8 +184,8 @@ help:
 	@echo "  make front-report   # future/stub front-oriented report factory"
 	@echo ""
 	@echo "Compatibility / lower-level run targets:"
-	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-balance"
-	@echo "  make run-metrics | run-human-balance | run-accounting | run-accounting-full"
+	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-views"
+	@echo "  make run-metrics | run-human-report | run-human-balance | run-accounting | run-accounting-full"
 	@echo "  make run-downstream-from-ledger | run-metrics-and-human | run-human-balance-only"
 	@echo ""
 	@echo "Key vars:"
@@ -197,39 +198,53 @@ help:
 # Meta targets
 # ----------------------------------------
 # Canonical names: these are the preferred operational surface.
-.PHONY: ledger materialize debt debt-views metrics human-report publish
+.PHONY: ledger materialize debt debt-views metrics human-report publish-latest publish
 ledger: run-ingest
 
 materialize: run-materialize
 
 debt: run-debt
 
-debt-views: run-debt-balance
+debt-views: run-debt-views
 
 metrics: run-metrics
 
-human-report: run-human-balance
+human-report: run-human-report
 
-publish:
-	@$(PY) -m accounting.publish_latest --project-root "$(ROOT)" --clean
+publish-latest:
+	@bash -eu -o pipefail -c '\
+		args=( --project-root "$(ROOT)" --clean ); \
+		if [ "$(DRY_RUN)" = "1" ]; then args+=( --dry-run ); fi; \
+		$(PY) -m accounting.publish.latest "$${args[@]}"; \
+	'
+
+# Compatibility alias; prefer publish-latest.
+publish: publish-latest
 
 # Composite names: one clear path for full builds and frontend handoff.
 .PHONY: build-all build-report build-front
-build-all: build-report publish
+build-all: build-report publish-latest
 
 build-report: human-report
 
-build-front: publish
+build-front: publish-latest
 
 # Support and experimental command surface.
 .PHONY: doctor validate clean-derived front-report
 doctor:
 	@$(PY) --version
 	@$(PY) -m py_compile \
+		accounting/ledger/ingest.py \
+		accounting/stage_d/materialize.py \
+		accounting/core/timeseries.py \
 		accounting/ingest.py \
 		accounting/materialize.py \
+		accounting/core_timeseries.py \
 		accounting/views.py \
+		accounting/debt/resolve.py \
+		accounting/debt/balance_views.py \
 		accounting/resolve_internal_debt_v2.py \
+		accounting/build_debt_balance_views.py \
 		accounting/metrics/io.py \
 		accounting/metrics/registry.py \
 		accounting/metrics/builders.py \
@@ -239,7 +254,15 @@ doctor:
 		accounting/metrics/drilldown.py \
 		accounting/metrics/build.py \
 		accounting/build_metric_values.py \
+		accounting/human/tables.py \
+		accounting/human/document.py \
+		accounting/human/front.py \
+		accounting/human_balance_tables.py \
 		accounting/human_balance_document_factory.py \
+		accounting/human_balance_front_factory.py \
+		accounting/publish/latest.py \
+		accounting/publish/manifest.py \
+		accounting/publish/snapshot.py \
 		accounting/publish_latest.py
 	@echo "accounting command modules compile ok"
 
@@ -254,7 +277,7 @@ front-report:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR). Run make metrics first or point RUN_STAMP to an existing run."; exit 2)
 	@mkdir -p "$(OUT)/front/$(RUN_RUN_ID)"
-	@$(PY) -m accounting.human_balance_front_factory \
+	@$(PY) -m accounting.human.front \
 		--run-root "$(RUN_OUT)" \
 		--metrics-dir "$(RUN_METRICS_DIR)" \
 		--write-dir "$(OUT)/front/$(RUN_RUN_ID)" \
@@ -270,7 +293,7 @@ front-report:
 smoke-accounting: smoke-views
 
 run-accounting: run-accounting-full
-run-accounting-full: run-human-balance
+run-accounting-full: run-human-report
 
 run-downstream-from-ledger:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -303,7 +326,7 @@ run-human-balance-only:
 smoke-ingest:
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@mkdir -p "$(SMOKE_OUT)"
-	@$(PY) -m accounting.ingest \
+	@$(PY) -m accounting.ledger.ingest \
 		--mode smoke \
 		--fixture "$(FIXTURE)" \
 		--out-dir "$(SMOKE_OUT)" \
@@ -313,7 +336,7 @@ smoke-ingest:
 .PHONY: smoke-materialize
 smoke-materialize: smoke-ingest
 	@$(call _guard_out_dir,$(SMOKE_OUT))
-	@$(PY) -m accounting.materialize \
+	@$(PY) -m accounting.stage_d.materialize \
 		--out-dir "$(SMOKE_OUT)" \
 		--freq "$(FREQ)" \
 		--force 1 \
@@ -350,7 +373,7 @@ run-ingest:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@$(call require_var,ACCOUNT_SHEET_URL)
 	@mkdir -p "$(RUN_OUT)"
-	@$(PY) -m accounting.ingest \
+	@$(PY) -m accounting.ledger.ingest \
 		--mode run \
 		--out-dir "$(RUN_OUT)" \
 		--run-id "$(RUN_RUN_ID)" \
@@ -365,7 +388,7 @@ run-materialize: run-ingest _run_materialize_action
 _run_materialize_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT)"; exit 2)
-	@$(PY) -m accounting.materialize \
+	@$(PY) -m accounting.stage_d.materialize \
 		--out-dir "$(RUN_OUT)" \
 		--freq "$(FREQ)" \
 		--force 0 \
@@ -422,21 +445,24 @@ _run_debt_action:
 		if [ "$(DEBT_FULL_ONLY)" = "1" ]; then \
 			args+=( --full-only ); \
 		fi; \
-		$(PY) -m accounting.resolve_internal_debt_v2 "$${args[@]}"; \
+		$(PY) -m accounting.debt.resolve "$${args[@]}"; \
 		test -s "$(RUN_DEBT_DIR)/debt_open_items.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_allocations.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_repayment_events.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_resolution_timeline.csv"; \
 	'
 
-.PHONY: run-debt-balance _run_debt_balance_action
-run-debt-balance: run-debt _run_debt_balance_action
+.PHONY: run-debt-views run-debt-balance _run_debt_balance_action
+run-debt-views: run-debt _run_debt_balance_action
+
+# Compatibility alias; prefer run-debt-views.
+run-debt-balance: run-debt-views
 
 _run_debt_balance_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_DEBT_DIR)/debt_open_items.csv" || (echo "ERROR: missing debt_open_items.csv at $(RUN_DEBT_DIR)"; exit 2)
 	@bash -eu -o pipefail -c '\
-		$(PY) -m accounting.build_debt_balance_views \
+		$(PY) -m accounting.debt.balance_views \
 			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
 			--write-dir "$(RUN_DEBT_BALANCE_DIR)"; \
 		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_daily.csv"; \
@@ -447,7 +473,7 @@ _run_debt_balance_action:
 
 
 .PHONY: run-metrics _run_metrics_action
-run-metrics: run-debt-balance _run_metrics_action
+run-metrics: run-debt-views _run_metrics_action
 
 _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -476,15 +502,18 @@ _run_metrics_action:
 	'
 
 
-.PHONY: run-human-balance _run_human_balance_action
-run-human-balance: run-metrics _run_human_balance_action
+.PHONY: run-human-report run-human-balance _run_human_balance_action
+run-human-report: run-metrics _run_human_balance_action
+
+# Compatibility alias; prefer run-human-report.
+run-human-balance: run-human-report
 
 _run_human_balance_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR)"; exit 2)
 	@mkdir -p "$(RUN_HUMAN_DIR)"
 	@bash -eu -o pipefail -c '\
-		$(PY) -m accounting.human_balance_document_factory \
+		$(PY) -m accounting.human.document \
 			--run-root "$(RUN_OUT)" \
 			--metrics-dir "$(RUN_METRICS_DIR)" \
 			--write-dir "$(RUN_HUMAN_DIR)" \
