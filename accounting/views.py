@@ -10,16 +10,11 @@ from typing import Dict, Optional, List, Any, Tuple
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
-from accounting.utils import atomic_write_df
-from accounting.utils import (
-    _read_csv_if_exists,
-    require_currency,
-    _find_first_existing,
-    _ensure_amount,
-)
+from accounting.support.currency import _ensure_amount, require_currency
+from accounting.support.io import _find_first_existing, _read_csv_if_exists, atomic_write_df
+from accounting.support.run_id import resolve_run_id
 
 from accounting.core.timeseries import period_bins_for_dates
-from accounting.utils import resolve_run_id
 
 
 FONDOS_FN = "fondos_report.csv"
@@ -980,7 +975,7 @@ def main(argv=None) -> int:
         meta_dir = root_dir / "meta"
         meta_dir.mkdir(parents=True, exist_ok=True)
 
-        from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+        from accounting.artifacts.manifest import artifact_from_path, write_stage_manifest, append_artifacts
 
         stage = "F.views"
         mode = str(args.mode)

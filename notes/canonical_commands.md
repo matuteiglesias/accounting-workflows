@@ -7,7 +7,7 @@ Last reviewed: 2026-05-10
 
 This file is the command authority companion to `notes/entrypoints.md`. It maps the desired command surface to current Makefile targets.
 
-Run `make help` for the live command list. The canonical debt module CLIs are `python -m accounting.debt.resolve` and `python -m accounting.debt.balance_views`; the old flat module paths remain compatibility wrappers.
+Run `make help` for the live command list. The canonical debt module CLIs are `python -m accounting.debt.resolve` and `python -m accounting.debt.balance_views`; the old flat debt module compatibility paths have been removed.
 
 ## Core pipeline
 

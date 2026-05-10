@@ -13,7 +13,7 @@ from accounting.logging_utils import get_logger
 import numpy as np
 
 
-# from accounting.utils import resolve_run_id
+# from accounting.support.run_id import resolve_run_id
 
 # rid = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True)
 

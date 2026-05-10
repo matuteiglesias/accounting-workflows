@@ -1,14 +1,10 @@
-# src/accounting/plots.py
+# accounting/viz/plots.py
 from __future__ import annotations
 from typing import Optional, Iterable
 from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# inside src/accounting/plots.py (replace old plot_renta_series)
-import matplotlib.pyplot as plt
-import pandas as pd
-from typing import Optional, Iterable
 
 def plot_renta_series(pivot_df: pd.DataFrame, parties: Optional[Iterable[str]] = None,
                       show_rolling: bool = True, rolling_window: int = 4) -> plt.Figure:
@@ -123,11 +119,10 @@ def save_fig(fig: plt.Figure, path: Path, fmt: str = "png"):
     plt.close(fig)
 
 
-# src/accounting/plots_cli.py
+# accounting/viz/plots_cli.py
 from pathlib import Path
 import argparse
 import pandas as pd
-from accounting.plots import plot_renta_series, save_fig
 
 def main(argv=None):
     p = argparse.ArgumentParser()

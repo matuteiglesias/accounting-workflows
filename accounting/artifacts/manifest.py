@@ -1,4 +1,4 @@
-# accounting/manifest.py
+# accounting/artifacts/manifest.py
 from __future__ import annotations
 
 import json

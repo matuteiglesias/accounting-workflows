@@ -1,4 +1,4 @@
-# src/accounting/reports.py
+# accounting/human/reports.py
 from __future__ import annotations
 
 """
@@ -28,7 +28,7 @@ def main() -> int:
     ap.add_argument("--allow-cross-currency-sum", action="store_true", help="Write unsafe currency-summed convenience outputs")
     args = ap.parse_args()
 
-    logging.warning("reports.py is deprecated. It now calls views.export_views and does not generate separate reports-stage artifacts.")
+    logging.warning("accounting.human.reports is deprecated. It now calls views.export_views and does not generate separate reports-stage artifacts.")
     export_views(
         reports_dir=Path(args.reports_dir),
         write_dir=Path(args.write_dir),

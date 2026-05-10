@@ -117,9 +117,9 @@ Governance rule: the frontend reads the published snapshot. It should not read a
 
 ## Current architectural decisions
 
-- `accounting.debt.resolve` is the current debt resolver; `resolve_internal_debt_v2.py` remains a compatibility wrapper.
-- `accounting.human.document` is the current human report factory; `human_balance_document_factory.py` remains a compatibility wrapper.
-- `accounting.human.front` is experimental/future until it has a clear consumer and output contract; `human_balance_front_factory.py` remains a compatibility wrapper.
+- `accounting.debt.resolve` is the current debt resolver; the old `resolve_internal_debt_v2.py` compatibility shim has been removed.
+- `accounting.human.document` is the current human report factory; the old `human_balance_document_factory.py` compatibility shim has been removed.
+- `accounting.human.front` is experimental/future until it has a clear consumer and output contract; the old `human_balance_front_factory.py` compatibility shim has been removed.
 - The metrics subsystem is the most mature contract layer and is the best first candidate for a later compatibility-package refactor.
 - Stage D materialized outputs are authoritative for view construction.
 - Legacy report artifacts are optional compatibility aids, not required pipeline inputs.

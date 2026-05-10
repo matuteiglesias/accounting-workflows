@@ -1,4 +1,4 @@
-# src/accounting/config.py
+# accounting/config.py
 """
 Configuration loader for accounting pipeline.
 
@@ -11,13 +11,14 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Any, List
 import os
 from pathlib import Path
+import importlib.util
 import json
 import sys
 
-# Try to import yaml if available; otherwise fall back to JSON-only usage
-try:
+# Use PyYAML when it is installed; otherwise read config files as JSON.
+if importlib.util.find_spec("yaml") is not None:
     import yaml  # PyYAML
-except Exception:
+else:
     yaml = None
 
 
@@ -127,18 +128,24 @@ def _env_override(key: str) -> Optional[str]:
 def load_config(yaml_path: Optional[str] = None) -> Config:
     """
     Load configuration with the following precedence:
-      1. config YAML/JSON file (src/accounting/config.yaml by default)
+      1. config YAML/JSON file (accounting/config.yaml by default)
       2. environment variables (ACCOUNT_<KEY>)
       3. dataclass defaults
 
     Returns a Config dataclass instance.
     """
-    # locate default yaml in repo relative to this file
-    repo_root = Path(__file__).resolve().parents[1]  # src/accounting -> project root
+    package_dir = Path(__file__).resolve().parent
+    repo_root = package_dir.parent
     if yaml_path:
         yaml_file = Path(yaml_path).expanduser()
     else:
-        yaml_file = repo_root / "src" / "accounting" / "config.yaml"
+        package_default = package_dir / "config.yaml"
+        legacy_src_default = repo_root / "src" / "accounting" / "config.yaml"
+        yaml_file = (
+            legacy_src_default
+            if legacy_src_default.exists() and not package_default.exists()
+            else package_default
+        )
 
     cfg_data = read_yaml(yaml_file) if yaml_file.exists() else {}
 

@@ -234,17 +234,23 @@ build-front: publish-latest
 doctor:
 	@$(PY) --version
 	@$(PY) -m py_compile \
+		accounting/config.py \
+		accounting/logging_utils.py \
 		accounting/ledger/ingest.py \
 		accounting/stage_d/materialize.py \
 		accounting/core/timeseries.py \
-		accounting/ingest.py \
-		accounting/materialize.py \
-		accounting/core_timeseries.py \
+		accounting/contracts/models.py \
+		accounting/viz/plots.py \
+		accounting/artifacts/manifest.py \
+		accounting/support/run_id.py \
+		accounting/support/io.py \
+		accounting/support/currency.py \
+		accounting/support/env.py \
+		accounting/support/hashing.py \
+		accounting/support/partitions.py \
 		accounting/views.py \
 		accounting/debt/resolve.py \
 		accounting/debt/balance_views.py \
-		accounting/resolve_internal_debt_v2.py \
-		accounting/build_debt_balance_views.py \
 		accounting/metrics/io.py \
 		accounting/metrics/registry.py \
 		accounting/metrics/builders.py \
@@ -253,17 +259,13 @@ doctor:
 		accounting/metrics/views.py \
 		accounting/metrics/drilldown.py \
 		accounting/metrics/build.py \
-		accounting/build_metric_values.py \
 		accounting/human/tables.py \
 		accounting/human/document.py \
 		accounting/human/front.py \
-		accounting/human_balance_tables.py \
-		accounting/human_balance_document_factory.py \
-		accounting/human_balance_front_factory.py \
+		accounting/human/reports.py \
 		accounting/publish/latest.py \
 		accounting/publish/manifest.py \
-		accounting/publish/snapshot.py \
-		accounting/publish_latest.py
+		accounting/publish/snapshot.py
 	@echo "accounting command modules compile ok"
 
 validate: doctor

@@ -71,33 +71,33 @@ Responsible for external records only: Google Sheets, fixtures, raw CSVs, and ma
 
 ### Canonical ledger
 
-`accounting.ledger.ingest` is responsible for turning source records into canonical ledger rows; `accounting.ingest` remains a compatibility wrapper. Its stable internal contract includes columns such as `tx_id`, `Date`, `amount`, `Currency`, `payer`, `receiver`, `Flujo`, `Tipo`, `status`, `Box`, `source_file`, `source_row`, `ingest_ts`, and notes/anomaly metadata.
+`accounting.ledger.ingest` is responsible for turning source records into canonical ledger rows; the old `accounting.ingest` compatibility wrapper has been removed. Its stable internal contract includes columns such as `tx_id`, `Date`, `amount`, `Currency`, `payer`, `receiver`, `Flujo`, `Tipo`, `status`, `Box`, `source_file`, `source_row`, `ingest_ts`, and notes/anomaly metadata.
 
 ### Materialized analytical artifacts
 
-`accounting.stage_d.materialize` is responsible for CSV-first analytical tables derived from the canonical ledger; `accounting.materialize` remains a compatibility wrapper. `accounting.views` remains a support bridge for view tables; the doctrine is that Stage D materialized artifacts are source-of-truth for views.
+`accounting.stage_d.materialize` is responsible for CSV-first analytical tables derived from the canonical ledger; the old `accounting.materialize` compatibility wrapper has been removed. `accounting.views` remains a support bridge for view tables; the doctrine is that Stage D materialized artifacts are source-of-truth for views.
 
 ### Metric/debt contracts
 
-The metrics subsystem is the most mature contract layer today. Its canonical implementation now lives under `accounting.metrics` (`io`, `registry`, `builders`, `derive`, `validate`, `views`, `drilldown`, and `build`), while the old flat module names remain compatibility wrappers.
+The metrics subsystem is the most mature contract layer today. Its canonical implementation now lives under `accounting.metrics` (`io`, `registry`, `builders`, `derive`, `validate`, `views`, `drilldown`, and `build`), while the old flat module compatibility wrappers have been removed.
 
-Debt resolution is also a named contract layer. `accounting.debt.resolve` is the current debt resolver, and `accounting.debt.balance_views` derives time-series debt balance artifacts from debt open items. The old flat module paths remain compatibility wrappers.
+Debt resolution is also a named contract layer. `accounting.debt.resolve` is the current debt resolver, and `accounting.debt.balance_views` derives time-series debt balance artifacts from debt open items. The old flat human compatibility module paths have been removed; use the `accounting.human.*` package paths directly.
 
 ### Human/report surfaces
 
-`accounting.human.tables` defines reusable human-facing table specs and builders. `accounting.human.document` is the current human report factory. `accounting.human.front` is future/experimental and should not be promoted to production until its output and consumer are clear. The old flat module paths remain compatibility wrappers.
+`accounting.human.tables` defines reusable human-facing table specs and builders. `accounting.human.document` is the current human report factory. `accounting.human.front` is future/experimental and should not be promoted to production until its output and consumer are clear. The old flat human compatibility module paths have been removed; use the `accounting.human.*` package paths directly.
 
 ### Frontend snapshot
 
-`accounting.publish.latest` packages selected latest metrics, debt, and human report artifacts into `public/accounting/latest/*`; `publish_latest.py` remains a compatibility wrapper. The frontend should consume this snapshot instead of internal producer directories.
+`accounting.publish.latest` packages selected latest metrics, debt, and human report artifacts into `public/accounting/latest/*`; the old `publish_latest.py` compatibility shim has been removed. The frontend should consume this snapshot instead of internal producer directories.
 
 ## Current decisions
 
 | Decision | Current authority |
 |---|---|
-| Debt resolver | `accounting.debt.resolve` (`resolve_internal_debt_v2.py` compatibility wrapper) |
-| Human report factory | `accounting.human.document` (`human_balance_document_factory.py` compatibility wrapper) |
-| Front report factory | `accounting.human.front` is experimental/future (`human_balance_front_factory.py` compatibility wrapper) |
+| Debt resolver | `accounting.debt.resolve` |
+| Human report factory | `accounting.human.document` |
+| Front report factory | `accounting.human.front` is experimental/future |
 | Metrics layer | Most mature contract layer; safest first code refactor candidate later |
 | View source of truth | Stage D materialized outputs |
 | Legacy report artifacts | Optional compatibility only |

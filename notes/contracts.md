@@ -31,14 +31,14 @@ Log lines/counters: "Writing ledger_canonical", "Materialization complete. Manif
 
 
 Purpose: Generate higher-level report artifacts from materialized CSV folder (optionally validate totals).
-Command: python -m src.accounting.reports -o <out_dir> -f <freq> [-w <write_dir>] [--parties ... | --top N] [--no-validate]
+Command: python -m accounting.human.reports --reports-dir <run_or_reports_dir> --write-dir <write_dir> [--freq <freq>] [--allow-cross-currency-sum]
 Inputs: Materialized CSVs in <out_dir> produced by materialize step; freq label must match filenames.
-Flags: --out-dir/-o, --freq/-f, --write-dir/-w, --parties (space list or "A,B"), --top, --no-validate, --pretty-json.
+Flags: --reports-dir, --write-dir, --freq, --allow-cross-currency-sum.
 Env: none required (CLI args dominate).
 Required files: at least ledger_canonical + per_party_time_long (for top parties derivation) + other report dependencies.
-Outputs: report files written under write_dir; JSON summary printed to stdout.
+Outputs: deprecated bridge writes view/mart CSVs under write_dir via accounting.views.export_views.
 Artifacts: report CSVs + metadata summary; validation block when enabled.
-Manifest fields: report summary JSON includes outputs + (optional) validation summary.
+Manifest fields: view export summary and manifest metadata are owned by accounting.views.
 Invariants: when parties omitted, derives top parties by abs total movement on 'amount'; returns empty parties if missing/empty.
 Failure modes: missing materialized files; freq mismatch; schema drift (missing amount/party); validation fails.
 Observability: prints JSON summary; logs/exit code should be non-zero on fatal errors.

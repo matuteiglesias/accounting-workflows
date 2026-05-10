@@ -75,22 +75,30 @@ The older `run-*` targets remain available as compatibility aliases and implemen
 | Module command | Layer | Status | Notes |
 |---|---|---|---|
 | `python -m accounting.ledger.ingest ...` | Level 1 | canonical implementation | Builds canonical ledger from fixture or Google Sheet. |
-| `python -m accounting.ingest ...` | Level 1 | compatibility wrapper | Old ledger ingest command path; kept for imports and commands. |
 | `python -m accounting.stage_d.materialize ...` | Level 2 | canonical implementation | Materializes the canonical ledger into Stage D CSV artifacts. |
-| `python -m accounting.materialize ...` | Level 2 | compatibility wrapper | Old Stage D materializer command path; kept for imports and commands. |
 | `python -m accounting.views ...` | Level 2/3 | support | Builds view tables from Stage D artifacts. |
 | `python -m accounting.debt.resolve ...` | Level 3 | canonical implementation | Current debt resolver. |
-| `python -m accounting.resolve_internal_debt_v2 ...` | Level 3 | compatibility wrapper | Old debt resolver path; kept for imports and commands. |
 | `python -m accounting.debt.balance_views ...` | Level 3 | canonical implementation | Builds debt balance view CSVs. |
-| `python -m accounting.build_debt_balance_views ...` | Level 3 | compatibility wrapper | Old debt balance view path; kept for imports and commands. |
 | `python -m accounting.metrics.build ...` | Level 3 | canonical implementation | Main metric artifact builder. |
-| `python -m accounting.build_metric_values ...` | Level 3 | compatibility wrapper | Preserved old metric-builder command path. |
 | `python -m accounting.human.document ...` | Level 4 | current canonical implementation | Current human report factory. |
-| `python -m accounting.human_balance_document_factory ...` | Level 4 | compatibility wrapper | Old human report factory path; kept for imports and commands. |
 | `python -m accounting.publish.latest ...` | Level 5 | current canonical publish implementation | Builds frontend-safe latest snapshot. |
-| `python -m accounting.publish_latest ...` | Level 5 | compatibility wrapper | Old publish command path; kept for imports and commands. |
 | `python -m accounting.human.front ...` | Level 4/5 | experimental | Future/front-oriented report factory. |
-| `python -m accounting.human_balance_front_factory ...` | Level 4/5 | compatibility wrapper | Old front report factory path; kept for imports and commands. |
+
+## Removed compatibility module paths
+
+The flat compatibility shim modules were removed after import, Makefile, and docs checks showed no active internal dependency. Use the canonical package paths in the table above instead.
+
+| Removed path | Replacement |
+|---|---|
+| `python -m accounting.ingest ...` | `python -m accounting.ledger.ingest ...` |
+| `python -m accounting.materialize ...` | `python -m accounting.stage_d.materialize ...` |
+| `python -m accounting.resolve_internal_debt_v2 ...` | `python -m accounting.debt.resolve ...` |
+| `python -m accounting.build_debt_balance_views ...` | `python -m accounting.debt.balance_views ...` |
+| `python -m accounting.build_metric_values ...` | `python -m accounting.metrics.build ...` |
+| `python -m accounting.human_balance_document_factory ...` | `python -m accounting.human.document ...` |
+| `python -m accounting.human_balance_front_factory ...` | `python -m accounting.human.front ...` |
+| `python -m accounting.publish_latest ...` | `python -m accounting.publish.latest ...` |
+
 
 ## Operational rule
 

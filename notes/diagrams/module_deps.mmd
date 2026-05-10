@@ -1,12 +1,14 @@
 graph LR
-  ingest[ingest.py] --> manifest[manifest.py]
-  ingest --> core[core_timeseries.py]
-  materialize[materialize.py] --> core
+  ingest[ledger/ingest.py] --> manifest[artifacts/manifest.py]
+  ingest --> core[core/timeseries.py]
+  ingest --> support[support/*]
+  materialize[stage_d/materialize.py] --> core
   materialize --> manifest
-  reports[reports.py] --> utils[utils.py]
-  reports --> materialize
-  views[views.py] --> utils
+  materialize --> support
+  reports[human/reports.py] --> views[views.py]
   views --> core
+  views --> support
+  views --> manifest
   storypack[storypack.py] --> reports
-  models[models.py] --> ingest
+  models[contracts/models.py] --> ingest
   config[config.py] --> ingest
