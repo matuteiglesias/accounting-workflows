@@ -10,13 +10,13 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
-from accounting.build_metric_values import METRIC_VIEWS_DIRNAME, REQUIRED_METRIC_VIEW_FILES
-from accounting.metric_drilldown import (
+from accounting.metrics.build import METRIC_VIEWS_DIRNAME, REQUIRED_METRIC_VIEW_FILES
+from accounting.metrics.drilldown import (
     DRILLDOWN_DIRNAME,
     DRILLDOWN_INDEX_FILENAME,
     drilldown_lookup,
 )
-from accounting.metrics_views import parse_noise_floor
+from accounting.metrics.views import parse_noise_floor
 from accounting.human_balance_tables import (
     HumanTableSpec,
     build_human_tables_with_specs,
