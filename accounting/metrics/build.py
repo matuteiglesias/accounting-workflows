@@ -174,7 +174,7 @@ def load_context(run_root: Path, run_id: str, as_of_date: str) -> MetricsContext
     views_dir = run_root / "views"
 
 
-    # TODO. build_metric_values.py busca deuda en una ruta sospechosa
+    # TODO. metrics.build debt lookup points at a suspicious path
 
     # Tu load_context() arma:
     # debt_run_dir = run_root.parent.parent / "debt_resolution" / run_root.name

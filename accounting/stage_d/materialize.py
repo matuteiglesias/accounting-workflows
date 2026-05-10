@@ -690,7 +690,7 @@ def main() -> int:
     freq = args.freq or os.getenv("FREQ", "W")
     force_flag = bool(int(str(args.force)))
 
-    from accounting.utils import resolve_run_id
+    from accounting.support.run_id import resolve_run_id
 
     # run_id = _resolve_run_id(args)
     run_id = resolve_run_id(mode=args.mode, run_id=getattr(args, "run_id", None), root_dir=out_dir, strict=True)
@@ -702,7 +702,7 @@ def main() -> int:
     meta_dir = out_dir / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
 
-    from accounting.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+    from accounting.artifacts.manifest import artifact_from_path, write_stage_manifest, append_artifacts
 
     stage_generated_at = pd.Timestamp.now("UTC").isoformat()
 

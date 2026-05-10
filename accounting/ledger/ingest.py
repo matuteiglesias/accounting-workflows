@@ -643,8 +643,8 @@ def main() -> int:
     args = parse_args()
     only_status = _parse_list_arg(args.only_status)
 
-    from accounting.manifest import artifact_from_path, append_artifacts, write_stage_manifest
-    from accounting.utils import resolve_run_id
+    from accounting.artifacts.manifest import artifact_from_path, append_artifacts, write_stage_manifest
+    from accounting.support.run_id import resolve_run_id
 
     if args.probe_fingerprint:
         fp = compute_ledger_fingerprint(

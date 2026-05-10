@@ -22,12 +22,13 @@ Canonical Make target:
 make publish-latest
 ```
 
-Compatibility surfaces remain available:
+Compatibility Make target:
 
 ```text
-python -m accounting.publish_latest --project-root <repo> --clean
 make publish
 ```
+
+The old `python -m accounting.publish_latest` compatibility module has been removed; use `python -m accounting.publish.latest` directly.
 
 Published snapshot path:
 
