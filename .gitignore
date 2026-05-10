@@ -1,0 +1,19 @@
+cat > .gitignore <<'EOF'
+# generated outputs
+out/
+public/
+
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# env/secrets
+.env
+.venv/
+venv/
+*.sqlite
+*.db
+EOF

@@ -1,0 +1,8 @@
+# accounting runs & secrets
+/out/
+*/out/
+src/accounting/config.local.yaml
+secrets.json
+*.key
+backups/
+logs/

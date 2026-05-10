@@ -1,0 +1,12 @@
+graph LR
+  ingest[ingest.py] --> manifest[manifest.py]
+  ingest --> core[core_timeseries.py]
+  materialize[materialize.py] --> core
+  materialize --> manifest
+  reports[reports.py] --> utils[utils.py]
+  reports --> materialize
+  views[views.py] --> utils
+  views --> core
+  storypack[storypack.py] --> reports
+  models[models.py] --> ingest
+  config[config.py] --> ingest
