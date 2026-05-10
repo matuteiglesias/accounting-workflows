@@ -25,10 +25,11 @@ The Makefile is the command authority. Module CLIs remain useful implementation 
 | `make ledger` | Level 1 | Build the live canonical ledger via `run-ingest`. |
 | `make materialize` | Level 2 | Build live materialized Stage D artifacts via `run-materialize`. |
 | `make debt` | Level 3 | Resolve live internal debt artifacts via `run-debt`. |
-| `make debt-views` | Level 3 | Build debt balance views via `run-debt-balance`. |
+| `make debt-views` | Level 3 | Build debt balance views via `run-debt-views`. |
 | `make metrics` | Level 3 | Build metric values, registry, validation, views, and drilldowns via `run-metrics`. |
-| `make human-report` | Level 4 | Build the current human balance report via `run-human-balance`. |
-| `make publish` | Level 5 | Publish latest producer artifacts to `public/accounting/latest/*`. |
+| `make human-report` | Level 4 | Build the current human balance report via `run-human-report`. |
+| `make publish-latest` | Level 5 | Publish latest producer artifacts to `public/accounting/latest/*`. |
+| `make publish` | Level 5 | Compatibility alias for `publish-latest`. |
 | `make build-all` | composite | Run the full canonical build through publish. |
 | `make build-report` | composite | Run through the current human report without publishing. |
 | `make build-front` | composite | Publish the latest report/metrics/debt snapshot for frontend consumption. |
@@ -49,7 +50,7 @@ The Makefile is the command authority. Module CLIs remain useful implementation 
 
 | Target | Purpose |
 |---|---|
-| `make front-report` | Build the future/front-oriented human report using `human_balance_front_factory.py`. This is not canonical yet. |
+| `make front-report` | Build the future/front-oriented human report using `accounting.human.front`. This remains experimental. |
 
 ## Legacy aliases and compatibility targets
 
@@ -61,9 +62,11 @@ The older `run-*` targets remain available as compatibility aliases and implemen
 | `run-materialize` | compatibility implementation for `materialize` |
 | `run-views` | support bridge for Stage D view composition |
 | `run-debt` | compatibility implementation for `debt` |
-| `run-debt-balance` | compatibility implementation for `debt-views` |
+| `run-debt-views` | compatibility implementation for `debt-views` |
+| `run-debt-balance` | legacy compatibility alias for `run-debt-views` |
 | `run-metrics` | compatibility implementation for `metrics` |
-| `run-human-balance` | compatibility implementation for `human-report` |
+| `run-human-report` | compatibility implementation for `human-report` |
+| `run-human-balance` | legacy compatibility alias for `run-human-report` |
 | `run-accounting` / `run-accounting-full` | compatibility implementation for `build-report` |
 | `run` / `run-all` | legacy convenience aliases for `run-accounting` |
 
@@ -71,16 +74,23 @@ The older `run-*` targets remain available as compatibility aliases and implemen
 
 | Module command | Layer | Status | Notes |
 |---|---|---|---|
-| `python -m accounting.ingest ...` | Level 1 | canonical implementation | Builds canonical ledger from fixture or Google Sheet. |
-| `python -m accounting.materialize ...` | Level 2 | canonical implementation | Materializes the canonical ledger into Stage D CSV artifacts. |
+| `python -m accounting.ledger.ingest ...` | Level 1 | canonical implementation | Builds canonical ledger from fixture or Google Sheet. |
+| `python -m accounting.ingest ...` | Level 1 | compatibility wrapper | Old ledger ingest command path; kept for imports and commands. |
+| `python -m accounting.stage_d.materialize ...` | Level 2 | canonical implementation | Materializes the canonical ledger into Stage D CSV artifacts. |
+| `python -m accounting.materialize ...` | Level 2 | compatibility wrapper | Old Stage D materializer command path; kept for imports and commands. |
 | `python -m accounting.views ...` | Level 2/3 | support | Builds view tables from Stage D artifacts. |
-| `python -m accounting.resolve_internal_debt_v2 ...` | Level 3 | canonical implementation | Current debt resolver. |
-| `python -m accounting.build_debt_balance_views ...` | Level 3 | support | Builds debt balance view CSVs. |
+| `python -m accounting.debt.resolve ...` | Level 3 | canonical implementation | Current debt resolver. |
+| `python -m accounting.resolve_internal_debt_v2 ...` | Level 3 | compatibility wrapper | Old debt resolver path; kept for imports and commands. |
+| `python -m accounting.debt.balance_views ...` | Level 3 | canonical implementation | Builds debt balance view CSVs. |
+| `python -m accounting.build_debt_balance_views ...` | Level 3 | compatibility wrapper | Old debt balance view path; kept for imports and commands. |
 | `python -m accounting.metrics.build ...` | Level 3 | canonical implementation | Main metric artifact builder. |
 | `python -m accounting.build_metric_values ...` | Level 3 | compatibility wrapper | Preserved old metric-builder command path. |
-| `python -m accounting.human_balance_document_factory ...` | Level 4 | current canonical implementation | Current human report factory. |
-| `python -m accounting.publish_latest ...` | Level 5 | current support/canonical publish implementation | Builds frontend-safe latest snapshot. |
-| `python -m accounting.human_balance_front_factory ...` | Level 4/5 | experimental | Future/front-oriented report factory. |
+| `python -m accounting.human.document ...` | Level 4 | current canonical implementation | Current human report factory. |
+| `python -m accounting.human_balance_document_factory ...` | Level 4 | compatibility wrapper | Old human report factory path; kept for imports and commands. |
+| `python -m accounting.publish.latest ...` | Level 5 | current canonical publish implementation | Builds frontend-safe latest snapshot. |
+| `python -m accounting.publish_latest ...` | Level 5 | compatibility wrapper | Old publish command path; kept for imports and commands. |
+| `python -m accounting.human.front ...` | Level 4/5 | experimental | Future/front-oriented report factory. |
+| `python -m accounting.human_balance_front_factory ...` | Level 4/5 | compatibility wrapper | Old front report factory path; kept for imports and commands. |
 
 ## Operational rule
 
@@ -99,5 +109,5 @@ make debt
 make debt-views
 make metrics
 make human-report
-make publish
+make publish-latest
 ```

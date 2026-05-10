@@ -18,7 +18,7 @@ from accounting.utils import (
     _ensure_amount,
 )
 
-from accounting.core_timeseries import period_bins_for_dates
+from accounting.core.timeseries import period_bins_for_dates
 from accounting.utils import resolve_run_id
 
 

@@ -24,23 +24,23 @@ This document names the current layers and decisions before any package movement
 
 ```text
 Google Sheet / fixture CSV / local export
-  → accounting.ingest
+  → accounting.ledger.ingest
       ledger_canonical.csv
       ingest anomalies
-  → accounting.materialize
+  → accounting.stage_d.materialize
       per_flow_time_long.freq=*.csv
       per_party_time_long.freq=*.csv
       daily_cash_position.csv
       Stage D/materialization metadata
   → accounting.views
       current view tables built from Stage D outputs
-  → accounting.resolve_internal_debt_v2
+  → accounting.debt.resolve
       debt_open_items.csv
       debt_allocations.csv
       debt_repayment_events.csv
       debt_resolution_timeline.csv
       debt_status_reconciliation.csv
-  → accounting.build_debt_balance_views
+  → accounting.debt.balance_views
       debt_balance_daily.csv
       debt_balance_monthly.csv
       debt_balance_quarterly.csv
@@ -52,11 +52,11 @@ Google Sheet / fixture CSV / local export
       metric_views/*
       metric_drilldown/*
       build_manifest.json
-  → accounting.human_balance_document_factory
+  → accounting.human.document
       balance_humano_v2.html
       story_manifest.json
       human-readable report assets
-  → accounting.publish_latest
+  → accounting.publish.latest
       public/accounting/latest/*
       frontend-safe manifest and selected artifacts
 ```
@@ -71,44 +71,44 @@ Responsible for external records only: Google Sheets, fixtures, raw CSVs, and ma
 
 ### Canonical ledger
 
-`accounting.ingest` is responsible for turning source records into canonical ledger rows. Its stable internal contract includes columns such as `tx_id`, `Date`, `amount`, `Currency`, `payer`, `receiver`, `Flujo`, `Tipo`, `status`, `Box`, `source_file`, `source_row`, `ingest_ts`, and notes/anomaly metadata.
+`accounting.ledger.ingest` is responsible for turning source records into canonical ledger rows; `accounting.ingest` remains a compatibility wrapper. Its stable internal contract includes columns such as `tx_id`, `Date`, `amount`, `Currency`, `payer`, `receiver`, `Flujo`, `Tipo`, `status`, `Box`, `source_file`, `source_row`, `ingest_ts`, and notes/anomaly metadata.
 
 ### Materialized analytical artifacts
 
-`accounting.materialize` is responsible for CSV-first analytical tables derived from the canonical ledger. `accounting.views` remains a support bridge for view tables; the doctrine is that Stage D materialized artifacts are source-of-truth for views.
+`accounting.stage_d.materialize` is responsible for CSV-first analytical tables derived from the canonical ledger; `accounting.materialize` remains a compatibility wrapper. `accounting.views` remains a support bridge for view tables; the doctrine is that Stage D materialized artifacts are source-of-truth for views.
 
 ### Metric/debt contracts
 
 The metrics subsystem is the most mature contract layer today. Its canonical implementation now lives under `accounting.metrics` (`io`, `registry`, `builders`, `derive`, `validate`, `views`, `drilldown`, and `build`), while the old flat module names remain compatibility wrappers.
 
-Debt resolution is also a named contract layer. `resolve_internal_debt_v2.py` is the current debt resolver, and `build_debt_balance_views.py` derives time-series debt balance artifacts from debt open items.
+Debt resolution is also a named contract layer. `accounting.debt.resolve` is the current debt resolver, and `accounting.debt.balance_views` derives time-series debt balance artifacts from debt open items. The old flat module paths remain compatibility wrappers.
 
 ### Human/report surfaces
 
-`human_balance_tables.py` defines reusable human-facing table specs and builders. `human_balance_document_factory.py` is the current human report factory. `human_balance_front_factory.py` is future/experimental and should not be promoted to canonical until its output and consumer are clear.
+`accounting.human.tables` defines reusable human-facing table specs and builders. `accounting.human.document` is the current human report factory. `accounting.human.front` is future/experimental and should not be promoted to production until its output and consumer are clear. The old flat module paths remain compatibility wrappers.
 
 ### Frontend snapshot
 
-`publish_latest.py` packages selected latest metrics, debt, and human report artifacts into `public/accounting/latest/*`. The frontend should consume this snapshot instead of internal producer directories.
+`accounting.publish.latest` packages selected latest metrics, debt, and human report artifacts into `public/accounting/latest/*`; `publish_latest.py` remains a compatibility wrapper. The frontend should consume this snapshot instead of internal producer directories.
 
 ## Current decisions
 
 | Decision | Current authority |
 |---|---|
-| Debt resolver | `resolve_internal_debt_v2.py` |
-| Human report factory | `human_balance_document_factory.py` |
-| Front report factory | `human_balance_front_factory.py` is experimental/future |
+| Debt resolver | `accounting.debt.resolve` (`resolve_internal_debt_v2.py` compatibility wrapper) |
+| Human report factory | `accounting.human.document` (`human_balance_document_factory.py` compatibility wrapper) |
+| Front report factory | `accounting.human.front` is experimental/future (`human_balance_front_factory.py` compatibility wrapper) |
 | Metrics layer | Most mature contract layer; safest first code refactor candidate later |
 | View source of truth | Stage D materialized outputs |
 | Legacy report artifacts | Optional compatibility only |
-| Frontend handoff | `publish_latest.py` writes `public/accounting/latest/*` |
+| Frontend handoff | `accounting.publish.latest` writes `public/accounting/latest/*` with `accounting_frontend_snapshot.v1` manifest |
 
 ## Known coupling risks
 
 - Report factories can become business-logic dumps if new metric formulas or debt allocation logic are added there.
 - Some modules infer candidate paths dynamically for convenience; docs and Make targets should identify the preferred paths.
 - `views.py` is a transitional support bridge between materialized artifacts and higher-level report/metric consumers.
-- `human_balance_front_factory.py` should remain experimental until it has a stable consumer and contract.
+- `accounting.human.front` should remain experimental until it has a stable consumer and contract.
 
 ## Migration posture
 

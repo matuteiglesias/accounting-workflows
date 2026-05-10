@@ -21,26 +21,26 @@ This document names the stable and emerging output contracts in the accounting b
 
 | Contract | Level | Stability | Producer | Typical path |
 |---|---:|---|---|---|
-| `ledger_canonical` | 1 | stable candidate | `accounting.ingest` | `out/run/accounting/<run_id>/ledger_canonical.csv` |
-| `stage_d_materialized_views` | 2 | current/stable candidate | `accounting.materialize` | `out/run/accounting/<run_id>/*.csv` |
+| `ledger_canonical` | 1 | stable candidate | `accounting.ledger.ingest` | `out/run/accounting/<run_id>/ledger_canonical.csv` |
+| `stage_d_materialized_views` | 2 | current/stable candidate | `accounting.stage_d.materialize` | `out/run/accounting/<run_id>/*.csv` |
 | `metric_values` | 3 | stable | `accounting.metrics.build` | `out/metrics/<run_id>/metric_values.csv` |
 | `metric_registry` | 3 | stable | `accounting.metrics.registry` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_registry.csv` |
 | `validation_report` | 3 | stable candidate | `accounting.metrics.validate` via `accounting.metrics.build` | `out/metrics/<run_id>/validation_report.csv` |
 | `metric_views` | 3 | current | `accounting.metrics.views` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_views/*` |
 | `metric_drilldown` | 3/4 | current | `accounting.metrics.drilldown` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_drilldown/*` |
-| `debt_open_items` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_open_items.csv` |
-| `debt_allocations` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_allocations.csv` |
-| `debt_repayment_events` | 3 | current/canonical | `accounting.resolve_internal_debt_v2` | `out/debt_resolution/<run_id>/debt_repayment_events.csv` |
-| `debt_balance_views` | 3 | current | `accounting.build_debt_balance_views` | `out/debt_resolution/<run_id>/debt_balance_*.csv` |
-| `human_table_specs` | 4 | current/stable seam | `accounting.human_balance_tables` | generated in human/front report outputs |
-| `human_balance_report` | 4 | current/canonical | `accounting.human_balance_document_factory` | `out/human_reports/<run_id>/balance_human_v2/*` |
-| `frontend_snapshot_manifest` | 5 | current | `accounting.publish_latest` | `public/accounting/latest/manifest.json` |
+| `debt_open_items` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_open_items.csv` |
+| `debt_allocations` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_allocations.csv` |
+| `debt_repayment_events` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_repayment_events.csv` |
+| `debt_balance_views` | 3 | current | `accounting.debt.balance_views` | `out/debt_resolution/<run_id>/debt_balance_*.csv` |
+| `human_table_specs` | 4 | current/stable seam | `accounting.human.tables` | generated in human/front report outputs |
+| `human_balance_report` | 4 | current/canonical | `accounting.human.document` | `out/human_reports/<run_id>/balance_human_v2/*` |
+| `frontend_snapshot_manifest` | 5 | current | `accounting.publish.latest` | `public/accounting/latest/manifest.json` |
 
 ## `ledger_canonical`
 
-Producer: `accounting.ingest`.
+Producer: `accounting.ledger.ingest`.
 
-Consumers: `accounting.materialize`, debt resolution, metric/drilldown builders, report evidence loaders.
+Consumers: `accounting.stage_d.materialize`, debt resolution, metric/drilldown builders, report evidence loaders.
 
 Required columns:
 
@@ -83,7 +83,7 @@ Validation expectations:
 
 ## `stage_d_materialized_views`
 
-Producer: `accounting.materialize`.
+Producer: `accounting.stage_d.materialize`.
 
 Consumers: `accounting.views`, metrics, human tables, report factories.
 
@@ -189,9 +189,9 @@ Validation expectations:
 
 ## Debt contracts
 
-Producer: `accounting.resolve_internal_debt_v2`.
+Producer: `accounting.debt.resolve`.
 
-Consumers: `accounting.build_debt_balance_views`, metrics, human tables, reports, and frontend snapshot packaging.
+Consumers: `accounting.debt.balance_views`, metrics, human tables, reports, and frontend snapshot packaging.
 
 Required primary artifacts:
 
@@ -233,7 +233,7 @@ Validation expectations:
 
 ## `debt_balance_views`
 
-Producer: `accounting.build_debt_balance_views`.
+Producer: `accounting.debt.balance_views`.
 
 Consumers: metrics and human reports.
 
@@ -254,7 +254,7 @@ Validation expectations:
 
 ## `human_table_specs`
 
-Producer: `accounting.human_balance_tables`.
+Producer: `accounting.human.tables`.
 
 Consumers: current human document factory and future front report factory.
 
@@ -278,9 +278,9 @@ Validation expectations:
 
 ## `human_balance_report`
 
-Producer: `accounting.human_balance_document_factory`.
+Producer: `accounting.human.document`.
 
-Consumers: humans and `accounting.publish_latest`.
+Consumers: humans and `accounting.publish.latest`.
 
 Required representative artifacts:
 
@@ -298,7 +298,7 @@ Validation expectations:
 
 ## `frontend_snapshot_manifest`
 
-Producer: `accounting.publish_latest`.
+Producer: `accounting.publish.latest`.
 
 Consumer: accounting viewer/static frontend.
 
@@ -308,21 +308,21 @@ Required representative location:
 public/accounting/latest/manifest.json
 ```
 
-Expected manifest fields in the current implementation include:
+Expected v1 manifest fields include:
 
 ```text
-surface_id
-published_at_utc
-publish_mode
-run_id
-as_of_date
-months
-include_statuses
-report
+schema_name
+built_at
+source_run_id
+status
+source_paths
+files
 metrics
 debt
-navigation
+reports
 ```
+
+Compatibility fields such as `surface_id`, `published_at_utc`, `publish_mode`, `run_id`, `as_of_date`, `months`, `include_statuses`, `report`, and `navigation` may also be present for older consumers.
 
 Governance expectations:
 

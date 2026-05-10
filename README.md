@@ -9,9 +9,9 @@ Run the accounting spine from the repository root with these Make targets:
 2. `make run-materialize`
 3. `make run-views`
 4. `make run-metrics`
-5. `make run-human-balance`
+5. `make run-human-report`
 
-`make run-accounting` is the happy-path wrapper and resolves to `run-human-balance`. The legacy storypack / compile branch is not part of the official flow anymore.
+`make run-accounting` is the happy-path wrapper and resolves to `run-human-report`. The legacy storypack / compile branch is not part of the official flow anymore.
 
 ## Runbook
 See `notes/accounting_spine_runbook.md` for the per-stage outputs, required files, and a concise smoke checklist.
