@@ -1,3 +1,9 @@
+---
+id: notes/narrative
+title: "Narrative"
+sidebar_label: "Narrative"
+---
+
 Perfecto: tu “negocio” no es solo contabilidad de gastos, es un sistema de renta inmobiliaria familiar con gobernanza frágil, préstamos internos, y riesgo de desvío de caja. Eso cambia por completo qué historias valen la pena y qué figuras son “estándar”.
 
 Abajo te propongo un set de historias que yo intentaría contar, con vistas bastante estándar, pero adaptadas a tus reglas (alquileres como ingreso base, egresos operativos, deuda interna Matías↔familia, contribuciones extraordinarias, y necesidad de transparencia).  

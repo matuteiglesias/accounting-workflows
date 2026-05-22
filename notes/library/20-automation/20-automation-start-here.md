@@ -1,3 +1,10 @@
+---
+id: notes/library/20-automation/20-automation-start-here
+title: "20 automation start here"
+sidebar_label: "20 automation start here"
+sidebar_position: 20
+---
+
 # 20 automation start here
 
 Status: draft

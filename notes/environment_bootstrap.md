@@ -1,3 +1,9 @@
+---
+id: notes/environment_bootstrap
+title: "Environment Bootstrap (Wave 1)"
+sidebar_label: "Environment Bootstrap (Wave 1)"
+---
+
 # Environment Bootstrap (Wave 1)
 
 Status: authority draft

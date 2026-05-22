@@ -1,3 +1,10 @@
+---
+id: notes/library/40-development/41-refactor-definition-of-done
+title: "41 refactor definition of done"
+sidebar_label: "41 refactor definition of done"
+sidebar_position: 41
+---
+
 # 41 refactor definition of done
 
 Status: draft (code-anchored)

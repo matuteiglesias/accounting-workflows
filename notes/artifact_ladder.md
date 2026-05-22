@@ -1,3 +1,9 @@
+---
+id: notes/artifact_ladder
+title: "Accounting Artifact Ladder"
+sidebar_label: "Accounting Artifact Ladder"
+---
+
 # Accounting Artifact Ladder
 
 Status: authority draft

@@ -1,3 +1,9 @@
+---
+id: notes/output_contracts
+title: "Accounting Backend Output Contracts"
+sidebar_label: "Accounting Backend Output Contracts"
+---
+
 # Accounting Backend Output Contracts
 
 Status: authority draft

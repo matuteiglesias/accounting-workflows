@@ -1,3 +1,10 @@
+---
+id: notes/library/20-automation/21-scheduler-wiring-spec
+title: "21 scheduler wiring spec"
+sidebar_label: "21 scheduler wiring spec"
+sidebar_position: 21
+---
+
 # 21 scheduler wiring spec
 
 Status: current pointer

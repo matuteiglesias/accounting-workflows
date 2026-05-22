@@ -1,3 +1,10 @@
+---
+id: notes/library/10-operations/15-incidents-first-15-minutes
+title: "15 incidents first 15 minutes"
+sidebar_label: "15 incidents first 15 minutes"
+sidebar_position: 15
+---
+
 # 15 incidents first 15 minutes
 
 Status: draft

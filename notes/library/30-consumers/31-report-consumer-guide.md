@@ -1,3 +1,10 @@
+---
+id: notes/library/30-consumers/31-report-consumer-guide
+title: "31 report consumer guide"
+sidebar_label: "31 report consumer guide"
+sidebar_position: 31
+---
+
 # 31 report consumer guide
 
 Status: draft (code-anchored)

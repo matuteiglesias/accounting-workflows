@@ -1,3 +1,9 @@
+---
+id: notes/documentation_compass
+title: "Documentation Compass (Humans + Agents)"
+sidebar_label: "Documentation Compass (Humans + Agents)"
+---
+
 # Documentation Compass (Humans + Agents)
 
 Status: current guidance

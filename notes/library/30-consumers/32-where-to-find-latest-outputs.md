@@ -1,3 +1,10 @@
+---
+id: notes/library/30-consumers/32-where-to-find-latest-outputs
+title: "32 where to find latest outputs"
+sidebar_label: "32 where to find latest outputs"
+sidebar_position: 32
+---
+
 # 32 where to find latest outputs
 
 Status: draft (code-anchored)

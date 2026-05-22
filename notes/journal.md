@@ -1,3 +1,9 @@
+---
+id: notes/journal
+title: "Journal"
+sidebar_label: "Journal"
+---
+
 Bien. Hagamos el lock-in como “Decision Record” corto y operativo, y dejemos claro qué se de-prioriza.
 
 ## Lock-in: decisión de arquitectura para reporting

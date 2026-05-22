@@ -1,3 +1,9 @@
+---
+id: notes/automation_wiring_spec
+title: "Automation Wiring Spec (Wave 2)"
+sidebar_label: "Automation Wiring Spec (Wave 2)"
+---
+
 # Automation Wiring Spec (Wave 2)
 
 Status: authority draft

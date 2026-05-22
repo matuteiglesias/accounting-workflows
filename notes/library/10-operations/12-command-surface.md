@@ -1,3 +1,10 @@
+---
+id: notes/library/10-operations/12-command-surface
+title: "12 command surface"
+sidebar_label: "12 command surface"
+sidebar_position: 12
+---
+
 # 12 command surface
 
 Status: draft

@@ -1,3 +1,10 @@
+---
+id: notes/library/20-automation/24-recovery-and-rollback
+title: "24 recovery and rollback"
+sidebar_label: "24 recovery and rollback"
+sidebar_position: 24
+---
+
 # 24 recovery and rollback
 
 Status: draft

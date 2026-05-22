@@ -1,3 +1,10 @@
+---
+id: notes/library/40-development/40-dev-start-here
+title: "40 dev start here"
+sidebar_label: "40 dev start here"
+sidebar_position: 40
+---
+
 # 40 dev start here
 
 Status: draft

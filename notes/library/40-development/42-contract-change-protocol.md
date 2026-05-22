@@ -1,3 +1,10 @@
+---
+id: notes/library/40-development/42-contract-change-protocol
+title: "42 contract change protocol"
+sidebar_label: "42 contract change protocol"
+sidebar_position: 42
+---
+
 # 42 contract change protocol
 
 Status: draft (code-anchored)

@@ -1,3 +1,9 @@
+---
+id: notes/docs_execution_plan
+title: "Documentation Production Team + Execution Plan"
+sidebar_label: "Documentation Production Team + Execution Plan"
+---
+
 # Documentation Production Team + Execution Plan
 
 Status: planning draft

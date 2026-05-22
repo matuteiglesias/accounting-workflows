@@ -1,3 +1,10 @@
+---
+id: notes/library/90-governance/90-doc-ownership-and-review
+title: "90 doc ownership and review"
+sidebar_label: "90 doc ownership and review"
+sidebar_position: 90
+---
+
 # 90 doc ownership and review
 
 Status: draft
