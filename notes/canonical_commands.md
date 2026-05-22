@@ -1,3 +1,9 @@
+---
+id: notes/canonical_commands
+title: "Accounting Canonical Commands"
+sidebar_label: "Accounting Canonical Commands"
+---
+
 # Accounting Canonical Commands
 
 Status: authority draft

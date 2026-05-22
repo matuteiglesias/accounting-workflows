@@ -1,3 +1,9 @@
+---
+id: notes/contracts
+title: "Contracts"
+sidebar_label: "Contracts"
+---
+
 
 Purpose: Build canonical ledger dataframe and write ledger_canonical.csv (plus preserve anomalies).
 Command: python -m accounting.ledger.ingest --fixture <csv> --out-dir <dir> [--require-tx-id]

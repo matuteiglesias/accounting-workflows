@@ -16,6 +16,12 @@ Run the accounting spine from the repository root with these Make targets:
 ## Runbook
 See `notes/accounting_spine_runbook.md` for the per-stage outputs, required files, and a concise smoke checklist.
 
+## Documentation compass
+Use `notes/documentation_compass.md` as the role-based guide to choose the right docs (operators, developers, analysts, and agents).
+
+## Operations playbook
+For stability-first incident response (human + agent workflow), see `notes/human_agent_playbook.md`.
+
 ## Repo hygiene
 - Generated outputs are not tracked (`out/`, `accounting/out/`, etc.)
 - Local secrets are kept in `private/` and never committed.

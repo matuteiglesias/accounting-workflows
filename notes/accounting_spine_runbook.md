@@ -1,3 +1,9 @@
+---
+id: notes/accounting_spine_runbook
+title: "Accounting spine runbook"
+sidebar_label: "Accounting spine runbook"
+---
+
 # Accounting spine runbook
 
 ## Official path

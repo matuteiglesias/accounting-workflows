@@ -1,3 +1,9 @@
+---
+id: notes/current_state_map
+title: "Accounting Backend Current State Map"
+sidebar_label: "Accounting Backend Current State Map"
+---
+
 # Accounting Backend Current State Map
 
 Status: authority draft

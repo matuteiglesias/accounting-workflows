@@ -1,3 +1,9 @@
+---
+id: notes/runbook
+title: "📘 Runbook — Output Contracts v1"
+sidebar_label: "📘 Runbook — Output Contracts v1"
+---
+
 **Runbook: Output Contracts (v1)**
 
 It captures the **expected outputs by stage**, and the **governance rules** (naming, currency-safety, Box consistency, and artifact registration).
