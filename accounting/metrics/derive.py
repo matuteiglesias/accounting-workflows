@@ -12,6 +12,7 @@ def derive_sum_components(
     component_ids: list[str],
     source_layer: str = "derived",
     build_status: str = "ok",
+    build_detail: str = "",
 ) -> pd.DataFrame:
     mv = ensure_metric_values_schema(metric_values)
 
@@ -38,7 +39,7 @@ def derive_sum_components(
     wide["metric_id"] = metric_id
     wide["source_layer"] = source_layer
     wide["build_status"] = build_status
-    wide["build_detail"] = f"sum_components({', '.join(component_ids)})"
+    wide["build_detail"] = build_detail or f"sum_components({', '.join(component_ids)})"
 
     out = wide[
         [
@@ -65,6 +66,7 @@ def derive_formula_subtract(
     subtrahend_ids: list[str],
     source_layer: str = "derived",
     build_status: str = "ok",
+    build_detail: str = "",
 ) -> pd.DataFrame:
     mv = ensure_metric_values_schema(metric_values)
     needed = [minuend_id] + subtrahend_ids
@@ -94,7 +96,64 @@ def derive_formula_subtract(
     wide["metric_id"] = metric_id
     wide["source_layer"] = source_layer
     wide["build_status"] = build_status
-    wide["build_detail"] = f"{minuend_id} - ({', '.join(subtrahend_ids)})"
+    wide["build_detail"] = build_detail or f"{minuend_id} - ({', '.join(subtrahend_ids)})"
+
+    out = wide[
+        [
+            "metric_id",
+            "period_grain",
+            "period",
+            "currency",
+            "value",
+            "run_id",
+            "as_of_date",
+            "source_layer",
+            "build_status",
+            "build_detail",
+        ]
+    ]
+    return ensure_metric_values_schema(out)
+
+
+def derive_formula_add_subtract(
+    metric_values: pd.DataFrame,
+    *,
+    metric_id: str,
+    addend_ids: list[str],
+    subtrahend_ids: list[str],
+    source_layer: str = "derived",
+    build_status: str = "ok",
+    build_detail: str = "",
+) -> pd.DataFrame:
+    mv = ensure_metric_values_schema(metric_values)
+    needed = addend_ids + subtrahend_ids
+
+    wide = (
+        mv.loc[mv["metric_id"].isin(needed)]
+        .pivot_table(
+            index=["period_grain", "period", "currency", "run_id", "as_of_date"],
+            columns="metric_id",
+            values="value",
+            aggfunc="first",
+        )
+        .fillna(0.0)
+        .reset_index()
+    )
+
+    if wide.empty:
+        return ensure_metric_values_schema(pd.DataFrame(columns=mv.columns))
+
+    for needed_id in needed:
+        if needed_id not in wide.columns:
+            wide[needed_id] = 0.0
+
+    wide["value"] = wide[addend_ids].sum(axis=1) - wide[subtrahend_ids].sum(axis=1)
+    wide["metric_id"] = metric_id
+    wide["source_layer"] = source_layer
+    wide["build_status"] = build_status
+    wide["build_detail"] = build_detail or (
+        f"sum({', '.join(addend_ids)}) - sum({', '.join(subtrahend_ids)})"
+    )
 
     out = wide[
         [
@@ -152,6 +211,61 @@ def derive_default_v1(metric_values: pd.DataFrame) -> pd.DataFrame:
             metric_id="IS.NET.POST_DRAWS",
             minuend_id="IS.NET.AFTER_COSTS",
             subtrahend_ids=["IS.DRAWS.PERSONAL"],
+        ),
+    )
+
+    current = _append_and_dedup(
+        current,
+        derive_sum_components(
+            current,
+            metric_id="IS.REVENUE.TOTAL",
+            component_ids=["IS.RENT.TOTAL"],
+            build_detail="shadow alias: IS.RENT.TOTAL",
+        ),
+    )
+
+    current = _append_and_dedup(
+        current,
+        derive_formula_subtract(
+            current,
+            metric_id="IS.NET.OPERATING",
+            minuend_id="IS.REVENUE.TOTAL",
+            subtrahend_ids=["IS.OPEX.TOTAL"],
+            build_detail="shadow formula: IS.REVENUE.TOTAL - IS.OPEX.TOTAL",
+        ),
+    )
+
+    current = _append_and_dedup(
+        current,
+        derive_sum_components(
+            current,
+            metric_id="FUND.CONTRIB.TOTAL",
+            component_ids=["IS.CONTRIB.TOTAL"],
+            build_detail="shadow alias: IS.CONTRIB.TOTAL",
+        ),
+    )
+
+    current = _append_and_dedup(
+        current,
+        derive_sum_components(
+            current,
+            metric_id="DIST.DRAWS.PERSONAL",
+            component_ids=["IS.DRAWS.PERSONAL"],
+            build_detail="shadow alias: IS.DRAWS.PERSONAL",
+        ),
+    )
+
+    current = _append_and_dedup(
+        current,
+        derive_formula_add_subtract(
+            current,
+            metric_id="COV.NET.AFTER_DRAWS",
+            addend_ids=["IS.NET.OPERATING", "FUND.CONTRIB.TOTAL"],
+            subtrahend_ids=["DIST.DRAWS.PERSONAL"],
+            build_detail=(
+                "shadow formula: IS.NET.OPERATING + FUND.CONTRIB.TOTAL "
+                "- DIST.DRAWS.PERSONAL"
+            ),
         ),
     )
 
