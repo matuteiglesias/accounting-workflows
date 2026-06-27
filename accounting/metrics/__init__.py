@@ -1,6 +1,8 @@
-"""Metrics contract and build subsystem for accounting.
+"""Canonical metrics subsystem for the accounting backend.
 
-This package contains the canonical metrics implementation. Historical flat
-``accounting.metrics_*`` and ``accounting.build_metric_values`` compatibility
-modules have been removed; import from this package directly.
+This package owns metric contracts, registry normalization, metric builders,
+derived metrics, validations, drilldowns, and the metric build CLI.
+
+Canonical CLI:
+    python -m accounting.metrics.build
 """

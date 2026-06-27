@@ -15,7 +15,7 @@ from pathlib import Path
 import argparse
 import logging
 
-from accounting.views import export_views
+from accounting.marts import export_views
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 

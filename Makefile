@@ -1,11 +1,11 @@
 # Makefile.v3 - Accounting spine
-# Official path: run-ingest -> run-materialize -> run-views -> run-metrics -> run-human-report
+# Official path: run-ingest -> run-materialize -> run-marts -> run-metrics -> run-human-report
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
 # - Explicit out-dir passed to all Python entrypoints
 # - Timestamped run outputs (avoid stale-file illusions)
 # - Content checks (not only presence)
-# - Views consumes Stage D; reports/ is optional legacy input only, never a required stage
+# - Marts consumes Stage D; reports/ is optional legacy input only, never a required stage
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -69,7 +69,7 @@ define _guard_out_dir
 	@if [ -z "$(1)" ]; then echo "ERROR: OUT_DIR empty"; exit 2; fi
 endef
 
-# Assert views sanity exists and invariant errors are empty
+# Assert marts/views sanity exists and invariant errors are empty
 define _check_views_sanity
 	@sanity="$(1)"; \
 	test -s "$$sanity" || (echo "ERROR: views_sanity.json missing/empty at $$sanity"; exit 2); \
@@ -176,7 +176,7 @@ help:
 	@echo ""
 	@echo "Support:"
 	@echo "  make doctor         # compile-check key command modules"
-	@echo "  make smoke          # fixture/offline smoke path through views"
+	@echo "  make smoke          # fixture/offline smoke path through marts/views"
 	@echo "  make validate       # lightweight command-surface checks"
 	@echo "  make clean-derived  # remove derived accounting outputs"
 	@echo ""
@@ -184,7 +184,7 @@ help:
 	@echo "  make front-report   # future/stub front-oriented report factory"
 	@echo ""
 	@echo "Compatibility / lower-level run targets:"
-	@echo "  make run-ingest | run-materialize | run-views | run-debt | run-debt-views"
+	@echo "  make run-ingest | run-materialize | run-marts | run-debt | run-debt-views"
 	@echo "  make run-metrics | run-human-report | run-human-balance | run-accounting | run-accounting-full"
 	@echo "  make run-downstream-from-ledger | run-metrics-and-human | run-human-balance-only"
 	@echo ""
@@ -248,7 +248,7 @@ doctor:
 		accounting/support/env.py \
 		accounting/support/hashing.py \
 		accounting/support/partitions.py \
-		accounting/views.py \
+		accounting/marts/build.py \
 		accounting/debt/resolve.py \
 		accounting/debt/balance_views.py \
 		accounting/metrics/io.py \
@@ -309,7 +309,7 @@ run-downstream-from-ledger:
 
 run-metrics-and-human:
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY). Run make run-views first or point RUN_STAMP to an existing run."; exit 2)
+	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY). Run make run-marts first or point RUN_STAMP to an existing run."; exit 2)
 	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
@@ -351,7 +351,7 @@ smoke-views: smoke-materialize
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@mkdir -p "$(SMOKE_VIEWS_DIR)"
 	@mkdir -p "$(SMOKE_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
-	@$(PY) -m accounting.views \
+	@$(PY) -m accounting.marts.build \
 		--reports-dir "$(SMOKE_REPORTS_DIR)" \
 		--write-dir "$(SMOKE_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
@@ -398,15 +398,15 @@ _run_materialize_action:
 		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 
-.PHONY: run-views _run_views_action
-run-views: run-materialize _run_views_action
+.PHONY: run-marts _run_views_action
+run-marts: run-materialize _run_views_action
 
 _run_views_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_OUT)/per_flow_time_long.freq=$(FREQ).csv" || (echo "ERROR: missing materialized outputs at $(RUN_OUT). Run make run-materialize first or use run-downstream-from-ledger."; exit 2)
 	@mkdir -p "$(RUN_VIEWS_DIR)"
 	@mkdir -p "$(RUN_REPORTS_DIR)"  # anchor for loader heuristics / optional legacy files
-	@$(PY) -m accounting.views \
+	@$(PY) -m accounting.marts.build \
 		--reports-dir "$(RUN_REPORTS_DIR)" \
 		--write-dir "$(RUN_VIEWS_DIR)" \
 		--freq "$(FREQ)" \
@@ -425,7 +425,7 @@ _run_views_action:
 
 
 .PHONY: run-debt _run_debt_action
-run-debt: run-views _run_debt_action
+run-debt: run-marts _run_debt_action
 
 _run_debt_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -537,98 +537,6 @@ _run_human_balance_action:
 		RUN_BASE="$(RUN_BASE)"
 
 	
-# ========================================
-# LEGACY REPORTING LAYER (deprecated)
-# - Kept only for comparison / rescue
-# - Not part of official accounting spine
-# ========================================
-	
-
-# # Add after run-views:
-
-# # run-storypack-cashflow_v1: run-views
-
-# # call $(PY) report_cashflow.py --in-dir "$(RUN_OUT)" --out-dir "$(RUN_OUT)/storypack/latest" or equivalent
-
-# # run-storypack-balance_v1: run-views
-
-# # same pattern
-
-# # ========================================
-# # STORYPACK (REPORT ARTIFACT CREATORS)
-# # ========================================
-
-# .PHONY: run-storypack-cashflow
-# run-storypack-cashflow: run-views
-# 	@$(call _guard_out_dir,$(RUN_OUT))
-# 	@echo "[LEGACY][RUN][STORYPACK][cashflow_v1] -> out=$(RUN_STORYPACK_DIR)/cashflow_v1"
-# 	@mkdir -p "$(RUN_STORYPACK_DIR)/cashflow_v1"
-# 	@bash -eu -o pipefail -c '\
-# 		err="$(RUN_OUT)/storypack_cashflow.stderr.log"; \
-# 		$(PY) accounting/report_cashflow.py \
-# 			--accounting-root "$(RUN_OUT)" \
-# 			--write-dir "$(RUN_STORYPACK_DIR)/cashflow_v1" \
-# 			--mode run \
-# 			--run-id "$(RUN_RUN_ID)" \
-# 			> /dev/null 2> "$$err"; \
-# 		test -s "$(RUN_STORYPACK_DIR)/cashflow_v1/story_manifest.json"; \
-# 	'
-
-# .PHONY: run-storypack-balance
-# run-storypack-balance: run-views
-# 	@$(call _guard_out_dir,$(RUN_OUT))
-# 	@echo "[LEGACY][RUN][STORYPACK][balance_v1] -> out=$(RUN_STORYPACK_DIR)/balance_v1"
-# 	@mkdir -p "$(RUN_STORYPACK_DIR)/balance_v1"
-# 	@bash -eu -o pipefail -c '\
-# 		err="$(RUN_OUT)/storypack_balance.stderr.log"; \
-# 		$(PY) accounting/report_balance.py \
-# 			--accounting-root "$(RUN_OUT)" \
-# 			--write-dir "$(RUN_STORYPACK_DIR)/balance_v1" \
-# 			--mode run \
-# 			--run-id "$(RUN_RUN_ID)" \
-# 			> /dev/null 2> "$$err"; \
-# 		test -s "$(RUN_STORYPACK_DIR)/balance_v1/story_manifest.json"; \
-# 	'
-
-# .PHONY: run-storypack
-# run-storypack: run-storypack-cashflow run-storypack-balance
-# 	@echo "[LEGACY][RUN][STORYPACK] done -> $(RUN_STORYPACK_DIR)"
-
-
-
-
-# # ========================================
-
-
-# .PHONY: run-compile-cashflow
-# run-compile-cashflow: run-storypack
-# 	@$(call _guard_out_dir,$(RUN_OUT))
-# 	@echo "[LEGACY][RUN][COMPILE][cashflow_v1] -> out=$(RUN_DOCS_DIR)/cashflow_v1"
-# 	@mkdir -p "$(RUN_DOCS_DIR)/cashflow_v1"
-# 	@$(PY) accounting/compile_reports.py \
-# 		--storypack-root "$(RUN_STORYPACK_DIR)" \
-# 		--template "templates/cashflow_template.md" \
-# 		--out-dir "$(RUN_DOCS_DIR)/cashflow_v1" \
-# 		--css "$(RUN_ASSETS_CSS)"
-
-# .PHONY: run-compile-balance
-# run-compile-balance: run-storypack
-# 	@$(call _guard_out_dir,$(RUN_OUT))
-# 	@echo "[LEGACY][RUN][COMPILE][balance_v1] -> out=$(RUN_DOCS_DIR)/balance_v1"
-# 	@mkdir -p "$(RUN_DOCS_DIR)/balance_v1"
-# 	@$(PY) accounting/compile_reports.py \
-# 		--storypack-root "$(RUN_STORYPACK_DIR)" \
-# 		--template "templates/balance_template.md" \
-# 		--out-dir "$(RUN_DOCS_DIR)/balance_v1" \
-# 		--css "$(RUN_ASSETS_CSS)"
-
-# .PHONY: run-compile
-# run-compile: run-compile-cashflow run-compile-balance
-# 	@echo "[RUN][COMPILE] done -> $(RUN_DOCS_DIR)"
-
-
-
-
 
 # ========================================
 # CHECKS
@@ -663,4 +571,3 @@ smoke: smoke-accounting
 run: run-accounting
 run-all: run-accounting
 	@echo "[RUN] done. latest -> $(RUN_REL)"
-

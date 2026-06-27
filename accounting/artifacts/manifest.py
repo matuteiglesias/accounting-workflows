@@ -357,6 +357,19 @@ def artifact_from_path(
     }
 
 
+def append_artifacts(meta_dir: Path, artifact_rows: Iterable[Dict[str, Any]]) -> str:
+    meta_dir = Path(meta_dir)
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    out_path = meta_dir / "artifacts.jsonl"
+    with out_path.open("a", encoding="utf-8") as f:
+        for row in artifact_rows:
+            clean = _json_sanitize(dict(row))
+            clean.setdefault("created_at", _utc_now_iso())
+            f.write(json.dumps(clean, ensure_ascii=False) + "\n")
+
+    out_dir = meta_dir.parent
+    return str(out_path.resolve().relative_to(out_dir.resolve()))
 
 def write_stage_manifest(meta_dir: Path, manifest_obj: Dict[str, Any], filename: Optional[str] = None) -> str:
     meta_dir = Path(meta_dir)
@@ -375,17 +388,3 @@ def write_stage_manifest(meta_dir: Path, manifest_obj: Dict[str, Any], filename:
     out_dir = meta_dir.parent
     return str(out_path.resolve().relative_to(out_dir.resolve()))
 
-
-def append_artifacts(meta_dir: Path, artifact_rows: Iterable[Dict[str, Any]]) -> str:
-    meta_dir = Path(meta_dir)
-    meta_dir.mkdir(parents=True, exist_ok=True)
-
-    out_path = meta_dir / "artifacts.jsonl"
-    with out_path.open("a", encoding="utf-8") as f:
-        for row in artifact_rows:
-            clean = _json_sanitize(dict(row))
-            clean.setdefault("created_at", _utc_now_iso())
-            f.write(json.dumps(clean, ensure_ascii=False) + "\n")
-
-    out_dir = meta_dir.parent
-    return str(out_path.resolve().relative_to(out_dir.resolve()))

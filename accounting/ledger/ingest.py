@@ -372,8 +372,6 @@ def _collect_anomalies(df: pd.DataFrame, fx_missing_mask: Optional[pd.Series] = 
 # Public API
 # -----------------------
 
-
-
 def build_ledger_base(
     fixture_path: Optional[str] = None,
     sheet_url: Optional[str] = None,
@@ -494,8 +492,6 @@ def build_ledger_base(
     ]
     cols = [c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]
     return df[cols].copy()
-
-
 
 
 def build_stable_ledger_snapshot(
