@@ -35,6 +35,9 @@ METRIC_FILES = [
     "metric_views/rent_rollup_by_place_m_last6.csv",
     "metric_views/flow_type_rollup_m_last6.csv",
     "metric_views/draws_discipline_monthly_last6.csv",
+    "metric_contract_frontier.csv",
+    "frontend_metric_series.csv",
+    "metrics_frontier_qa.csv",
 ]
 
 DEBT_FILES = [

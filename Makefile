@@ -249,6 +249,9 @@ doctor:
 		accounting/support/hashing.py \
 		accounting/support/partitions.py \
 		accounting/marts/build.py \
+		accounting/marts/cash.py \
+		accounting/marts/debt.py \
+		accounting/marts/semantic.py \
 		accounting/debt/resolve.py \
 		accounting/debt/balance_views.py \
 		accounting/metrics/io.py \
@@ -258,6 +261,7 @@ doctor:
 		accounting/metrics/validate.py \
 		accounting/metrics/views.py \
 		accounting/metrics/drilldown.py \
+		accounting/metrics/frontier.py \
 		accounting/metrics/build.py \
 		accounting/human/tables.py \
 		accounting/human/document.py \
@@ -345,6 +349,13 @@ smoke-materialize: smoke-ingest
 		--mode smoke \
 		--run-id "$(SMOKE_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(SMOKE_OUT)" MODE="smoke" FREQ="$(FREQ)"
+	@test -s "$(SMOKE_OUT)/classification_audit.csv"
+	@test -s "$(SMOKE_OUT)/classification_audit_summary.csv"
+	@test -s "$(SMOKE_OUT)/monthly_flow_semantic_split.csv"
+	@test -s "$(SMOKE_OUT)/monthly_operating_statement.csv"
+	@test -s "$(SMOKE_OUT)/monthly_operating_statement_qa.csv"
+	@test -s "$(SMOKE_OUT)/monthly_cash_close.csv"
+	@test -s "$(SMOKE_OUT)/monthly_cash_close_qa.csv"
 
 .PHONY: smoke-views
 smoke-views: smoke-materialize
@@ -397,6 +408,13 @@ _run_materialize_action:
 		--mode run \
 		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
+	@test -s "$(RUN_OUT)/classification_audit.csv"
+	@test -s "$(RUN_OUT)/classification_audit_summary.csv"
+	@test -s "$(RUN_OUT)/monthly_flow_semantic_split.csv"
+	@test -s "$(RUN_OUT)/monthly_operating_statement.csv"
+	@test -s "$(RUN_OUT)/monthly_operating_statement_qa.csv"
+	@test -s "$(RUN_OUT)/monthly_cash_close.csv"
+	@test -s "$(RUN_OUT)/monthly_cash_close_qa.csv"
 
 .PHONY: run-marts _run_views_action
 run-marts: run-materialize _run_views_action
@@ -471,6 +489,11 @@ _run_debt_balance_action:
 		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_monthly.csv"; \
 		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_quarterly.csv"; \
 		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_yearly.csv"; \
+		$(PY) -m accounting.marts.debt \
+			--debt-dir "$(RUN_DEBT_BALANCE_DIR)" \
+			--write-dir "$(RUN_OUT)"; \
+		test -s "$(RUN_OUT)/monthly_debt_position.csv"; \
+		test -s "$(RUN_OUT)/monthly_debt_position_qa.csv"; \
 	'
 
 
@@ -495,6 +518,9 @@ _run_metrics_action:
 		test -s "$(RUN_METRICS_DIR)/metric_values.csv"; \
 		test -s "$(RUN_METRICS_DIR)/validation_report.csv"; \
 		test -s "$(RUN_METRICS_DIR)/build_manifest.json"; \
+		test -s "$(RUN_METRICS_DIR)/metric_contract_frontier.csv"; \
+		test -s "$(RUN_METRICS_DIR)/frontend_metric_series.csv"; \
+		test -s "$(RUN_METRICS_DIR)/metrics_frontier_qa.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/income_statement_monthly_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_place_m_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_detail_m_last6.csv"; \

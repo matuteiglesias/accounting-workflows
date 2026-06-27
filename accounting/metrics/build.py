@@ -10,6 +10,7 @@ import pandas as pd
 from accounting.logging_utils import configure_logging, get_logger
 
 from .drilldown import build_metric_drilldown_artifacts
+from .frontier import build_metrics_frontier
 from .builders import run_leaf_builders
 from .derive import derive_default_v1
 from .io import MetricsContext, ensure_metric_values_schema
@@ -597,6 +598,8 @@ def main() -> None:
     metric_values.to_csv(out_dir / METRIC_VALUES_FILENAME, index=False)
     validation.to_csv(out_dir / VALIDATION_REPORT_FILENAME, index=False)
 
+    frontier_paths = build_metrics_frontier(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=args.as_of_date)
+
     try:
         metric_values.to_parquet(out_dir / "metric_values.parquet", index=False)
     except Exception as e:
@@ -617,6 +620,7 @@ def main() -> None:
         "n_registry_rows": int(len(registry)),
         "n_metric_values_rows": int(len(metric_values)),
         "n_validation_rows": int(len(validation)),
+        "frontier_outputs": {k: str(v) for k, v in frontier_paths.items()},
         "builder_keys": builder_keys,
     }
     (out_dir / BUILD_MANIFEST_FILENAME).write_text(
