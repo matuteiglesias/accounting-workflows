@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Tuple
+
+import pandas as pd
+
+RULE_VERSION = "semantic_pr1_2026-06-27"
+AUDIT_COLUMNS = [
+    "tx_id", "Date", "period", "Currency", "amount", "Box", "Flujo", "Tipo", "Detalle",
+    "payer", "receiver", "status", "semantic_bucket", "semantic_subbucket", "direction",
+    "rule_id", "rule_version", "classification_confidence", "classification_status",
+    "review_required", "warning", "notes",
+]
+SUMMARY_COLUMNS = [
+    "period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status",
+    "review_required", "amount_total", "amount_abs_total", "n_tx", "rule_id",
+    "sample_detalle", "sample_payer", "sample_receiver",
+]
+MONTHLY_COLUMNS = [
+    "period", "period_end", "Currency", "Box", "semantic_bucket", "semantic_subbucket",
+    "amount_in", "amount_out", "net_amount", "amount_abs", "n_tx", "classification_status",
+    "classification_confidence", "review_required", "source_table", "source_tx_ids_sample",
+    "rule_ids", "notes",
+]
+VALIDATION_COLUMNS = ["check", "period", "Currency", "amount", "n_tx", "warning"]
+OPERATING_STATEMENT_COLUMNS = [
+    "period", "period_end", "Currency", "statement_line", "label", "semantic_category",
+    "amount", "source_table", "source_filter", "n_tx", "classification_coverage_ratio",
+    "unknown_amount", "review_required_amount", "caveat", "frontend_suitability",
+]
+OPERATING_STATEMENT_QA_COLUMNS = ["check", "status", "detail", "severity"]
+
+
+def _norm(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _norm_key(value: Any) -> str:
+    return _norm(value).casefold()
+
+
+def _infer_box_party(box: Any) -> str:
+    b = _norm(box)
+    if not b:
+        return ""
+    if b.casefold() == "household":
+        return "HH"
+    return "".join(part[0].upper() for part in b.split() if part and part[0].isalpha())
+
+
+def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
+    flujo = _norm_key(row.get("Flujo"))
+    tipo = _norm_key(row.get("Tipo"))
+    detail_blob = " ".join(_norm(row.get(c)) for c in ("Detalle", "notes") if c in row.index).casefold()
+
+    if "gastos personales" in detail_blob:
+        return ("family_withdrawal_candidate", "personal_expense", "R011_personal_expense_text", "medium", False, "classified", "review family/informal withdrawal candidate")
+    if flujo == "cobros" and tipo == "renta":
+        return ("operating_revenue", "rent", "R001_rent_collections", "high", False, "classified", "")
+    if tipo == "impuestos":
+        return ("property_opex", "taxes", "R002_property_taxes", "high", False, "classified", "")
+    if tipo in {"servicio", "servicios"}:
+        return ("property_opex", "services", "R003_property_services", "high", False, "classified", "")
+    if tipo == "mantenimiento":
+        return ("property_opex", "maintenance", "R004_property_maintenance", "high", False, "classified", "")
+    if tipo == "legal":
+        return ("property_opex", "legal", "R005_property_legal", "high", False, "classified", "")
+    if flujo == "contribucion" or tipo in {"contribucion", "contribuciones"}:
+        return ("funding_contribution", "family_or_tenant_contribution", "R006_contribution", "high", False, "classified", "")
+    if tipo == "prestamo":
+        return ("debt_movement", "principal", "R007_debt_principal", "high", False, "classified", "")
+    if tipo == "repago":
+        return ("debt_movement", "repayment", "R008_debt_repayment", "high", False, "classified", "")
+    if tipo == "interes":
+        return ("debt_movement", "interest", "R009_debt_interest", "high", False, "classified", "")
+    if tipo == "dividendo":
+        return ("family_withdrawal_candidate", "dividend", "R010_dividend", "medium", False, "classified", "review family/informal withdrawal candidate")
+    if flujo == "transfer" and tipo == "gasto":
+        return ("family_withdrawal_candidate", "transfer_to_expense", "R012_transfer_expense", "medium", False, "classified", "review family/informal withdrawal candidate")
+    if flujo == "transfer":
+        return ("internal_transfer", "transfer", "R013_internal_transfer", "medium", False, "classified", "review if this transfer crosses economic owners")
+    return ("unknown", "review_required", "R999_unknown_review_required", "low", True, "review_required", "no conservative semantic rule matched")
+
+
+def _prepare_ledger(ledger: pd.DataFrame, freq: str = "M") -> pd.DataFrame:
+    df = ledger.copy()
+    if "amount" not in df.columns and "amount_cents" in df.columns:
+        df["amount"] = pd.to_numeric(df["amount_cents"], errors="coerce").fillna(0.0) / 100.0
+    df["amount"] = pd.to_numeric(df.get("amount", 0.0), errors="coerce").fillna(0.0)
+    df["Date"] = pd.to_datetime(df.get("Date"), errors="coerce")
+    df = df[df["Date"].notna()].copy()
+    period = df["Date"].dt.to_period(freq)
+    df["period"] = period.astype(str)
+    df["period_end"] = period.dt.end_time.dt.date.astype(str)
+    for col in ["tx_id", "Currency", "Box", "Flujo", "Tipo", "Detalle", "payer", "receiver", "status", "notes"]:
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+
+def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M") -> Dict[str, Path]:
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df = _prepare_ledger(ledger, freq=freq)
+
+    classified = df.apply(_classify_row, axis=1, result_type="expand")
+    classified.columns = ["semantic_bucket", "semantic_subbucket", "rule_id", "classification_confidence", "review_required", "classification_status", "warning"]
+    audit = pd.concat([df, classified], axis=1)
+    audit["rule_version"] = RULE_VERSION
+
+    payer = audit["payer"].map(_norm).str.upper()
+    receiver = audit["receiver"].map(_norm).str.upper()
+    box_party = audit["Box"].map(_infer_box_party).str.upper()
+    audit["direction"] = "unknown"
+    audit.loc[receiver.eq(box_party) & box_party.ne(""), "direction"] = "in"
+    audit.loc[payer.eq(box_party) & box_party.ne(""), "direction"] = "out"
+    audit.loc[payer.eq(box_party) & receiver.eq(box_party) & box_party.ne(""), "direction"] = "internal"
+
+    unknown_direction = audit["direction"].eq("unknown")
+    audit.loc[unknown_direction & audit["semantic_bucket"].isin(["operating_revenue", "funding_contribution"]), "direction"] = "in"
+    audit.loc[unknown_direction & audit["semantic_bucket"].isin(["property_opex", "family_withdrawal_candidate", "family_withdrawal"]), "direction"] = "out"
+    audit.loc[unknown_direction & audit["semantic_bucket"].eq("internal_transfer"), "direction"] = "internal"
+
+    audit["Date"] = audit["Date"].dt.date.astype(str)
+    audit["review_required"] = audit["review_required"].astype(bool)
+    period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
+    audit = audit[AUDIT_COLUMNS]
+
+    summary = audit.groupby(["period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status", "review_required", "rule_id"], dropna=False).agg(
+        amount_total=("amount", "sum"), amount_abs_total=("amount", lambda s: s.abs().sum()), n_tx=("tx_id", "count"),
+        sample_detalle=("Detalle", "first"), sample_payer=("payer", "first"), sample_receiver=("receiver", "first"),
+    ).reset_index()[SUMMARY_COLUMNS]
+
+    work = audit.copy()
+    work["amount_in"] = work["amount"].where(work["direction"].eq("in"), 0.0)
+    work["amount_out"] = work["amount"].where(work["direction"].eq("out"), 0.0)
+    work["net_amount"] = work["amount_in"] - work["amount_out"]
+    work["amount_abs"] = work["amount"].abs()
+    monthly = work.groupby(["period", "Currency", "Box", "semantic_bucket", "semantic_subbucket"], dropna=False).agg(
+        amount_in=("amount_in", "sum"), amount_out=("amount_out", "sum"), net_amount=("net_amount", "sum"), amount_abs=("amount_abs", "sum"),
+        n_tx=("tx_id", "count"), classification_status=("classification_status", lambda s: "review_required" if (s == "review_required").any() else "classified"),
+        classification_confidence=("classification_confidence", lambda s: "low" if "low" in set(s) else ("medium" if "medium" in set(s) else "high")),
+        review_required=("review_required", "max"), source_tx_ids_sample=("tx_id", lambda s: ";".join(s.astype(str).head(10))),
+        rule_ids=("rule_id", lambda s: ";".join(sorted(set(s.astype(str))))), notes=("warning", lambda s: "; ".join(sorted(set(x for x in s.astype(str) if x)))),
+    ).reset_index()
+    monthly = monthly.merge(period_end_lookup, on="period", how="left")
+    monthly["source_table"] = "ledger_canonical.csv"
+    monthly = monthly[MONTHLY_COLUMNS]
+
+    validations = _build_validation_rows(audit, monthly)
+    paths = {
+        "classification_audit": out_dir / "classification_audit.csv",
+        "classification_audit_summary": out_dir / "classification_audit_summary.csv",
+        "monthly_flow_semantic_split": out_dir / "monthly_flow_semantic_split.csv",
+        "classification_validation": out_dir / "classification_validation.csv",
+    }
+    audit.to_csv(paths["classification_audit"], index=False)
+    summary.to_csv(paths["classification_audit_summary"], index=False)
+    monthly.to_csv(paths["monthly_flow_semantic_split"], index=False)
+    validations.to_csv(paths["classification_validation"], index=False)
+    return paths
+
+
+def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    required = [
+        "period", "period_end", "Currency", "semantic_bucket", "semantic_subbucket",
+        "amount_in", "amount_out", "net_amount", "amount_abs", "n_tx", "review_required",
+    ]
+    missing = [c for c in required if c not in split.columns]
+    if missing:
+        raise ValueError(f"monthly_flow_semantic_split.csv missing required columns for operating statement: {missing}")
+
+    df = split.copy()
+    for col in ["amount_in", "amount_out", "net_amount", "amount_abs"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    df["n_tx"] = pd.to_numeric(df["n_tx"], errors="coerce").fillna(0).astype(int)
+    df["review_required"] = df["review_required"].astype(str).str.lower().isin({"true", "1", "yes", "y"})
+
+    keys = ["period", "period_end", "Currency"]
+    groups = df[keys].drop_duplicates().sort_values(keys).to_dict("records")
+    rows = []
+
+    def mask_for(bucket: str | None = None, subbucket: str | None = None, review_required: bool | None = None):
+        mask = pd.Series(True, index=df.index)
+        if bucket is not None:
+            mask &= df["semantic_bucket"].eq(bucket)
+        if subbucket is not None:
+            mask &= df["semantic_subbucket"].eq(subbucket)
+        if review_required is not None:
+            mask &= df["review_required"].eq(review_required)
+        return mask
+
+    def add_row(base: dict[str, Any], line: str, label: str, category: str, amount: float, source_filter: str, n_tx: int, coverage: float, unknown: float, review: float, caveat: str = "", frontend: str = "safe_canonical") -> None:
+        rows.append({
+            "period": base["period"],
+            "period_end": base["period_end"],
+            "Currency": base["Currency"],
+            "statement_line": line,
+            "label": label,
+            "semantic_category": category,
+            "amount": float(amount),
+            "source_table": "monthly_flow_semantic_split.csv",
+            "source_filter": source_filter,
+            "n_tx": int(n_tx),
+            "classification_coverage_ratio": float(coverage),
+            "unknown_amount": float(unknown),
+            "review_required_amount": float(review),
+            "caveat": caveat,
+            "frontend_suitability": frontend,
+        })
+
+    for base in groups:
+        gmask = (df["period"].eq(base["period"]) & df["period_end"].eq(base["period_end"]) & df["Currency"].eq(base["Currency"]))
+        g = df.loc[gmask].copy()
+        eligible_abs = float(g["amount_abs"].sum())
+        unknown_mask = g["semantic_bucket"].eq("unknown") | g["review_required"]
+        unknown_amount = float(g.loc[unknown_mask, "amount_abs"].sum())
+        review_amount = float(g.loc[g["review_required"], "amount_abs"].sum())
+        classified_abs = float(g.loc[~unknown_mask, "amount_abs"].sum())
+        coverage = classified_abs / eligible_abs if eligible_abs else 1.0
+
+        op_rev = g.loc[g["semantic_bucket"].eq("operating_revenue"), "amount_in"].sum()
+        rent = g.loc[g["semantic_bucket"].eq("operating_revenue") & g["semantic_subbucket"].eq("rent"), "amount_in"].sum()
+        opex = g.loc[g["semantic_bucket"].eq("property_opex"), "amount_out"].sum()
+        taxes = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("taxes"), "amount_out"].sum()
+        services = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("services"), "amount_out"].sum()
+        maintenance = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("maintenance"), "amount_out"].sum()
+        legal = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("legal"), "amount_out"].sum()
+        explicit_opex = {"taxes", "services", "maintenance", "legal"}
+        other_opex = g.loc[g["semantic_bucket"].eq("property_opex") & ~g["semantic_subbucket"].isin(explicit_opex), "amount_out"].sum()
+        funding = g.loc[g["semantic_bucket"].eq("funding_contribution"), "amount_in"].sum()
+        draws = g.loc[g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"]), "amount_out"].sum()
+        debt = g.loc[g["semantic_bucket"].eq("debt_movement"), "amount_abs"].sum()
+        transfers = g.loc[g["semantic_bucket"].eq("internal_transfer"), "amount_abs"].sum()
+        unknown_out = g.loc[unknown_mask, "amount_out"].sum()
+        if unknown_out == 0:
+            unknown_out = unknown_amount
+        net_operating = float(op_rev - opex)
+        coverage_after_draws = float(net_operating + funding - draws)
+
+        def ntx(bucket: str | None = None, subbucket: str | None = None) -> int:
+            m = pd.Series(True, index=g.index)
+            if bucket is not None:
+                m &= g["semantic_bucket"].eq(bucket)
+            if subbucket is not None:
+                m &= g["semantic_subbucket"].eq(subbucket)
+            return int(g.loc[m, "n_tx"].sum())
+
+        caveat = "Excludes funding, family withdrawals, debt movements, internal transfers, and unknown/review-required flows from net operating."
+        add_row(base, "operating_revenue", "Operating revenue", "operating", op_rev, "semantic_bucket=operating_revenue; amount_in", ntx("operating_revenue"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "rent_revenue", "Rent revenue", "operating_detail", rent, "semantic_bucket=operating_revenue; semantic_subbucket=rent; amount_in", ntx("operating_revenue", "rent"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "property_opex_true", "True property operating expense", "operating", opex, "semantic_bucket=property_opex; amount_out", ntx("property_opex"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "taxes", "Taxes", "property_opex_detail", taxes, "semantic_bucket=property_opex; semantic_subbucket=taxes; amount_out", ntx("property_opex", "taxes"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "services", "Services", "property_opex_detail", services, "semantic_bucket=property_opex; semantic_subbucket=services; amount_out", ntx("property_opex", "services"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "maintenance", "Maintenance", "property_opex_detail", maintenance, "semantic_bucket=property_opex; semantic_subbucket=maintenance; amount_out", ntx("property_opex", "maintenance"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "legal", "Legal", "property_opex_detail", legal, "semantic_bucket=property_opex; semantic_subbucket=legal; amount_out", ntx("property_opex", "legal"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "other_property_opex", "Other property OPEX", "property_opex_detail", other_opex, "semantic_bucket=property_opex; semantic_subbucket not in explicit property opex list; amount_out", ntx("property_opex"), coverage, unknown_amount, review_amount, "Should remain zero unless future explicit OPEX rules are added.", "review_before_frontend")
+        add_row(base, "net_operating", "Net operating", "operating_result", net_operating, "operating_revenue - property_opex_true", ntx("operating_revenue") + ntx("property_opex"), coverage, unknown_amount, review_amount, caveat)
+        add_row(base, "funding_contributions", "Funding contributions", "non_operating_funding", funding, "semantic_bucket=funding_contribution; amount_in", ntx("funding_contribution"), coverage, unknown_amount, review_amount, "Shown separately; not operating revenue.")
+        add_row(base, "family_draws_or_distributions", "Family draws or distributions", "non_operating_distribution", draws, "semantic_bucket in family_withdrawal_candidate,family_withdrawal; amount_out", int(g.loc[g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"]), "n_tx"].sum()), coverage, unknown_amount, review_amount, "Candidate line for review; not property OPEX.", "review_before_frontend")
+        add_row(base, "coverage_after_draws", "Coverage after draws", "coverage", coverage_after_draws, "net_operating + funding_contributions - family_draws_or_distributions", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Coverage-like cash view; not a pure operating result.", "review_before_frontend")
+        add_row(base, "unknown_or_ambiguous_outflows", "Unknown or ambiguous outflows", "data_quality", unknown_out, "semantic_bucket=unknown or review_required=true; amount_out else amount_abs", int(g.loc[unknown_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "Requires accounting review before decision-grade reporting.", "not_frontend_ready")
+        add_row(base, "classification_coverage", "Classification coverage", "data_quality", coverage, "classified_amount_abs / eligible_amount_abs", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Ratio, not money.", "safe_canonical")
+        add_row(base, "debt_movements", "Debt movements", "non_operating_debt", debt, "semantic_bucket=debt_movement; amount_abs", ntx("debt_movement"), coverage, unknown_amount, review_amount, "Excluded from property OPEX and net operating.", "review_before_frontend")
+        add_row(base, "internal_transfers", "Internal transfers", "non_operating_transfer", transfers, "semantic_bucket=internal_transfer; amount_abs", ntx("internal_transfer"), coverage, unknown_amount, review_amount, "Excluded from operating revenue, property OPEX, and net operating.", "review_before_frontend")
+
+    statement = pd.DataFrame(rows, columns=OPERATING_STATEMENT_COLUMNS)
+    qa = build_monthly_operating_statement_qa(statement)
+    return statement, qa
+
+
+def build_monthly_operating_statement(out_dir: Path) -> Dict[str, Path]:
+    out_dir = Path(out_dir)
+    split_path = out_dir / "monthly_flow_semantic_split.csv"
+    if not split_path.exists():
+        raise FileNotFoundError(
+            f"monthly_operating_statement requires {split_path}; run semantic classification first and do not fall back to legacy reports"
+        )
+    split = pd.read_csv(split_path)
+    statement, qa = build_monthly_operating_statement_from_split(split)
+    statement_path = out_dir / "monthly_operating_statement.csv"
+    qa_path = out_dir / "monthly_operating_statement_qa.csv"
+    statement.to_csv(statement_path, index=False)
+    qa.to_csv(qa_path, index=False)
+    return {"monthly_operating_statement": statement_path, "monthly_operating_statement_qa": qa_path}
+
+
+def build_monthly_operating_statement_qa(statement: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    lines = set(statement["statement_line"].astype(str)) if not statement.empty else set()
+
+    def add(check: str, ok: bool, detail: str, severity: str = "error") -> None:
+        rows.append({"check": check, "status": "pass" if ok else "fail", "detail": detail, "severity": severity})
+
+    add("monthly_operating_statement_exists", not statement.empty, f"rows={len(statement)}")
+    for line in [
+        "operating_revenue", "property_opex_true", "net_operating", "funding_contributions",
+        "family_draws_or_distributions", "coverage_after_draws",
+    ]:
+        add(f"has_{line}", line in lines, line)
+    add("classification_coverage_present", "classification_coverage" in lines and statement["classification_coverage_ratio"].notna().all(), "coverage ratio populated")
+    add("unknown_amount_present", "unknown_amount" in statement.columns, "unknown_amount column populated", "warning")
+
+    def source_filter(line: str) -> str:
+        vals = statement.loc[statement["statement_line"].eq(line), "source_filter"].astype(str).unique().tolist()
+        return "; ".join(vals)
+
+    add("no_funding_in_operating_revenue", "funding_contribution" not in source_filter("operating_revenue"), source_filter("operating_revenue"))
+    add("no_family_draws_in_property_opex", "family_withdrawal" not in source_filter("property_opex_true"), source_filter("property_opex_true"))
+    add("no_debt_principal_in_property_opex", "debt_movement" not in source_filter("property_opex_true") and "principal" not in source_filter("property_opex_true"), source_filter("property_opex_true"))
+    return pd.DataFrame(rows, columns=OPERATING_STATEMENT_QA_COLUMNS)
+
+
+def _build_validation_rows(audit: pd.DataFrame, monthly: pd.DataFrame) -> pd.DataFrame:
+    rows = [
+        {"check": "classification_audit_exists", "period": "", "Currency": "", "amount": len(audit), "n_tx": len(audit), "warning": ""},
+        {"check": "monthly_flow_semantic_split_exists", "period": "", "Currency": "", "amount": len(monthly), "n_tx": int(monthly["n_tx"].sum()) if not monthly.empty else 0, "warning": ""},
+    ]
+    def add(check: str, mask):
+        g = audit.loc[mask].groupby(["period", "Currency"], dropna=False).agg(amount=("amount", "sum"), n_tx=("tx_id", "count")).reset_index()
+        for _, r in g.iterrows():
+            rows.append({"check": check, "period": r["period"], "Currency": r["Currency"], "amount": r["amount"], "n_tx": r["n_tx"], "warning": "review" if r["n_tx"] else ""})
+    add("unknown_amount_by_currency", audit["semantic_bucket"].eq("unknown"))
+    add("unknown_tx_count", audit["semantic_bucket"].eq("unknown"))
+    add("property_opex_amount_by_month", audit["semantic_bucket"].eq("property_opex"))
+    add("family_withdrawal_candidate_amount_by_month", audit["semantic_bucket"].eq("family_withdrawal_candidate"))
+    add("funding_amount_by_month", audit["semantic_bucket"].eq("funding_contribution"))
+    add("rent_amount_by_month", audit["semantic_bucket"].eq("operating_revenue") & audit["semantic_subbucket"].eq("rent"))
+    return pd.DataFrame(rows, columns=VALIDATION_COLUMNS)

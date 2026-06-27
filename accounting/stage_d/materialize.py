@@ -25,6 +25,8 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
+from accounting.marts.cash import build_monthly_cash_close
+from accounting.marts.semantic import build_monthly_operating_statement, build_semantic_outputs
 from accounting.core.timeseries import (
     aggregate_per_flow,
     aggregate_per_party,
@@ -605,6 +607,25 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_daily_cash")
         aggregates["daily_cash_failed"] = {"error": "failed"}
+
+    # 4.1) monthly cash consumption wrapper with explicit suitability flags
+    try:
+        cash_paths = build_monthly_cash_close(out_dir=out_dir, freq=freq)
+        for name, path in cash_paths.items():
+            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _sha256_file(path)}
+    except Exception:
+        LOG.exception("Failed monthly cash close build")
+        raise
+
+    # 4.5) conservative semantic classification mart and monthly operating statement
+    try:
+        semantic_paths = build_semantic_outputs(ledger_df, out_dir=out_dir, freq="M")
+        operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir)
+        for name, path in {**semantic_paths, **operating_statement_paths}.items():
+            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _sha256_file(path)}
+    except Exception:
+        LOG.exception("Failed semantic mart / monthly operating statement build")
+        raise
 
     # 5) partitions.json update (simple)
     parts_path = out_dir / "partitions.json"
