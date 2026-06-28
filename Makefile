@@ -354,6 +354,7 @@ smoke-materialize: smoke-ingest
 	@test -s "$(SMOKE_OUT)/monthly_flow_semantic_split.csv"
 	@test -s "$(SMOKE_OUT)/monthly_operating_statement.csv"
 	@test -s "$(SMOKE_OUT)/monthly_operating_statement_qa.csv"
+	@test -s "$(SMOKE_OUT)/semantic_leakage_qa.csv"
 	@test -s "$(SMOKE_OUT)/monthly_cash_close.csv"
 	@test -s "$(SMOKE_OUT)/monthly_cash_close_qa.csv"
 
@@ -413,6 +414,7 @@ _run_materialize_action:
 	@test -s "$(RUN_OUT)/monthly_flow_semantic_split.csv"
 	@test -s "$(RUN_OUT)/monthly_operating_statement.csv"
 	@test -s "$(RUN_OUT)/monthly_operating_statement_qa.csv"
+	@test -s "$(RUN_OUT)/semantic_leakage_qa.csv"
 	@test -s "$(RUN_OUT)/monthly_cash_close.csv"
 	@test -s "$(RUN_OUT)/monthly_cash_close_qa.csv"
 
@@ -521,6 +523,7 @@ _run_metrics_action:
 		test -s "$(RUN_METRICS_DIR)/metric_contract_frontier.csv"; \
 		test -s "$(RUN_METRICS_DIR)/frontend_metric_series.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metrics_frontier_qa.csv"; \
+		test -s "$(RUN_METRICS_DIR)/frontier_source_qa.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/income_statement_monthly_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_place_m_last6.csv"; \
 		test -s "$(RUN_METRICS_DIR)/metric_views/rent_rollup_by_detail_m_last6.csv"; \

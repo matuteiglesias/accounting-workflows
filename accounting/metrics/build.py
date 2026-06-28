@@ -482,10 +482,12 @@ def build_metric_view_exports(
     views_dir = out_dir / METRIC_VIEWS_DIRNAME
     views_dir.mkdir(parents=True, exist_ok=True)
 
+    monthly_statement = load_optional_csv(run_root / "monthly_operating_statement.csv")
     build_income_statement_monthly_last6(
         ledger,
         months=months,
         include_statuses=include_statuses,
+        monthly_statement=monthly_statement,
     ).to_csv(views_dir / "income_statement_monthly_last6.csv", index=False)
 
     build_flow_rollup_last_n_months(
@@ -522,6 +524,7 @@ def build_metric_view_exports(
         months=months,
         include_statuses=include_statuses,
         noise_floor_by_currency=noise_floor_by_currency,
+        monthly_statement=monthly_statement,
     ).to_csv(views_dir / "draws_discipline_monthly_last6.csv", index=False)
 
     pd.DataFrame([
