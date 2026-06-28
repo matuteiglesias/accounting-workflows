@@ -82,3 +82,19 @@ def build_compact_tables_from_statement(statement: pd.DataFrame, out_dir: Path) 
     qa.to_csv(paths["compact_tables_qa"], index=False)
     recon.to_csv(paths["compact_vs_operating_result_reconciliation"], index=False)
     return paths
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build compact semester tables from the canonical monthly operating statement.")
+    parser.add_argument("--statement", type=Path, required=True, help="Path to monthly_operating_statement.csv")
+    parser.add_argument("--out-dir", type=Path, required=True, help="Output directory for compact tables")
+    args = parser.parse_args()
+
+    statement = pd.read_csv(args.statement)
+    build_compact_tables_from_statement(statement, args.out_dir)
+
+
+if __name__ == "__main__":
+    main()

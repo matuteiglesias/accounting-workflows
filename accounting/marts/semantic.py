@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any, Dict, Tuple
 
 import pandas as pd
@@ -186,7 +187,7 @@ def build_semantic_leakage_qa(audit: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for _, r in opex.iterrows():
         blob = " ".join(_norm(r.get(c)) for c in text_cols).casefold()
-        hits = [name for name, pat in patterns.items() if __import__("re").search(pat, blob, flags=__import__("re").IGNORECASE)]
+        hits = [name for name, pat in patterns.items() if re.search(pat, blob, flags=re.IGNORECASE)]
         for hit in hits:
             rows.append({
                 "tx_id": r.get("tx_id", ""), "period": r.get("period", ""), "Currency": r.get("Currency", ""),

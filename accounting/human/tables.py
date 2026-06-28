@@ -72,6 +72,8 @@ class HumanTablesContext:
     manifest: Dict[str, Any]
     metric_views_manifest: Dict[str, str]
     drilldown_index: pd.DataFrame
+    metric_contract_frontier: pd.DataFrame
+    frontend_metric_series: pd.DataFrame
     metric_views_cache: Dict[str, pd.DataFrame]
 
 
@@ -107,6 +109,8 @@ def load_human_tables_context(metrics_dir: Path) -> HumanTablesContext:
 
     drilldown_path = metrics_dir / DRILLDOWN_DIRNAME / DRILLDOWN_INDEX_FILENAME
     drilldown_index = pd.read_csv(drilldown_path) if drilldown_path.exists() else pd.DataFrame()
+    metric_contract_frontier = pd.read_csv(metrics_dir / "metric_contract_frontier.csv") if (metrics_dir / "metric_contract_frontier.csv").exists() else pd.DataFrame()
+    frontend_metric_series = pd.read_csv(metrics_dir / "frontend_metric_series.csv") if (metrics_dir / "frontend_metric_series.csv").exists() else pd.DataFrame()
 
     return HumanTablesContext(
         metrics_dir=metrics_dir,
@@ -116,6 +120,8 @@ def load_human_tables_context(metrics_dir: Path) -> HumanTablesContext:
         manifest=manifest,
         metric_views_manifest=metric_views_manifest,
         drilldown_index=drilldown_index,
+        metric_contract_frontier=metric_contract_frontier,
+        frontend_metric_series=frontend_metric_series,
         metric_views_cache={},
     )
 
@@ -319,9 +325,48 @@ def _build_data_quality(ctx: HumanTablesContext) -> pd.DataFrame:
 # Human table builders
 # -----------------------
 
+def _frontier_contract_row(ctx: HumanTablesContext, metric_id: str) -> pd.Series | None:
+    frontier = ctx.metric_contract_frontier
+    if frontier.empty or "metric_id" not in frontier.columns:
+        return None
+    sub = frontier.loc[frontier["metric_id"].astype(str).eq(metric_id)]
+    return None if sub.empty else sub.iloc[0]
+
+
+def _frontend_metric_rows(ctx: HumanTablesContext, metric_id: str) -> pd.DataFrame:
+    series = ctx.frontend_metric_series
+    if series.empty or "metric_id" not in series.columns:
+        return pd.DataFrame()
+    return series.loc[series["metric_id"].astype(str).eq(metric_id)].copy()
+
+
 def build_cash_snapshot_table(ctx: HumanTablesContext) -> pd.DataFrame:
-    metric_ids = ["BS.CASH.FB", "BS.CASH.PM", "BS.CASH.TOTAL"]
-    return _build_snapshot_from_metric_ids(ctx.registry, ctx.metric_values, metric_ids, grain="Y")
+    contract = _frontier_contract_row(ctx, "BS.CASH.TOTAL")
+    cash_rows = _frontend_metric_rows(ctx, "BS.CASH.TOTAL")
+    if contract is None:
+        return pd.DataFrame(columns=["metric_id", "label", "currency", "period", "value", "status", "frontend_suitability", "source_table", "caveat"])
+    status = str(contract.get("status", ""))
+    suitability = str(contract.get("frontend_suitability", ""))
+    caveat = str(contract.get("caveat", ""))
+    if cash_rows.empty or status == "unavailable" or suitability == "unavailable":
+        return pd.DataFrame([{
+            "metric_id": "BS.CASH.TOTAL",
+            "label": contract.get("label", "Frontend-safe cash total"),
+            "currency": "",
+            "period": "",
+            "value": pd.NA,
+            "status": "unavailable",
+            "frontend_suitability": "unavailable",
+            "source_table": "monthly_cash_close.csv",
+            "caveat": caveat or "No frontend-safe cash rows; cash narrative blocked.",
+        }])
+    cash_rows["value"] = pd.to_numeric(cash_rows["value"], errors="coerce")
+    latest = cash_rows.sort_values(["Currency", "period"]).groupby("Currency", dropna=False).tail(1)
+    latest = latest.rename(columns={"Currency": "currency"})
+    latest["label"] = contract.get("label", "Frontend-safe cash total")
+    latest["status"] = status or "active"
+    cols = ["metric_id", "label", "currency", "period", "value", "status", "frontend_suitability", "source_table", "caveat"]
+    return latest.reindex(columns=cols).reset_index(drop=True)
 
 
 def build_debt_snapshot_table(ctx: HumanTablesContext) -> pd.DataFrame:
@@ -397,17 +442,29 @@ def build_income_statement_q_table(ctx: HumanTablesContext) -> pd.DataFrame:
 
 
 def build_cash_by_box_y_table(ctx: HumanTablesContext) -> pd.DataFrame:
-    path = ctx.metrics_dir / "balance_cash_y.csv"
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    rows = _frontend_metric_rows(ctx, "BS.CASH.CLOSE.BOX")
+    if rows.empty:
+        return pd.DataFrame(columns=["metric_id", "period", "currency", "box", "value", "source_table", "frontend_suitability"])
+    rows = rows.rename(columns={"Currency": "currency", "dimension_value": "box"})
+    rows["year"] = rows["period"].astype(str).str.slice(0, 4)
+    return rows.reindex(columns=["metric_id", "year", "period", "currency", "box", "value", "source_table", "frontend_suitability"]).sort_values(["year", "currency", "box", "period"]).reset_index(drop=True)
 
 
 def build_cash_by_box_q_table(ctx: HumanTablesContext) -> pd.DataFrame:
-    path = ctx.metrics_dir / "balance_cash_q.csv"
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    rows = _frontend_metric_rows(ctx, "BS.CASH.CLOSE.BOX")
+    if rows.empty:
+        return pd.DataFrame(columns=["metric_id", "period", "currency", "box", "value", "source_table", "frontend_suitability"])
+    rows = rows.rename(columns={"Currency": "currency", "dimension_value": "box"})
+    rows["quarter"] = pd.to_datetime(rows["period"].astype(str) + "-01", errors="coerce").dt.to_period("Q").astype(str)
+    return rows.reindex(columns=["metric_id", "quarter", "period", "currency", "box", "value", "source_table", "frontend_suitability"]).sort_values(["quarter", "currency", "box", "period"]).reset_index(drop=True)
 
 
 def build_cash_position_monthly_last12_table(ctx: HumanTablesContext) -> pd.DataFrame:
-    return _safe_read_metric_view_cached(ctx, "cash_position_monthly_last12.csv")
+    rows = _frontend_metric_rows(ctx, "BS.CASH.TOTAL")
+    if rows.empty:
+        return pd.DataFrame(columns=["metric_id", "period", "currency", "cash_position_end", "source_table", "frontend_suitability"])
+    rows = rows.rename(columns={"Currency": "currency", "value": "cash_position_end"})
+    return rows.reindex(columns=["metric_id", "period", "currency", "cash_position_end", "source_table", "frontend_suitability"]).sort_values(["currency", "period"]).groupby("currency", dropna=False).tail(12).reset_index(drop=True)
 
 
 def build_rent_rollup_by_place_table(ctx: HumanTablesContext) -> pd.DataFrame:

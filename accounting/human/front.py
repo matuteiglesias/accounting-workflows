@@ -99,7 +99,7 @@ a:hover { text-decoration: underline; }
 # Section 1. Dataclasses / config / profiles
 # =========================================================
 
-BlockStatus = Literal["ready", "partial", "hidden"]
+BlockStatus = Literal["ready", "partial", "hidden", "blocked"]
 ProfileName = Literal["executive", "core_evidence", "prudential", "methodology", "full_front"]
 CalloutLevel = Literal["ok", "warn", "err"]
 
@@ -403,10 +403,12 @@ def build_kpi_cards(ctx: FrontDataContext) -> List[Dict[str, str]]:
         _pick_row(cash_snapshot, "BS.CASH.TOTAL"),
     )
     
-    if cash_row is not None:
+    if cash_row is None or str(cash_row.get("status", "")).lower() == "unavailable" or pd.isna(cash_row.get("value", pd.NA)):
+        cards.append({"label": "Caja total", "value": "s/d"})
+    else:
         cards.append({"label": f"Caja total [{cash_row.get('currency','')}]", "value": _fmt_num(cash_row.get("value", pd.NA))})
 
-    for metric_id, label in [("IS.NET.AFTER_COSTS", "Neto después de costos"), ("IS.OPEX.TOTAL", "Opex")]:
+    for metric_id, label in [("IS.NET.OPERATING", "Neto operativo"), ("IS.OPEX.TOTAL", "Opex")]:
         item = _pick_metric(metric_id, label)
         if item["value"] != "N/A":
             cards.append(item)
@@ -488,9 +490,20 @@ def narrative_executive_summary(ctx: FrontDataContext) -> str:
 
 
 def narrative_cash_visibility(ctx: FrontDataContext) -> str:
+    cash = get_table(ctx, "cash_snapshot")
+    unavailable = cash.empty or ("status" in cash.columns and cash["status"].astype(str).str.lower().eq("unavailable").all())
+    if unavailable:
+        return (
+            "<p><strong>Caja bloqueada:</strong> no hay filas de "
+            "<code>monthly_cash_close.csv</code> marcadas como "
+            "<code>is_frontend_safe=true</code>. El reporte muestra caja como "
+            "<strong>s/d</strong> y no reconstruye saldos desde party balances, "
+            "box motor ni caja diaria interna.</p>"
+        )
     return (
-        "<p>Stub narrative. Explain visible liquidity, distribution between boxes, "
-        "and why visible cash does not automatically equal freely distributable surplus.</p>"
+        "<p>La caja visible se limita a filas frontend-safe de "
+        "<code>monthly_cash_close.csv</code>; no se mezcla con saldos internos, "
+        "box motor ni deuda.</p>"
     )
 
 
@@ -579,9 +592,10 @@ def build_block_executive_summary(ctx: FrontDataContext) -> FrontBlock:
 
 def build_block_cash_visibility(ctx: FrontDataContext) -> FrontBlock:
     primary_df = get_table(ctx, "cash_snapshot")
-    status: BlockStatus = "ready" if not primary_df.empty else "partial"
-    key_message = "Caja visible disponible para lectura."
-    if not primary_df.empty and {"metric_id", "currency", "value"}.issubset(primary_df.columns):
+    cash_unavailable = primary_df.empty or ("status" in primary_df.columns and primary_df["status"].astype(str).str.lower().eq("unavailable").all())
+    status: BlockStatus = "blocked" if cash_unavailable else "ready"
+    key_message = "Caja total: s/d (sin fuente frontend-safe)."
+    if not cash_unavailable and {"metric_id", "currency", "value"}.issubset(primary_df.columns):
         sub = primary_df.loc[primary_df["metric_id"].astype(str) == "BS.CASH.TOTAL"]
         if not sub.empty:
             row = sub.iloc[0]
@@ -607,7 +621,7 @@ def build_block_cash_visibility(ctx: FrontDataContext) -> FrontBlock:
     )
     if status != "ready":
         block.status = status
-        block.callouts.append(FrontCallout(level="warn", text="Falta la tabla principal de caja; el bloque queda parcial."))
+        block.callouts.append(FrontCallout(level="warn", text="Caja no disponible: no hay fuente frontend-safe; narrativa de caja bloqueada."))
     return block
 
 
@@ -616,11 +630,11 @@ def build_block_recent_performance(ctx: FrontDataContext) -> FrontBlock:
     status: BlockStatus = "ready" if not df.empty else "partial"
     key_message = "Lectura reciente de renta, costos y neto disponible."
     if not df.empty and {"metric_id", "currency"}.issubset(df.columns):
-        sub = df.loc[df["metric_id"].astype(str) == "IS.NET.AFTER_COSTS"]
+        sub = df.loc[df["metric_id"].astype(str) == "IS.NET.OPERATING"]
         month_cols = sorted([str(c) for c in df.columns if str(c).startswith("20")])
         if not sub.empty and month_cols:
             row = sub.iloc[0]
-            key_message = f"Neto después de costos (último mes): {_fmt_num(row.get(month_cols[-1], pd.NA))} {row.get('currency', '')}."
+            key_message = f"Neto operativo (último mes): {_fmt_num(row.get(month_cols[-1], pd.NA))} {row.get('currency', '')}."
 
     block = FrontBlock(
         block_id="recent_performance",
