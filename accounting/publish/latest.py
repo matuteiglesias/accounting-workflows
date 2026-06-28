@@ -38,6 +38,7 @@ METRIC_FILES = [
     "metric_contract_frontier.csv",
     "frontend_metric_series.csv",
     "metrics_frontier_qa.csv",
+    "frontier_source_qa.csv",
 ]
 
 DEBT_FILES = [

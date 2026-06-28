@@ -202,7 +202,9 @@ def build_summary_kpis(tables: Dict[str, pd.DataFrame]) -> List[Dict[str, str]]:
         if row is None:
             row = _pick_row(cash_snapshot, "BS.CASH.TOTAL")
         if row is None:
-            return {"label": "Caja total", "value": "N/A"}
+            return {"label": "Caja total", "value": "s/d"}
+        if str(row.get("status", "")).lower() == "unavailable" or pd.isna(row.get("value", pd.NA)):
+            return {"label": "Caja total", "value": "s/d"}
         return {"label": f"Caja total [{row.get('currency','')}]", "value": _fmt_num(row.get("value", pd.NA))}
 
     def _pick_debt_net() -> Dict[str, str]:

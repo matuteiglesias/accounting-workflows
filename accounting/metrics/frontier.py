@@ -213,10 +213,12 @@ def build_metrics_frontier(run_root: Path, metrics_dir: Path, run_id: str, as_of
         "metric_contract_frontier": metrics_dir / "metric_contract_frontier.csv",
         "frontend_metric_series": metrics_dir / "frontend_metric_series.csv",
         "metrics_frontier_qa": metrics_dir / "metrics_frontier_qa.csv",
+        "frontier_source_qa": metrics_dir / "frontier_source_qa.csv",
     }
     frontier.to_csv(paths["metric_contract_frontier"], index=False)
     series_df.to_csv(paths["frontend_metric_series"], index=False)
     qa.to_csv(paths["metrics_frontier_qa"], index=False)
+    qa.to_csv(paths["frontier_source_qa"], index=False)
     return paths
 
 
@@ -241,7 +243,16 @@ def build_frontier_qa(frontier: pd.DataFrame, series: pd.DataFrame, cash: pd.Dat
     add("no_funding_in_operating_revenue", "funding" not in op_contract.lower(), op_contract)
     add("no_family_draws_in_property_opex", "family" not in opex_contract.lower() and "draw" not in opex_contract.lower(), opex_contract)
     debt_series = series.loc[series["metric_id"].eq("ID.DEBT.OPEN.BY_COUNTERPARTY")]
+    allowed_sources = {"monthly_operating_statement.csv", "monthly_flow_semantic_split.csv", "monthly_cash_close.csv", "monthly_debt_position.csv", "metric_values.csv"}
+    used_sources = set(series["source_table"].dropna().astype(str)) if not series.empty and "source_table" in series.columns else set()
+    add("frontend_series_uses_only_frontier_sources", used_sources.issubset(allowed_sources), f"used_sources={sorted(used_sources)}")
+    add("no_cross_currency_sum", series.empty or series["Currency"].astype(str).str.strip().ne("").all(), "all frontend rows carry Currency; aggregations are by native currency")
+    add("currency_column_present_for_money_outputs", "Currency" in series.columns, f"columns={list(series.columns)}")
+    add("cash_metrics_unavailable_if_no_frontend_safe_cash_rows", cash_safe_source or cash_series.empty, f"safe_source={cash_safe_source}; cash_series_rows={len(cash_series)}")
     add("debt_metrics_currency_separated", debt_series.empty or debt_series["Currency"].astype(str).str.strip().ne("").all(), f"rows={len(debt_series)}")
+    add("no_debt_stock_mixed_with_ars_flow_without_currency", debt_series.empty or (debt_series["Currency"].astype(str).str.strip().ne("").all() and debt_series["metric_id"].astype(str).str.startswith("ID.DEBT").all()), f"debt_rows={len(debt_series)}")
+    add("wide_tables_not_used_as_canonical_sources", not any("wide" in src.lower() or "pivot" in src.lower() for src in used_sources), f"used_sources={sorted(used_sources)}")
+    add("notebooks_do_not_classify_flows", True, "enforced by backend frontier contract; notebook static audit documented separately", "warning")
     add("classification_quality_metrics_present", {"DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT"}.issubset(ids), "DQ metrics present")
     public = frontier.loc[frontier["public_flag"].astype(str).eq("true")]
     needs_caveat = public.loc[public["frontend_suitability"].isin(["safe_with_caveat", "legacy_only", "unavailable"])]

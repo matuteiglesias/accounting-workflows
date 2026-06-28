@@ -198,85 +198,55 @@ def build_income_statement_monthly_last6(
     *,
     months: int,
     include_statuses: Sequence[str],
+    monthly_statement: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    work = ledger.copy()
-    allowed = {str(x).strip().lower() for x in include_statuses}
-    work = work.loc[work["status"].astype(str).str.strip().str.lower().isin(allowed)].copy()
-    work["amount"] = pd.to_numeric(work["amount"], errors="coerce")
-    work = work.dropna(subset=["amount", "Currency"]).copy()
+    """Build the legacy last-6 presentation table from the canonical monthly statement.
 
-    months_list = last_n_months(work, months)
-    work = work.loc[work["period_m"].isin(months_list)].copy()
-
-    specs = [
-        ("IS.RENT.TOTAL", "Renta total", (work["Flujo"].astype(str) == "Cobros") & (work["Tipo"].astype(str) == "Renta")),
-        ("IS.CONTRIB.TOTAL", "Contribuciones totales", work["Flujo"].astype(str) == "Contribucion"),
-        ("IS.OPEX.TOTAL", "Costos operativos totales", work["Flujo"].astype(str) == "Pagos"),
-    ]
-
-    rows: list[dict[str, Any]] = []
-    for metric_id, label, mask in specs:
-        sub = work.loc[mask].copy()
-        if sub.empty:
-            continue
-        agg = sub.groupby(["Currency", "period_m"], dropna=False)["amount"].sum().reset_index()
-        wide = (
-            agg.pivot_table(index=["Currency"], columns="period_m", values="amount", aggfunc="sum", fill_value=0.0)
-            .reset_index()
-        )
-        for m in months_list:
-            if m not in wide.columns:
-                wide[m] = 0.0
-        for _, row in wide.iterrows():
-            out = {"metric_id": metric_id, "label": label, "currency": row["Currency"]}
-            vals = [row[m] for m in months_list]
+    This table is retained for report compatibility only.  It must not reclassify
+    ledger rows or become a competing income-statement source.
+    """
+    if monthly_statement is not None and not monthly_statement.empty:
+        required = {"period", "Currency", "statement_line", "amount"}
+        missing = sorted(required - set(monthly_statement.columns))
+        if missing:
+            raise ValueError(f"monthly_operating_statement.csv missing columns for presentation view: {missing}")
+        stmt = monthly_statement.copy()
+        stmt["amount"] = pd.to_numeric(stmt["amount"], errors="coerce").fillna(0.0)
+        stmt = stmt.dropna(subset=["period", "Currency", "statement_line"]).copy()
+        stmt["period_m"] = stmt["period"].astype(str)
+        months_list = sorted(stmt["period_m"].dropna().astype(str).unique().tolist())[-months:]
+        stmt = stmt.loc[stmt["period_m"].isin(months_list)].copy()
+        line_specs = [
+            ("rent_revenue", "IS.RENT.TOTAL", "Renta total"),
+            ("funding_contributions", "IS.CONTRIB.TOTAL", "Contribuciones totales"),
+            ("property_opex_true", "IS.OPEX.TOTAL", "Costos operativos verdaderos"),
+            ("net_operating", "IS.NET.OPERATING", "Neto operativo"),
+        ]
+        rows: list[dict[str, Any]] = []
+        for line, metric_id, label in line_specs:
+            sub = stmt.loc[stmt["statement_line"].astype(str).eq(line)].copy()
+            if sub.empty:
+                continue
+            agg = sub.groupby(["Currency", "period_m"], dropna=False)["amount"].sum().reset_index()
+            wide = agg.pivot_table(index=["Currency"], columns="period_m", values="amount", aggfunc="sum", fill_value=0.0).reset_index()
             for m in months_list:
-                out[m] = row[m]
-            out["total_6m"] = sum(vals)
-            out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-            rows.append(out)
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        derived_rows = []
-        for currency in sorted(df["currency"].astype(str).unique().tolist()):
-            sub = df.loc[df["currency"].astype(str) == currency].set_index("metric_id")
-            rent = sub.loc["IS.RENT.TOTAL"] if "IS.RENT.TOTAL" in sub.index else None
-            contrib = sub.loc["IS.CONTRIB.TOTAL"] if "IS.CONTRIB.TOTAL" in sub.index else None
-            opex = sub.loc["IS.OPEX.TOTAL"] if "IS.OPEX.TOTAL" in sub.index else None
-
-            if rent is not None or contrib is not None:
-                out = {"metric_id": "IS.INCOME.TOTAL", "label": "Ingresos totales", "currency": currency}
+                if m not in wide.columns:
+                    wide[m] = 0.0
+            for _, row in wide.iterrows():
+                out = {"metric_id": metric_id, "label": label, "currency": row["Currency"], "source_role": "presentation_only", "source_table": "monthly_operating_statement.csv"}
                 for m in months_list:
-                    out[m] = (rent[m] if rent is not None else 0.0) + (contrib[m] if contrib is not None else 0.0)
-                out["total_6m"] = sum(out[m] for m in months_list)
+                    out[m] = row[m]
+                out["total_6m"] = sum(row[m] for m in months_list)
                 out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-                derived_rows.append(out)
+                rows.append(out)
+        df = pd.DataFrame(rows)
+        if df.empty:
+            return pd.DataFrame(columns=["metric_id", "label", "currency", "source_role", "source_table"] + months_list + ["total_6m", "avg_m"])
+        order = ["IS.RENT.TOTAL", "IS.CONTRIB.TOTAL", "IS.OPEX.TOTAL", "IS.NET.OPERATING"]
+        df["__sort"] = df["metric_id"].map({k: i for i, k in enumerate(order)})
+        return df.sort_values(["currency", "__sort"]).reset_index(drop=True)[["metric_id", "label", "currency", "source_role", "source_table"] + months_list + ["total_6m", "avg_m"]]
 
-            if (rent is not None or contrib is not None) and opex is not None:
-                base = derived_rows[-1] if derived_rows else None
-                if base and base["metric_id"] == "IS.INCOME.TOTAL":
-                    out = {"metric_id": "IS.NET.AFTER_COSTS", "label": "Neto después de costos", "currency": currency}
-                    for m in months_list:
-                        out[m] = base[m] - opex[m]
-                    out["total_6m"] = sum(out[m] for m in months_list)
-                    out["avg_m"] = out["total_6m"] / max(len(months_list), 1)
-                    derived_rows.append(out)
-
-        if derived_rows:
-            df = pd.concat([df, pd.DataFrame(derived_rows)], ignore_index=True)
-
-    ordered_metric_ids = [
-        "IS.RENT.TOTAL",
-        "IS.CONTRIB.TOTAL",
-        "IS.INCOME.TOTAL",
-        "IS.OPEX.TOTAL",
-        "IS.NET.AFTER_COSTS",
-    ]
-    df["__sort"] = df["metric_id"].map({k: i for i, k in enumerate(ordered_metric_ids)})
-    cols = ["metric_id", "label", "currency"] + months_list + ["total_6m", "avg_m"]
-    return df.sort_values(["currency", "__sort"]).reset_index(drop=True)[cols]
-
+    raise FileNotFoundError("income_statement_monthly_last6 requires monthly_operating_statement.csv; legacy ledger classification fallback is disabled")
 
 def build_draws_discipline_monthly_last6(
     ledger: pd.DataFrame,
@@ -284,6 +254,7 @@ def build_draws_discipline_monthly_last6(
     months: int,
     include_statuses: Sequence[str],
     noise_floor_by_currency: Dict[str, float],
+    monthly_statement: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     work = ledger.copy()
     allowed = {str(x).strip().lower() for x in include_statuses}
@@ -299,8 +270,8 @@ def build_draws_discipline_monthly_last6(
         mask = mask | work[c].astype(str).str.contains(r"personal|retiro|draw|owner|dividend", case=False, na=False)
 
     draws = work.loc[mask].groupby(["Currency", "period_m"], dropna=False)["amount"].sum().reset_index()
-    net = build_income_statement_monthly_last6(work, months=months, include_statuses=include_statuses)
-    net = net.loc[net["metric_id"] == "IS.NET.AFTER_COSTS"].copy()
+    net = build_income_statement_monthly_last6(work, months=months, include_statuses=include_statuses, monthly_statement=monthly_statement)
+    net = net.loc[net["metric_id"].isin(["IS.NET.OPERATING", "IS.NET.AFTER_COSTS"])].copy()
 
     rows = []
     for currency in sorted(set(draws["Currency"].astype(str)) | set(net["currency"].astype(str))):

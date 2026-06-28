@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any, Dict, Tuple
 
 import pandas as pd
@@ -30,6 +31,7 @@ OPERATING_STATEMENT_COLUMNS = [
     "unknown_amount", "review_required_amount", "caveat", "frontend_suitability",
 ]
 OPERATING_STATEMENT_QA_COLUMNS = ["check", "status", "detail", "severity"]
+SEMANTIC_LEAKAGE_QA_COLUMNS = ["tx_id", "period", "Currency", "amount", "Box", "Flujo", "Tipo", "Detalle", "payer", "receiver", "semantic_bucket", "semantic_subbucket", "rule_id", "leakage_pattern", "severity", "recommended_bucket", "notes"]
 
 
 def _norm(value: Any) -> str:
@@ -151,17 +153,53 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     monthly = monthly[MONTHLY_COLUMNS]
 
     validations = _build_validation_rows(audit, monthly)
+    leakage = build_semantic_leakage_qa(audit)
     paths = {
         "classification_audit": out_dir / "classification_audit.csv",
         "classification_audit_summary": out_dir / "classification_audit_summary.csv",
         "monthly_flow_semantic_split": out_dir / "monthly_flow_semantic_split.csv",
         "classification_validation": out_dir / "classification_validation.csv",
+        "semantic_leakage_qa": out_dir / "semantic_leakage_qa.csv",
     }
     audit.to_csv(paths["classification_audit"], index=False)
     summary.to_csv(paths["classification_audit_summary"], index=False)
     monthly.to_csv(paths["monthly_flow_semantic_split"], index=False)
     validations.to_csv(paths["classification_validation"], index=False)
+    leakage.to_csv(paths["semantic_leakage_qa"], index=False)
     return paths
+
+
+def build_semantic_leakage_qa(audit: pd.DataFrame) -> pd.DataFrame:
+    if audit.empty:
+        return pd.DataFrame(columns=SEMANTIC_LEAKAGE_QA_COLUMNS)
+    text_cols = [c for c in ["Flujo", "Tipo", "Detalle", "notes", "payer", "receiver", "rule_id"] if c in audit.columns]
+    patterns = {
+        "Gastos Personales": r"gastos\s+personales",
+        "Personal": r"\bpersonal\b",
+        "Dividendo": r"dividendo|dividend",
+        "Retiro": r"retiro|withdrawal",
+        "Distribucion": r"distribuci[oó]n|distribution",
+        "Transfer + Gasto": r"transfer.*gasto|gasto.*transfer",
+        "family withdrawal": r"family\s+withdrawal",
+        "draw": r"\bdraw\b",
+    }
+    opex = audit.loc[audit["semantic_bucket"].astype(str).eq("property_opex")].copy()
+    rows = []
+    for _, r in opex.iterrows():
+        blob = " ".join(_norm(r.get(c)) for c in text_cols).casefold()
+        hits = [name for name, pat in patterns.items() if re.search(pat, blob, flags=re.IGNORECASE)]
+        for hit in hits:
+            rows.append({
+                "tx_id": r.get("tx_id", ""), "period": r.get("period", ""), "Currency": r.get("Currency", ""),
+                "amount": r.get("amount", pd.NA), "Box": r.get("Box", ""), "Flujo": r.get("Flujo", ""),
+                "Tipo": r.get("Tipo", ""), "Detalle": r.get("Detalle", ""), "payer": r.get("payer", ""),
+                "receiver": r.get("receiver", ""), "semantic_bucket": r.get("semantic_bucket", ""),
+                "semantic_subbucket": r.get("semantic_subbucket", ""), "rule_id": r.get("rule_id", ""),
+                "leakage_pattern": hit, "severity": "error",
+                "recommended_bucket": "family_withdrawal_candidate_review",
+                "notes": "Property OPEX contains personal/family/distribution-like text; review classification rule before frontend/reporting use.",
+            })
+    return pd.DataFrame(rows, columns=SEMANTIC_LEAKAGE_QA_COLUMNS)
 
 
 def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -310,6 +348,9 @@ def build_monthly_operating_statement_qa(statement: pd.DataFrame) -> pd.DataFram
 
     add("no_funding_in_operating_revenue", "funding_contribution" not in source_filter("operating_revenue"), source_filter("operating_revenue"))
     add("no_family_draws_in_property_opex", "family_withdrawal" not in source_filter("property_opex_true"), source_filter("property_opex_true"))
+    add("no_personal_expense_in_property_opex", "personal" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
+    add("no_dividend_in_property_opex", "dividend" not in source_filter("property_opex_true").lower() and "dividendo" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
+    add("no_transfer_gasto_in_property_opex", "transfer" not in source_filter("property_opex_true").lower() and "gasto" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
     add("no_debt_principal_in_property_opex", "debt_movement" not in source_filter("property_opex_true") and "principal" not in source_filter("property_opex_true"), source_filter("property_opex_true"))
     return pd.DataFrame(rows, columns=OPERATING_STATEMENT_QA_COLUMNS)
 
