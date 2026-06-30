@@ -38,6 +38,7 @@ def load_frontier_sources(run_root: Path, metrics_dir: Path | None = None) -> di
         "monthly_operating_statement": _read_csv(run_root / "monthly_operating_statement.csv"),
         "monthly_cash_close": _read_csv(run_root / "monthly_cash_close.csv"),
         "monthly_debt_position": _read_csv(run_root / "monthly_debt_position.csv"),
+        "monthly_debt_activity": _read_csv(run_root / "monthly_debt_activity.csv"),
     }
     if metrics_dir is not None:
         sources["metric_registry"] = _read_csv(metrics_dir / "metric_registry.csv")
@@ -121,6 +122,7 @@ def build_metrics_frontier(run_root: Path, metrics_dir: Path, run_id: str, as_of
     statement = sources["monthly_operating_statement"]
     cash = sources["monthly_cash_close"]
     debt = sources["monthly_debt_position"]
+    debt_activity = sources["monthly_debt_activity"]
     metric_registry = sources.get("metric_registry")
     metric_values = sources.get("metric_values")
 
@@ -136,6 +138,7 @@ def build_metrics_frontier(run_root: Path, metrics_dir: Path, run_id: str, as_of
     split_status, split_validation, split_caveat = source_status(split)
     cash_status, cash_validation, cash_caveat = source_status(cash)
     debt_status, debt_validation, debt_caveat = source_status(debt)
+    debt_activity_status, debt_activity_validation, debt_activity_caveat = source_status(debt_activity)
 
     # Statement-backed clean metrics.
     stmt_defs = [
@@ -192,6 +195,9 @@ def build_metrics_frontier(run_root: Path, metrics_dir: Path, run_id: str, as_of
         for _, r in sub.iterrows():
             series.append(_series_row("ID.DEBT.OPEN.BY_COUNTERPARTY", r["period"], r["period_end"], r["Currency"], r["open_amount"], "monthly_debt_position.csv", run_id, as_of_date, "safe_with_caveat", True, False, False, "Internal debt/claim position, not operating expense or cash.", dimension_name="debtor_creditor", dimension_value=f"{r['debtor']} -> {r['creditor']}"))
 
+    # Debt activity compatibility: register the canonical activity source for future dashboards without emitting annual metrics yet.
+    rows.append(_contract_row("ID.DEBT.ACTIVITY", "Internal debt movement activity", "internal_debt", "flow", "monthly_debt_activity.csv", "future dashboard source for new claims, repayments, interest accruals, opening/closing movement and residual adjustments", suitability="unavailable" if debt_activity_status == "unavailable" else "safe_with_caveat", public=False, internal=True, caveat=debt_activity_caveat or "Debt activity movement source; not an operating statement and not a debt closing balance.", status="unavailable" if debt_activity_status == "unavailable" else "active", validation=debt_activity_validation, notes="compatibility contract only; no dashboard series emitted yet"))
+
     # More complete registry: carry selected legacy metrics as legacy-only definitions for consumers.
     legacy_ids = ["IS.NET.AFTER_COSTS", "IS.CONTRIB.TOTAL", "IS.DRAWS.PERSONAL", "BS.CASH.FB", "BS.CASH.PM", "BS.DEBT.TOTAL.OPEN", "BS.DEBT.PRINCIPAL.OPEN", "BS.DEBT.INTEREST.OPEN", "BS.DEBT.NET_PM_POSITION"]
     if metric_registry is not None and not metric_registry.empty:
@@ -245,7 +251,7 @@ def build_frontier_qa(frontier: pd.DataFrame, series: pd.DataFrame, cash: pd.Dat
     add("no_funding_in_operating_revenue", "funding" not in op_contract.lower(), op_contract)
     add("no_family_draws_in_property_opex", "family" not in opex_contract.lower() and "draw" not in opex_contract.lower(), opex_contract)
     debt_series = series.loc[series["metric_id"].eq("ID.DEBT.OPEN.BY_COUNTERPARTY")]
-    allowed_sources = {"monthly_operating_statement.csv", "monthly_flow_semantic_split.csv", "monthly_cash_close.csv", "monthly_debt_position.csv", "metric_values.csv"}
+    allowed_sources = {"monthly_operating_statement.csv", "monthly_flow_semantic_split.csv", "monthly_cash_close.csv", "monthly_debt_position.csv", "monthly_debt_activity.csv", "metric_values.csv"}
     used_sources = set(series["source_table"].dropna().astype(str)) if not series.empty and "source_table" in series.columns else set()
     add("frontend_series_uses_only_frontier_sources", used_sources.issubset(allowed_sources), f"used_sources={sorted(used_sources)}")
     add("no_cross_currency_sum", series.empty or series["Currency"].astype(str).str.strip().ne("").all(), "all frontend rows carry Currency; aggregations are by native currency")
@@ -259,6 +265,7 @@ def build_frontier_qa(frontier: pd.DataFrame, series: pd.DataFrame, cash: pd.Dat
         "monthly_flow_semantic_split.csv",
         "monthly_cash_close.csv",
         "monthly_debt_position.csv",
+        "monthly_debt_activity.csv",
     }
     source_contracts = {src: artifact_contract_for_name(src, src).get("source_authority") for src in used_sources}
     add("metrics_frontier_uses_canonical_sources_when_available", used_sources.issubset(canonical_sources | {"metric_values.csv"}), f"source_contracts={source_contracts}")
