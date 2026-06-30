@@ -12,6 +12,7 @@ from accounting.artifacts.manifest import artifact_contract_for_name, write_arti
 
 from .drilldown import build_metric_drilldown_artifacts
 from .frontier import build_metrics_frontier
+from .annual import build_annual_balance_dashboard
 from .builders import run_leaf_builders
 from .derive import derive_default_v1
 from .io import MetricsContext, ensure_metric_values_schema
@@ -285,6 +286,7 @@ def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, P
         "monthly_operating_statement.csv",
         "monthly_cash_close.csv",
         "monthly_debt_position.csv",
+        "monthly_debt_activity.csv",
     ]
     for rel in source_names:
         path = run_root / rel
@@ -316,7 +318,7 @@ def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, P
         columns=["check", "status", "detail", "severity"],
     )
     qa = pd.concat([qa, extra], ignore_index=True)
-    canonical_sources = {"monthly_flow_semantic_split.csv", "monthly_operating_statement.csv", "monthly_cash_close.csv", "monthly_debt_position.csv"}
+    canonical_sources = {"monthly_flow_semantic_split.csv", "monthly_operating_statement.csv", "monthly_cash_close.csv", "monthly_debt_position.csv", "monthly_debt_activity.csv"}
     existing_canonical = sorted(rel for rel in canonical_sources if (run_root / rel).exists())
     qa = pd.concat(
         [
@@ -671,6 +673,7 @@ def main() -> None:
     validation.to_csv(out_dir / VALIDATION_REPORT_FILENAME, index=False)
 
     frontier_paths = build_metrics_frontier(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=args.as_of_date)
+    annual_paths = build_annual_balance_dashboard(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=args.as_of_date)
 
     try:
         metric_values.to_parquet(out_dir / "metric_values.parquet", index=False)
@@ -693,6 +696,7 @@ def main() -> None:
         "n_metric_values_rows": int(len(metric_values)),
         "n_validation_rows": int(len(validation)),
         "frontier_outputs": {k: str(v) for k, v in frontier_paths.items()},
+        "annual_dashboard_outputs": {k: str(v) for k, v in annual_paths.items()},
         "builder_keys": builder_keys,
     }
     (out_dir / BUILD_MANIFEST_FILENAME).write_text(
