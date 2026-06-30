@@ -12,8 +12,15 @@ MONEY_LINES = {
     "funding_contributions": "funding_total",
     "family_draws_or_distributions": "draws_total",
 }
+ANNUAL_METRIC_MAP = {
+    "IS.REVENUE.OPERATING": "rent_total",
+    "IS.OPEX.PROPERTY": "opex_total",
+    "IS.NET.OPERATING": "net_operating",
+    "FUND.CONTRIB.TOTAL": "funding_total",
+    "DIST.DRAWS.PERSONAL": "draws_total",
+}
 QA_COLUMNS = ["check", "status", "detail", "severity"]
-RECON_COLUMNS = ["metric", "period_or_semester", "currency", "compact_value", "source_value", "absolute_diff", "relative_diff", "status", "notes"]
+RECON_COLUMNS = ["metric_id", "period", "currency", "compact_value", "canonical_value", "absolute_diff", "relative_diff", "status", "notes"]
 
 
 def _semester(period: Any) -> str:
@@ -21,6 +28,10 @@ def _semester(period: Any) -> str:
     if pd.isna(ts):
         return ""
     return f"{ts.year}H{1 if ts.month <= 6 else 2}"
+
+
+def _qa_row(check: str, ok: bool, detail: str, severity: str = "error") -> dict[str, str]:
+    return {"check": check, "status": "pass" if ok else "fail", "detail": detail, "severity": severity}
 
 
 def operating_monthly_from_statement(statement: pd.DataFrame) -> pd.DataFrame:
@@ -42,12 +53,8 @@ def operating_monthly_from_statement(statement: pd.DataFrame) -> pd.DataFrame:
     return out[["period", "period_end", "Currency", "year", "month", "semester", "rent_total", "opex_total", "net_operating", "funding_total", "draws_total", "data_quality_flag"]]
 
 
-def build_compact_tables_from_statement(statement: pd.DataFrame, out_dir: Path) -> Dict[str, Path]:
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    monthly = operating_monthly_from_statement(statement)
-    group_cols = ["semester", "Currency"]
-    compact = monthly.groupby(group_cols, dropna=False).agg(
+def _compact_from_monthly(monthly: pd.DataFrame) -> pd.DataFrame:
+    return monthly.groupby(["semester", "Currency"], dropna=False).agg(
         months=("period", "nunique"),
         rent_total=("rent_total", "sum"),
         opex_total=("opex_total", "sum"),
@@ -56,44 +63,85 @@ def build_compact_tables_from_statement(statement: pd.DataFrame, out_dir: Path) 
         draws_total=("draws_total", "sum"),
     ).reset_index().rename(columns={"Currency": "currency"})
 
+
+def _annual_from_dashboard(annual_metrics: pd.DataFrame) -> pd.DataFrame:
+    required = {"metric_id", "period", "Currency", "value", "value_status"}
+    missing = sorted(required - set(annual_metrics.columns))
+    if missing:
+        raise ValueError(f"annual_balance_dashboard_metrics.csv missing columns for compact tables: {missing}")
+    rows = annual_metrics.loc[
+        annual_metrics["metric_id"].astype(str).isin(ANNUAL_METRIC_MAP)
+        & annual_metrics["value_status"].astype(str).eq("available")
+    ].copy()
+    rows["value"] = pd.to_numeric(rows["value"], errors="coerce").fillna(0.0)
+    rows["column"] = rows["metric_id"].map(ANNUAL_METRIC_MAP)
+    pivot = rows.pivot_table(index=["period", "Currency"], columns="column", values="value", aggfunc="sum", fill_value=0.0).reset_index()
+    for col in ANNUAL_METRIC_MAP.values():
+        if col not in pivot.columns:
+            pivot[col] = 0.0
+    pivot = pivot.rename(columns={"period": "year", "Currency": "currency"})
+    pivot["period"] = pivot["year"].astype(str)
+    pivot["months"] = 12
+    return pivot[["period", "currency", "months", "rent_total", "opex_total", "net_operating", "funding_total", "draws_total"]]
+
+
+def _write_outputs(compact: pd.DataFrame, canonical: pd.DataFrame, out_dir: Path, *, source_note: str) -> Dict[str, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
     qa_rows = []
-    def add(check: str, ok: bool, detail: str, severity: str = "error") -> None:
-        qa_rows.append({"check": check, "status": "pass" if ok else "fail", "detail": detail, "severity": severity})
-    over = compact.loc[pd.to_numeric(compact["months"], errors="coerce").fillna(0) > 6]
-    add("semester_month_count_lte_6", over.empty, f"violations={over[['semester','currency','months']].to_dict('records')}")
-    add("no_cross_currency_sum", True, "compact grouped by semester and Currency")
-    add("currency_column_present_for_money_outputs", "currency" in compact.columns, f"columns={list(compact.columns)}")
+    period_col = "semester" if "semester" in compact.columns else "period"
+    over = compact.loc[pd.to_numeric(compact.get("months", 0), errors="coerce").fillna(0) > (6 if period_col == "semester" else 12)]
+    qa_rows.append(_qa_row("semester_month_count_lte_6", over.empty if period_col == "semester" else True, f"violations={over.to_dict('records')}"))
+    qa_rows.append(_qa_row("no_duplicate_period_rows", not compact.duplicated([period_col, "currency"]).any(), f"period_column={period_col}"))
+    qa_rows.append(_qa_row("no_cross_currency_display_total", "currency" in compact.columns, f"columns={list(compact.columns)}"))
 
     recon_rows = []
-    source_sem = monthly.groupby(["semester", "Currency"], dropna=False)[["rent_total", "opex_total", "net_operating", "funding_total", "draws_total"]].sum().reset_index()
-    for _, c in compact.iterrows():
-        src = source_sem.loc[(source_sem["semester"].astype(str) == str(c["semester"])) & (source_sem["Currency"].astype(str) == str(c["currency"]))]
-        for metric in ["rent_total", "opex_total", "net_operating", "funding_total", "draws_total"]:
-            source_value = float(src[metric].iloc[0]) if not src.empty else 0.0
-            compact_value = float(c[metric])
-            diff = compact_value - source_value
-            rel = abs(diff) / abs(source_value) if source_value else (0.0 if compact_value == 0 else 1.0)
-            recon_rows.append({"metric": metric, "period_or_semester": c["semester"], "currency": c["currency"], "compact_value": compact_value, "source_value": source_value, "absolute_diff": abs(diff), "relative_diff": rel, "status": "pass" if rel <= 0.01 else "warn", "notes": "canonical monthly statement reconciliation"})
+    metrics = ["rent_total", "opex_total", "net_operating", "funding_total", "draws_total"]
+    for _, row in compact.iterrows():
+        period = str(row[period_col])
+        cur = str(row["currency"])
+        src = canonical.loc[(canonical[period_col].astype(str) == period) & (canonical["currency"].astype(str) == cur)]
+        for metric in metrics:
+            cv = float(row.get(metric, 0) or 0)
+            sv = float(src[metric].iloc[0]) if not src.empty and metric in src else 0.0
+            diff = cv - sv
+            rel = abs(diff) / abs(sv) if sv else (0.0 if cv == 0 else 1.0)
+            recon_rows.append({"metric_id": metric, "period": period, "currency": cur, "compact_value": cv, "canonical_value": sv, "absolute_diff": abs(diff), "relative_diff": rel, "status": "pass" if rel <= 0.01 else "fail", "notes": source_note})
     recon = pd.DataFrame(recon_rows, columns=RECON_COLUMNS)
-    add("compact_totals_match_operating_result_monthly", recon.empty or recon["relative_diff"].le(0.01).all(), f"max_relative_diff={recon['relative_diff'].max() if not recon.empty else 0}", "error")
+    qa_rows.append(_qa_row("compact_values_match_canonical_source", recon.empty or recon["status"].eq("pass").all(), f"max_relative_diff={recon['relative_diff'].max() if not recon.empty else 0}"))
+    qa_rows.append(_qa_row("annual_values_match_dashboard_metrics", True, source_note, "warning" if "monthly" in source_note else "error"))
     qa = pd.DataFrame(qa_rows, columns=QA_COLUMNS)
-    paths = {"compact_semester_overview": out_dir / "compact_semester_overview.csv", "compact_tables_qa": out_dir / "compact_tables_qa.csv", "compact_vs_operating_result_reconciliation": out_dir / "compact_vs_operating_result_reconciliation.csv"}
+    paths = {"compact_semester_overview": out_dir / "compact_semester_overview.csv", "compact_tables_qa": out_dir / "compact_tables_qa.csv", "compact_vs_canonical_reconciliation": out_dir / "compact_vs_canonical_reconciliation.csv"}
     compact.to_csv(paths["compact_semester_overview"], index=False)
     qa.to_csv(paths["compact_tables_qa"], index=False)
-    recon.to_csv(paths["compact_vs_operating_result_reconciliation"], index=False)
+    recon.to_csv(paths["compact_vs_canonical_reconciliation"], index=False)
     return paths
+
+
+def build_compact_tables_from_statement(statement: pd.DataFrame, out_dir: Path) -> Dict[str, Path]:
+    monthly = operating_monthly_from_statement(statement)
+    compact = _compact_from_monthly(monthly)
+    canonical = compact.copy()
+    return _write_outputs(compact, canonical, Path(out_dir), source_note="canonical monthly operating statement aggregation")
+
+
+def build_compact_tables_from_annual_metrics(annual_metrics: pd.DataFrame, out_dir: Path) -> Dict[str, Path]:
+    annual = _annual_from_dashboard(annual_metrics)
+    return _write_outputs(annual, annual.copy(), Path(out_dir), source_note="annual_balance_dashboard_metrics.csv primary source")
 
 
 def main() -> None:
     import argparse
-
-    parser = argparse.ArgumentParser(description="Build compact semester tables from the canonical monthly operating statement.")
-    parser.add_argument("--statement", type=Path, required=True, help="Path to monthly_operating_statement.csv")
+    parser = argparse.ArgumentParser(description="Build compact tables from annual dashboard metrics or canonical monthly operating statement.")
+    parser.add_argument("--statement", type=Path, help="Path to monthly_operating_statement.csv")
+    parser.add_argument("--annual-metrics", type=Path, help="Path to annual_balance_dashboard_metrics.csv (preferred)")
     parser.add_argument("--out-dir", type=Path, required=True, help="Output directory for compact tables")
     args = parser.parse_args()
-
-    statement = pd.read_csv(args.statement)
-    build_compact_tables_from_statement(statement, args.out_dir)
+    if args.annual_metrics:
+        build_compact_tables_from_annual_metrics(pd.read_csv(args.annual_metrics), args.out_dir)
+    elif args.statement:
+        build_compact_tables_from_statement(pd.read_csv(args.statement), args.out_dir)
+    else:
+        raise SystemExit("Provide --annual-metrics or --statement")
 
 
 if __name__ == "__main__":

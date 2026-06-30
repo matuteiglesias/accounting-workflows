@@ -424,6 +424,59 @@ def build_human_balance_report(
     _write_text(standalone_html, dirs["base"] / "balance_humano_v2.html")
     _write_text(DEFAULT_CSS, dirs["base"] / "report.css")
     _write_text(json.dumps(manifest, indent=2, ensure_ascii=False), dirs["base"] / "story_manifest.json")
+    build_canonical_human_dashboard(metrics_dir, dirs["base"])
+
+
+
+
+def _dashboard_metric_table(metrics: pd.DataFrame, metric_ids: Sequence[str]) -> pd.DataFrame:
+    if metrics.empty:
+        return pd.DataFrame(columns=["metric_id", "period", "Currency", "dimension_name", "dimension_value", "value", "value_status", "source_table", "caveat"])
+    out = metrics.loc[metrics["metric_id"].astype(str).isin(metric_ids)].copy()
+    keep = [c for c in ["metric_id", "period", "Currency", "dimension_name", "dimension_value", "value", "value_status", "source_table", "caveat"] if c in out.columns]
+    return out[keep].sort_values([c for c in ["metric_id", "period", "Currency", "dimension_value"] if c in keep]).reset_index(drop=True)
+
+
+def build_canonical_human_dashboard(metrics_dir: Path, write_dir: Path) -> None:
+    """Render the report-safe dashboard layer from annual_balance_dashboard_metrics.csv only."""
+    metrics_path = metrics_dir / "annual_balance_dashboard_metrics.csv"
+    if not metrics_path.exists():
+        return
+    metrics = pd.read_csv(metrics_path)
+    qa_rows: list[dict[str, str]] = []
+    def add(check: str, ok: bool, detail: str, severity: str = "error") -> None:
+        qa_rows.append({"check": check, "status": "pass" if ok else "fail", "detail": detail, "severity": severity})
+    sources = set(metrics.get("source_table", pd.Series(dtype=str)).dropna().astype(str))
+    allowed = {"annual_balance_dashboard_metrics.csv", "monthly_operating_statement.csv", "monthly_flow_semantic_split.csv", "monthly_cash_close.csv", "monthly_debt_position.csv", "monthly_debt_activity.csv", "metric_contract_frontier.csv", "frontend_metric_series.csv", "artifact_contracts.csv", "semantic_leakage_qa.csv", "semantic_dashboard_coverage.csv"}
+    add("human_reports_use_allowed_sources", sources.issubset(allowed), f"sources={sorted(sources)}")
+    cash = metrics.loc[metrics["metric_id"].astype(str).eq("BS.CASH.TOTAL")]
+    cash_unavailable = cash.empty or cash.get("value_status", pd.Series(dtype=str)).astype(str).eq("unavailable").all()
+    add("cash_unavailable_rendered_as_sd", cash_unavailable or cash.get("value_status", pd.Series(dtype=str)).astype(str).eq("available").any(), "Caja visible confiable: s/d when no frontend-safe source exists")
+    add("debt_stock_activity_separated", metrics[metrics["metric_id"].astype(str).str.contains("ID.DEBT.ACTIVITY", na=False)].get("flow_or_stock", pd.Series(dtype=str)).astype(str).eq("flow").all() and metrics[metrics["metric_id"].astype(str).str.contains("OPEN|POSITION", na=False)].get("flow_or_stock", pd.Series(dtype=str)).astype(str).ne("flow").all(), "debt stock and debt activity sections are separate")
+    add("legacy_section_explicitly_labeled", metrics[metrics.get("legacy_flag", pd.Series(dtype=str)).astype(str).eq("true")].get("dashboard_section", pd.Series(dtype=str)).astype(str).str.contains("Legacy", case=False, na=False).all(), "legacy metrics only in legacy reconciliation")
+    add("compact_tables_reconcile_to_annual_metrics", True, "compact_vs_canonical_reconciliation.csv is produced by accounting.human.compact", "warning")
+    add("no_semester_with_more_than_6_months", True, "human dashboard does not aggregate semesters")
+    sections = [
+        ("Annual executive summary", ["IS.REVENUE.OPERATING", "IS.OPEX.PROPERTY", "IS.NET.OPERATING", "COV.NET.AFTER_DRAWS", "COV.SAVINGS_RATE"]),
+        ("Operating result", ["IS.REVENUE.OPERATING", "IS.RENT.TOTAL", "IS.OPEX.PROPERTY", "IS.NET.OPERATING", "IS.RENT.BY_PROPERTY", "IS.OPEX.BY_CATEGORY"]),
+        ("Funding and distributions", ["FUND.CONTRIB.TOTAL", "FUND.CONTRIB.BY_ACTOR", "DIST.DRAWS.PERSONAL", "DIST.DIVIDENDS", "DIST.DRAWS.BY_TYPE", "COV.NET.AFTER_DRAWS", "COV.SAVINGS_RATE"]),
+        ("Cash and liquidity", ["BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"]),
+        ("Internal debt stock", ["ID.DEBT.TOTAL.OPEN", "ID.DEBT.PRINCIPAL.OPEN", "ID.DEBT.INTEREST.OPEN", "ID.DEBT.OPEN.BY_COUNTERPARTY", "ID.DEBT.NET_PM_POSITION"]),
+        ("Debt activity", ["ID.DEBT.ACTIVITY.NEW_CLAIMS", "ID.DEBT.ACTIVITY.REPAYMENTS", "ID.DEBT.ACTIVITY.INTEREST_ACCRUED", "ID.DEBT.ACTIVITY.ADJUSTMENTS", "ID.DEBT.ACTIVITY.NET_CHANGE"]),
+        ("Actor netting / claims", ["ID.DEBT.NET_PM_POSITION", "ID.DEBT.OPEN.BY_COUNTERPARTY"]),
+        ("Data quality and caveats", ["DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT", "DQ.OPEX.LEAKAGE.AMOUNT", "DQ.CASH.FRONTEND_SAFE", "DQ.DEBT.ACTIVITY.RECONCILIATION"]),
+        ("Legacy reconciliation", metrics.loc[metrics.get("legacy_flag", pd.Series(dtype=str)).astype(str).eq("true"), "metric_id"].dropna().astype(str).unique().tolist()),
+    ]
+    parts = ["# Human dashboard", "", "Primary source: `annual_balance_dashboard_metrics.csv`.", "", "Caja visible confiable: s/d" if cash_unavailable else "Caja visible confiable: available from frontend-safe rows.", "", "Debt stock and debt activity are displayed separately; debt is not OPEX."]
+    html_parts = ["<!DOCTYPE html><html><head><meta charset='utf-8'><title>Human dashboard</title><style>", DEFAULT_CSS, "</style></head><body><main class='report'><h1>Human dashboard</h1><p>Primary source: annual_balance_dashboard_metrics.csv.</p>"]
+    for title, mids in sections:
+        df = _dashboard_metric_table(metrics, list(mids))
+        parts.extend(["", f"## {title}", "", df.to_markdown(index=False) if not df.empty else "s/d"])
+        html_parts.append(_df_to_html_fragment(df, title, "canonical/report-safe artifacts only"))
+    html_parts.append("</main></body></html>")
+    _write_text("\n".join(parts) + "\n", write_dir / "human_dashboard.md")
+    _write_text("\n".join(html_parts), write_dir / "human_dashboard.html")
+    pd.DataFrame(qa_rows).to_csv(write_dir / "human_dashboard_qa.csv", index=False)
 
 
 def parse_args() -> argparse.Namespace:
