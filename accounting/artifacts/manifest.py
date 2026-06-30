@@ -273,6 +273,26 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "frontend_contract",
             "notes": "Frontend metric series; suitability is carried at row/metric level.",
         }
+    if key == "annual_balance_dashboard_metrics.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "mixed",
+            "grain": "annual",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "row_level_or_metric_level",
+            "source_authority": "frontend_contract",
+            "notes": "Annual dashboard-ready metric series built only from canonical monthly/frontier contracts.",
+        }
+    if key == "annual_balance_dashboard_contract.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "mixed",
+            "grain": "annual",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "frontend_contract",
+            "notes": "Contract for annual dashboard metrics, including source, aggregation rule, suitability, and legacy demotion metadata.",
+        }
     if key.endswith("_qa.csv") or "qa" in key:
         return {
             "artifact_role": "qa",
