@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import hashlib
 import mimetypes
 import os
@@ -17,6 +18,7 @@ Pathish = Union[str, os.PathLike, Path]
 
 ARTIFACT_ROLES = [
     "canonical_source",
+    "canonical_rule_contract",
     "diagnostic",
     "internal_balance",
     "inferred_reconciliation",
@@ -26,8 +28,8 @@ ARTIFACT_ROLES = [
     "qa",
     "meta",
 ]
-ACCOUNTING_NATURES = ["transaction", "flow", "stock", "ratio", "quality", "mixed", "unknown"]
-GRAINS = ["tx", "daily", "monthly", "quarterly", "annual", "period_close", "mixed"]
+ACCOUNTING_NATURES = ["transaction", "flow", "stock", "ratio", "quality", "rules", "mixed", "unknown"]
+GRAINS = ["tx", "daily", "monthly", "quarterly", "annual", "period_close", "rule", "dashboard_line", "mixed"]
 CURRENCY_POLICIES = [
     "explicit_currency_required",
     "by_currency",
@@ -55,6 +57,9 @@ SOURCE_AUTHORITIES = [
     "source_of_truth_for_debt_stock",
     "source_of_truth_for_debt_activity",
     "frontend_contract",
+    "source_of_truth_for_semantic_rules",
+    "diagnostic_evidence",
+    "semantic_coverage_contract",
 ]
 
 CONTRACT_COLUMNS = [

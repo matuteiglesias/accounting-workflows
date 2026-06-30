@@ -148,9 +148,11 @@ _update_latest:
 			ls -lah "$$latest"; \
 		}; \
 		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
+		link_swap "$(OUT)/debt_resolution" "$(RUN_REL)"; \
 		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
 		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
-	'	link_swap "$(OUT)/debt_resolution" "$(RUN_REL)";
+		echo "[LATEST] updated run,debt,metrics,human latest links"; \
+	'
 
 # ----------------------------------------
 # Help
@@ -158,38 +160,40 @@ _update_latest:
 .PHONY: help
 help:
 	@echo ""
-	@echo "Accounting backend command surface"
+	@echo "Accounting backend control plane"
 	@echo ""
-	@echo "Core pipeline (canonical):"
-	@echo "  make ledger         # source inputs -> canonical ledger"
-	@echo "  make materialize    # canonical ledger -> Stage D analytical artifacts"
-	@echo "  make debt           # resolve internal debt contracts"
-	@echo "  make debt-views     # debt contracts -> balance views"
-	@echo "  make metrics        # analytical artifacts -> metric contracts"
-	@echo "  make human-report   # metric/debt contracts -> current human report"
-	@echo "  make publish-latest # latest artifacts -> public/accounting/latest snapshot"
+	@echo "Doctor / validate:"
+	@echo "  make doctor             # env + compile checks; no Google Sheets required"
+	@echo "  make validate           # static + artifact contract validation; no private env"
 	@echo ""
-	@echo "Composite:"
-	@echo "  make build-all      # full canonical path through publish"
-	@echo "  make build-report   # full current report path, no publish"
-	@echo "  make build-front    # publish latest frontend snapshot"
+	@echo "Fixture / smoke:"
+	@echo "  make smoke-core         # fixture ingest -> materialize -> semantic/cash wrappers"
+	@echo "  make smoke-full         # fixture-safe smoke bundle; currently core + validation + publish dry-run"
+	@echo "  make smoke              # compatibility alias for smoke-core"
 	@echo ""
-	@echo "Support:"
-	@echo "  make doctor         # compile-check key command modules"
-	@echo "  make smoke          # fixture/offline smoke path through marts/views"
-	@echo "  make validate       # lightweight command-surface checks"
-	@echo "  make clean-derived  # remove derived accounting outputs"
+	@echo "Live canonical / metrics / dashboard / human:"
+	@echo "  make run-canonical      # live ingest -> materialize -> marts -> debt wrappers"
+	@echo "  make metrics-from-run   # metrics from existing RUN_OUT/RUN_STAMP; no upstream live ingest"
+	@echo "  make run-metrics        # alias for metrics-from-run"
+	@echo "  make run-metrics-live   # orchestrate live upstream then metrics"
+	@echo "  make run-dashboard      # assert annual dashboard outputs from metrics"
+	@echo "  make run-human          # build human report from existing metrics/run artifacts"
+	@echo "  make run-full           # full live pipeline -> publish -> release-check"
 	@echo ""
-	@echo "Experimental:"
-	@echo "  make front-report   # future/stub front-oriented report factory"
+	@echo "Publish / release:"
+	@echo "  make publish-latest     # package latest artifacts only"
+	@echo "  make release-check      # validate public/accounting/latest readiness"
 	@echo ""
-	@echo "Compatibility / lower-level run targets:"
-	@echo "  make run-ingest | run-materialize | run-marts | run-debt | run-debt-views"
-	@echo "  make run-metrics | run-human-report | run-human-balance | run-accounting | run-accounting-full"
-	@echo "  make run-downstream-from-ledger | run-metrics-and-human | run-human-balance-only"
+	@echo "Legacy compatibility aliases:"
+	@echo "  make ledger | materialize | debt | debt-views | metrics | human-report | publish | build-all"
+	@echo "  make run-accounting | run-accounting-full | run-human-balance | run-debt-balance"
+	@echo ""
+	@echo "Diagnostics / cleanup / experimental:"
+	@echo "  make clean-derived      # remove derived accounting outputs"
+	@echo "  make front-report       # presentation-only report factory stub"
 	@echo ""
 	@echo "Key vars:"
-	@echo "  OUT=out  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
+	@echo "  OUT=out  RUN_STAMP=<run-id>  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
 	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
 	@echo "  ACCOUNT_SA=/path/to/sa.json  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
 	@echo ""
@@ -223,7 +227,7 @@ publish: publish-latest
 
 # Composite names: one clear path for full builds and frontend handoff.
 .PHONY: build-all build-report build-front
-build-all: build-report publish-latest
+build-all: run-full
 
 build-report: human-report
 
@@ -274,7 +278,8 @@ doctor:
 
 validate: doctor
 	@$(MAKE) help >/dev/null
-	@echo "make help ok"
+	@$(PY) scripts/check_contracts.py
+	@echo "make help and contract validation ok"
 
 clean-derived:
 	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest"
@@ -294,12 +299,33 @@ front-report:
 		--include-statuses "$(INCLUDE_STATUSES)" \
 		--noise-floor "$(NOISE_FLOOR)"
 
-.PHONY: smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
+.PHONY: smoke-core smoke-full run-canonical run-full run-dashboard run-human metrics-from-run run-metrics-live smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
 
-smoke-accounting: smoke-views
+smoke-core: smoke-ingest
+	@$(call _guard_out_dir,$(SMOKE_OUT))
+	@$(PY) -m accounting.stage_d.materialize --out-dir "$(SMOKE_OUT)" --freq "$(FREQ)" --force 1 --mode smoke --run-id "$(SMOKE_RUN_ID)"
+	@test -s "$(SMOKE_OUT)/classification_audit.csv"
+	@test -s "$(SMOKE_OUT)/classification_audit_summary.csv"
+	@test -s "$(SMOKE_OUT)/monthly_flow_semantic_split.csv"
+	@test -s "$(SMOKE_OUT)/monthly_operating_statement.csv"
+	@test -s "$(SMOKE_OUT)/monthly_operating_statement_qa.csv"
+	@test -s "$(SMOKE_OUT)/semantic_leakage_qa.csv"
+	@test -s "$(SMOKE_OUT)/monthly_cash_close.csv"
+	@test -s "$(SMOKE_OUT)/monthly_cash_close_qa.csv"
+	@echo "smoke-core passed fixture ingest/materialize semantic and cash wrapper checks"
+
+smoke-full: smoke-core validate
+	@$(PY) -m accounting.publish.latest --project-root "$(ROOT)" --dry-run >/dev/null
+	@echo "smoke-full partial: fixture core + validation + publish dry-run passed; fixture debt/human publish remains documented follow-up"
+
+smoke-accounting: smoke-core
+
+run-canonical: run-debt-views
+
+run-full: run-canonical run-metrics run-dashboard run-human publish-latest release-check
 
 run-accounting: run-accounting-full
-run-accounting-full: run-human-report
+run-accounting-full: run-full
 
 run-downstream-from-ledger:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -502,7 +528,11 @@ _run_debt_balance_action:
 
 
 .PHONY: run-metrics _run_metrics_action
-run-metrics: run-debt-views _run_metrics_action
+run-metrics: metrics-from-run
+
+metrics-from-run: _run_metrics_action
+
+run-metrics-live: run-debt-views _run_metrics_action
 
 _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -536,7 +566,14 @@ _run_metrics_action:
 
 
 .PHONY: run-human-report run-human-balance _run_human_balance_action
-run-human-report: run-metrics _run_human_balance_action
+run-human-report: run-human
+
+run-human: _run_human_balance_action
+
+run-dashboard: run-metrics
+	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_metrics.csv"
+	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_contract.csv"
+	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_qa.csv"
 
 # Compatibility alias; prefer run-human-report.
 run-human-balance: run-human-report
@@ -597,8 +634,11 @@ _check_views:
 # Aliases / convenience
 # ========================================
 
-.PHONY: smoke run-all run
-smoke: smoke-accounting
+.PHONY: release-check smoke run-all run
+release-check:
+	@$(PY) scripts/check_release.py --public-root "$(ROOT)/public/accounting/latest"
+
+smoke: smoke-core
 run: run-accounting
 run-all: run-accounting
 	@echo "[RUN] done. latest -> $(RUN_REL)"
