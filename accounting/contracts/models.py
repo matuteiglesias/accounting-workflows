@@ -19,8 +19,14 @@ class TxStatus(str, Enum):
 
 class Money(BaseModel):
     amount: float = Field(..., ge=0)
-    currency: Currency = Currency.ARS
+    currency: Currency
     rate: Optional[float] = None  # FX rate to base (if present)
+
+    @validator("currency", pre=True)
+    def require_explicit_currency(cls, v):
+        if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "":
+            raise ValueError("Money.currency must be explicit for accounting artifacts")
+        return str(v).strip().upper()
 
     def to_base(self, base_currency: Currency = Currency.USD) -> float:
         if self.currency == base_currency:

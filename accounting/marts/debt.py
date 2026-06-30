@@ -119,6 +119,8 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
         {"check": "has_monthly_periods", "status": "pass" if out["period"].astype(str).str.match(r"^\d{4}-\d{2}$").all() else "fail", "detail": f"periods={out['period'].nunique() if not out.empty else 0}", "severity": "error"},
         {"check": "total_reconciles_to_source", "status": "pass" if abs(source_total - wrapper_total) < 0.01 else "fail", "detail": f"source_total={source_total}; wrapper_total={wrapper_total}", "severity": "error"},
         {"check": "no_cross_currency_sum", "status": "pass", "detail": "all rows remain currency-grained", "severity": "error"},
+        {"check": "frontend_outputs_have_suitability", "status": "pass" if "frontend_suitability" in out.columns and out["frontend_suitability"].astype(str).str.strip().ne("").all() else "fail", "detail": "debt wrapper rows carry suitability", "severity": "error"},
+        {"check": "money_outputs_have_currency", "status": "pass" if out["Currency"].astype(str).str.strip().ne("").all() else "fail", "detail": "debt wrapper rows carry Currency", "severity": "error"},
     ]
     _qa(qa_rows).to_csv(qa_path, index=False)
     return {"monthly_debt_position": out_path, "monthly_debt_position_qa": qa_path}

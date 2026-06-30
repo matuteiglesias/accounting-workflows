@@ -138,10 +138,12 @@ def _compute_in_out_net(df: pd.DataFrame, signed_col: str = "signed") -> pd.Data
 # -----------------------
 def load_reports_folder(reports_dir: Path, freq: str = "M") -> Dict[str, Any]:
     """
-    Load Stage D artifacts (materialize outputs) plus optional legacy report artifacts.
+    Load materialized evidence artifacts plus optional legacy report artifacts.
 
     Contract:
-      - Stage D artifacts are the source of truth for Views.
+      - Stage D artifacts are diagnostic/materialized evidence, not dashboard truth.
+      - Canonical dashboard/reporting sources are semantic, cash, debt marts and frontier outputs.
+      - Legacy views may still consume Stage D for compatibility, but must be marked presentation_only or legacy.
       - Legacy report artifacts (fondos_report.csv, renta_*.csv) are best-effort only and must never be required.
     """
     reports_dir = Path(reports_dir)

@@ -723,7 +723,13 @@ def main() -> int:
     meta_dir = out_dir / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
 
-    from accounting.artifacts.manifest import artifact_from_path, write_stage_manifest, append_artifacts
+    from accounting.artifacts.manifest import (
+        append_artifacts,
+        artifact_from_path,
+        write_artifact_contract_qa,
+        write_artifact_contracts_csv,
+        write_stage_manifest,
+    )
 
     stage_generated_at = pd.Timestamp.now("UTC").isoformat()
 
@@ -864,6 +870,46 @@ def main() -> int:
             )
         )
 
+    known_relpaths = {art["relpath"] for art in [in_art, *out_arts]}
+    for filename, meta in sorted(result.get("aggregates", {}).items()):
+        if not isinstance(meta, dict) or not meta.get("path"):
+            continue
+        path = Path(meta["path"])
+        if not path.exists():
+            continue
+        relpath = str(path.resolve().relative_to(out_dir.resolve()))
+        if relpath in known_relpaths:
+            continue
+        out_arts.append(
+            artifact_from_path(
+                name=path.stem,
+                path=path,
+                stage="D.materialize",
+                mode=args.mode,
+                run_id=run_id,
+                role="derived",
+                root_dir=out_dir,
+                content_type="text/csv" if path.suffix.lower() == ".csv" else None,
+            )
+        )
+        known_relpaths.add(relpath)
+
+    contract_path = write_artifact_contracts_csv(out_dir / "artifact_contracts.csv", [in_art, *out_arts])
+    qa_path = write_artifact_contract_qa(out_dir / "artifact_contract_qa.csv", [in_art, *out_arts])
+    for contract_artifact, contract_name in [(contract_path, "artifact_contracts"), (qa_path, "artifact_contract_qa")]:
+        out_arts.append(
+            artifact_from_path(
+                name=contract_name,
+                path=contract_artifact,
+                stage="D.materialize",
+                mode=args.mode,
+                run_id=run_id,
+                role="derived",
+                root_dir=out_dir,
+                content_type="text/csv",
+            )
+        )
+
     stage_manifest = {
         "generated_at": stage_generated_at,  # fixes created_at=None downstream
         "stage": "D.materialize",
@@ -885,7 +931,7 @@ def main() -> int:
     stage_manifest_rel = write_stage_manifest(meta_dir, stage_manifest)
 
     stage_meta_path = out_dir / stage_manifest_rel
-    stage_meta_sha = artifact_from_path(
+    stage_meta_art = artifact_from_path(
         name="stage_D_materialize",
         path=stage_meta_path,
         stage="D.materialize",
@@ -894,21 +940,7 @@ def main() -> int:
         role="meta",
         root_dir=out_dir,
         content_type="application/json",
-    )["sha256"]
-
-    stage_meta_art = {
-        "run_id": run_id,
-        "stage": "D.materialize",
-        "mode": args.mode,
-        "name": "stage_D_materialize",
-        "relpath": stage_manifest_rel,
-        "sha256": stage_meta_sha,
-        "bytes": stage_meta_path.stat().st_size,
-        "rows": None,
-        "content_type": "application/json",
-        "created_at": stage_manifest.get("generated_at"),
-        "role": "meta",
-    }
+    )
 
     append_artifacts(meta_dir, [in_art, *out_arts, stage_meta_art])
     LOG.info("Stage finish outputs=%s partitions=%s", aggregate_rows, result.get("partitions_path"))

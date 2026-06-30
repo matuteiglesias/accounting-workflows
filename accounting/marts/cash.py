@@ -118,6 +118,8 @@ def build_monthly_cash_close(out_dir: Path, freq: str = "M") -> Dict[str, Path]:
         {"check": "no_cash_total_without_frontend_safe_rows", "status": "pass", "detail": "no aggregate frontend-safe cash total emitted", "severity": "error"},
         {"check": "cash_close_by_currency_present", "status": "pass" if out["Currency"].astype(str).str.strip().ne("").any() else "fail", "detail": ",".join(sorted(out["Currency"].dropna().astype(str).unique())), "severity": "error"},
         {"check": "cash_close_caveats_present", "status": "pass" if caveats_present else "fail", "detail": "all rows have caveats" if caveats_present else "missing caveat", "severity": "error"},
+        {"check": "daily_cash_position_not_frontend_safe", "status": "pass" if not out["source_table"].astype(str).eq("daily_cash_position.csv").any() or out.loc[out["source_table"].astype(str).eq("daily_cash_position.csv"), "is_frontend_safe"].astype(bool).eq(False).all() else "fail", "detail": "daily cash rows are internal-only", "severity": "error"},
+        {"check": "box_balance_not_frontend_safe", "status": "pass" if not out["position_type"].astype(str).eq("inferred_box_motor").any() or out.loc[out["position_type"].astype(str).eq("inferred_box_motor"), "is_frontend_safe"].astype(bool).eq(False).all() else "fail", "detail": "box motor rows are reconciliation-only", "severity": "error"},
     ]
     _qa(qa_rows).to_csv(qa_path, index=False)
     return {"monthly_cash_close": close_path, "monthly_cash_close_qa": qa_path}

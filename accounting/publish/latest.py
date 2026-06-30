@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from accounting.publish.manifest import build_frontend_snapshot_manifest
+from accounting.artifacts.manifest import artifact_contract_for_name, write_artifact_contracts_csv
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,29 @@ def publish_selected_files(src_root: Path, dst_root: Path, rel_paths: list[str],
     return published
 
 
+def _published_contract_row(public_relpath: str) -> dict[str, Any]:
+    public_rel = Path(public_relpath)
+    contract = artifact_contract_for_name(public_rel.name, str(public_rel))
+    if contract["artifact_role"] == "canonical_source" and contract["source_authority"] in {"frontend_contract", "source_of_truth", "source_of_truth_for_debt_stock", "source_of_truth_for_cash_only_when_is_frontend_safe_true"}:
+        publish_class = "public_contract"
+    elif contract["artifact_role"] == "presentation_only":
+        publish_class = "presentation_only"
+    elif contract["artifact_role"] == "legacy":
+        publish_class = "legacy_compatibility"
+    elif contract["frontend_suitability"] in {"forbidden", "internal_only"}:
+        publish_class = "unsafe_for_frontend" if contract["frontend_suitability"] == "forbidden" else "internal_diagnostic"
+    else:
+        publish_class = "internal_diagnostic"
+    return {"name": public_rel.name, "relpath": str(public_rel), "publish_class": publish_class, **contract}
+
+
+def write_publish_artifact_contracts(paths: PublishPaths, files: list[str]) -> str:
+    rows = [_published_contract_row(rel) for rel in files if rel != "manifest.json"]
+    out = paths.public_root / "artifact_contracts.csv"
+    write_artifact_contracts_csv(out, rows)
+    return relative_to_project(out, paths.project_root)
+
+
 def publish_metrics(paths: PublishPaths, mode: str) -> dict[str, Any]:
     dst_root = paths.public_root / "metrics"
     published = publish_selected_files(paths.metrics_latest, dst_root, METRIC_FILES, mode)
@@ -227,6 +251,8 @@ def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], met
     build_manifest = read_json(build_manifest_path) if build_manifest_path.exists() else {}
     source_run_id = build_manifest.get("run_id") or story_manifest.get("run_root", "").split("/")[-1] or None
 
+    files = _snapshot_file_list(report_info, metrics_info, debt_info)
+    contracts_rel = write_publish_artifact_contracts(paths, files)
     return build_frontend_snapshot_manifest(
         source_run_id=source_run_id,
         status="ok",
@@ -236,7 +262,7 @@ def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], met
             "debt_latest": relative_to_project(paths.debt_latest, paths.project_root),
             "public_root": relative_to_project(paths.public_root, paths.project_root),
         },
-        files=_snapshot_file_list(report_info, metrics_info, debt_info),
+        files=sorted(set([*files, "artifact_contracts.csv"])),
         metrics=metrics_info,
         debt=debt_info,
         reports={"balance_human_v2": report_info},
@@ -254,6 +280,14 @@ def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], met
                 {"id": "report", "title": "Reporte", "path": "/report"},
                 {"id": "debt", "title": "Deudas", "path": "/debt"},
             ],
+            "artifact_contracts": "artifact_contracts.csv",
+            "publish_contract_summary": {
+                "public_contract": "metric frontier/series and explicitly safe contracts",
+                "presentation_only": "human or metric convenience views",
+                "legacy_compatibility": "kept for compatibility; not source of truth",
+                "internal_diagnostic": "internal evidence only",
+                "unsafe_for_frontend": "must not be displayed as dashboard fact",
+            },
         },
     )
 
