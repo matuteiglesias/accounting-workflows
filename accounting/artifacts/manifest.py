@@ -82,6 +82,36 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "source_of_truth",
             "notes": "Canonical transaction ledger; downstream reports should prefer semantic/cash/debt marts.",
         }
+    if key == "semantic_rule_registry.csv":
+        return {
+            "artifact_role": "canonical_rule_contract",
+            "accounting_nature": "rules",
+            "grain": "rule",
+            "currency_policy": "not_money",
+            "frontend_suitability": "internal_only",
+            "source_authority": "source_of_truth_for_semantic_rules",
+            "notes": "Auditable governed semantic classification rule registry.",
+        }
+    if key in {"classification_audit.csv", "classification_audit_summary.csv", "classification_validation.csv"}:
+        return {
+            "artifact_role": "diagnostic",
+            "accounting_nature": "flow",
+            "grain": "tx" if key == "classification_audit.csv" else "mixed",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only",
+            "source_authority": "diagnostic_evidence",
+            "notes": "Semantic classification audit evidence; monthly semantic split and operating statement are canonical for dashboard aggregation.",
+        }
+    if key == "semantic_dashboard_coverage.csv":
+        return {
+            "artifact_role": "qa",
+            "accounting_nature": "quality",
+            "grain": "dashboard_line",
+            "currency_policy": "not_money",
+            "frontend_suitability": "internal_only",
+            "source_authority": "semantic_coverage_contract",
+            "notes": "Coverage map for intended dashboard lines supported by semantic outputs.",
+        }
     if key.startswith("monthly_flow_semantic_split"):
         return {
             "artifact_role": "canonical_source",
