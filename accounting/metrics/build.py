@@ -8,6 +8,7 @@ from typing import Optional
 import pandas as pd
 
 from accounting.logging_utils import configure_logging, get_logger
+from accounting.artifacts.manifest import artifact_contract_for_name, write_artifact_contract_qa, write_artifact_contracts_csv
 
 from .drilldown import build_metric_drilldown_artifacts
 from .frontier import build_metrics_frontier
@@ -31,6 +32,8 @@ METRIC_REGISTRY_FILENAME = "metric_registry.csv"
 LOG = get_logger("metrics")
 VALIDATION_REPORT_FILENAME = "validation_report.csv"
 BUILD_MANIFEST_FILENAME = "build_manifest.json"
+SOURCE_CONTRACT_QA_FILENAME = "source_contract_qa.csv"
+ARTIFACT_CONTRACTS_FILENAME = "artifact_contracts.csv"
 METRIC_VIEWS_DIRNAME = "metric_views"
 REQUIRED_METRIC_VIEW_FILES = [
     "income_statement_monthly_last6.csv",
@@ -267,6 +270,72 @@ def build_statement_views(metric_values: pd.DataFrame, out_dir: Path) -> None:
             .reset_index()
         )
         wide.to_csv(out_dir / name, index=False)
+
+
+def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, Path]:
+    """Write source-role metadata for metrics outputs without changing formulas."""
+    artifact_rows: list[dict] = []
+    source_names = [
+        "ledger_canonical.csv",
+        "per_flow_time_long.freq=M.csv",
+        "daily_cash_position.csv",
+        "views/v_contributions_monthly.csv",
+        "views/v_opex_category_monthly.csv",
+        "monthly_flow_semantic_split.csv",
+        "monthly_operating_statement.csv",
+        "monthly_cash_close.csv",
+        "monthly_debt_position.csv",
+    ]
+    for rel in source_names:
+        path = run_root / rel
+        contract = artifact_contract_for_name(path.name, rel)
+        artifact_rows.append({"name": path.stem, "relpath": rel, **contract, "exists": path.exists()})
+
+    for path in sorted(out_dir.glob("*.csv")) + sorted((out_dir / METRIC_VIEWS_DIRNAME).glob("*.csv")):
+        rel = str(path.relative_to(out_dir))
+        contract = artifact_contract_for_name(path.name, rel)
+        artifact_rows.append({"name": path.stem, "relpath": rel, **contract, "exists": path.exists()})
+
+    contracts_path = write_artifact_contracts_csv(out_dir / ARTIFACT_CONTRACTS_FILENAME, artifact_rows)
+    qa_path = write_artifact_contract_qa(out_dir / SOURCE_CONTRACT_QA_FILENAME, artifact_rows)
+
+    qa = pd.read_csv(qa_path)
+    warnings = [
+        ("metrics_raw_source_loaded", "ledger_canonical.csv", "ledger_canonical is loaded for legacy/presentation views only."),
+        ("metrics_raw_source_loaded", "per_flow_time_long.freq=M.csv", "per_flow_time_long is diagnostic and must not be presented as frontier truth."),
+        ("metrics_raw_source_loaded", "daily_cash_position.csv", "daily_cash_position is internal balance, not cash."),
+        ("metrics_legacy_view_source_loaded", "views/v_contributions_monthly.csv", "legacy contribution view is compatibility-only."),
+        ("metrics_legacy_view_source_loaded", "views/v_opex_category_monthly.csv", "legacy opex view is compatibility-only."),
+    ]
+    extra = pd.DataFrame(
+        [
+            {"check": check, "status": "warn", "detail": f"{rel}: {detail}", "severity": "warning"}
+            for check, rel, detail in warnings
+            if (run_root / rel).exists()
+        ],
+        columns=["check", "status", "detail", "severity"],
+    )
+    qa = pd.concat([qa, extra], ignore_index=True)
+    canonical_sources = {"monthly_flow_semantic_split.csv", "monthly_operating_statement.csv", "monthly_cash_close.csv", "monthly_debt_position.csv"}
+    existing_canonical = sorted(rel for rel in canonical_sources if (run_root / rel).exists())
+    qa = pd.concat(
+        [
+            qa,
+            pd.DataFrame(
+                [
+                    {
+                        "check": "metrics_frontier_uses_canonical_sources_when_available",
+                        "status": "pass" if existing_canonical else "warn",
+                        "detail": f"canonical_sources={existing_canonical}",
+                        "severity": "warning",
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    qa.to_csv(qa_path, index=False)
+    return {"artifact_contracts": contracts_path, "source_contract_qa": qa_path}
 
 
 def build_debt_metric_views(ctx: MetricsContext, out_dir: Path) -> None:
@@ -656,6 +725,13 @@ def main() -> None:
         out_dir=out_dir,
         run_id=run_id,
         include_statuses=include_statuses,
+    )
+
+    contract_paths = build_metrics_source_contracts(run_root=run_root, out_dir=out_dir)
+    manifest["source_contract_outputs"] = {k: str(v) for k, v in contract_paths.items()}
+    (out_dir / BUILD_MANIFEST_FILENAME).write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
 
     if not validation.empty:

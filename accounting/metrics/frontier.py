@@ -5,6 +5,8 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from accounting.artifacts.manifest import artifact_contract_for_name
+
 FRONTIER_COLUMNS = [
     "metric_id", "label", "semantic_category", "flow_or_stock", "period_grain", "currency_mode",
     "source_table", "calculation_rule", "lineage_inputs", "frontend_suitability", "public_flag",
@@ -252,6 +254,14 @@ def build_frontier_qa(frontier: pd.DataFrame, series: pd.DataFrame, cash: pd.Dat
     add("debt_metrics_currency_separated", debt_series.empty or debt_series["Currency"].astype(str).str.strip().ne("").all(), f"rows={len(debt_series)}")
     add("no_debt_stock_mixed_with_ars_flow_without_currency", debt_series.empty or (debt_series["Currency"].astype(str).str.strip().ne("").all() and debt_series["metric_id"].astype(str).str.startswith("ID.DEBT").all()), f"debt_rows={len(debt_series)}")
     add("wide_tables_not_used_as_canonical_sources", not any("wide" in src.lower() or "pivot" in src.lower() for src in used_sources), f"used_sources={sorted(used_sources)}")
+    canonical_sources = {
+        "monthly_operating_statement.csv",
+        "monthly_flow_semantic_split.csv",
+        "monthly_cash_close.csv",
+        "monthly_debt_position.csv",
+    }
+    source_contracts = {src: artifact_contract_for_name(src, src).get("source_authority") for src in used_sources}
+    add("metrics_frontier_uses_canonical_sources_when_available", used_sources.issubset(canonical_sources | {"metric_values.csv"}), f"source_contracts={source_contracts}")
     add("notebooks_do_not_classify_flows", True, "enforced by backend frontier contract; notebook static audit documented separately", "warning")
     add("classification_quality_metrics_present", {"DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT"}.issubset(ids), "DQ metrics present")
     public = frontier.loc[frontier["public_flag"].astype(str).eq("true")]
