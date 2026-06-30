@@ -6,11 +6,32 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
-RULE_VERSION = "semantic_pr1_2026-06-27"
+RULE_VERSION = "semantic_pr2_2026-06-30"
+RULE_REGISTRY_COLUMNS = [
+    "rule_id", "rule_version", "priority", "rule_name", "match_fields", "match_pattern",
+    "semantic_bucket", "semantic_subbucket", "direction", "direction_source",
+    "classification_confidence", "review_required", "warning", "notes", "active",
+]
+SEMANTIC_RULES = [
+    {"rule_id":"R011_personal_expense_text","priority":10,"rule_name":"Personal expense text","match_fields":"Detalle,notes","match_pattern":"gastos personales","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"personal_expense","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Personal/family expenses are distribution candidates, never property OPEX.","active":True},
+    {"rule_id":"R001_rent_collections","priority":20,"rule_name":"Rent collections","match_fields":"Flujo,Tipo","match_pattern":"Flujo=cobros; Tipo=renta","semantic_bucket":"operating_revenue","semantic_subbucket":"rent","direction":"in","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"Operating rent revenue only.","active":True},
+    {"rule_id":"R002_property_taxes","priority":30,"rule_name":"Property taxes","match_fields":"Tipo","match_pattern":"impuestos","semantic_bucket":"property_opex","semantic_subbucket":"taxes","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
+    {"rule_id":"R003_property_services","priority":40,"rule_name":"Property services","match_fields":"Tipo","match_pattern":"servicio|servicios","semantic_bucket":"property_opex","semantic_subbucket":"services","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
+    {"rule_id":"R004_property_maintenance","priority":50,"rule_name":"Property maintenance","match_fields":"Tipo","match_pattern":"mantenimiento","semantic_bucket":"property_opex","semantic_subbucket":"maintenance","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
+    {"rule_id":"R005_property_legal","priority":60,"rule_name":"Property legal","match_fields":"Tipo","match_pattern":"legal","semantic_bucket":"property_opex","semantic_subbucket":"legal","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
+    {"rule_id":"R006_contribution","priority":70,"rule_name":"Funding contribution","match_fields":"Flujo,Tipo","match_pattern":"contribucion|contribuciones","semantic_bucket":"funding_contribution","semantic_subbucket":"family_or_tenant_contribution","direction":"in","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"Funding is not operating revenue.","active":True},
+    {"rule_id":"R007_debt_principal","priority":80,"rule_name":"Debt principal","match_fields":"Tipo","match_pattern":"prestamo","semantic_bucket":"debt_movement","semantic_subbucket":"principal","direction":"unknown","direction_source":"unknown","classification_confidence":"high","review_required":False,"warning":"","notes":"Debt principal is not property OPEX.","active":True},
+    {"rule_id":"R008_debt_repayment","priority":90,"rule_name":"Debt repayment","match_fields":"Tipo","match_pattern":"repago","semantic_bucket":"debt_movement","semantic_subbucket":"repayment","direction":"unknown","direction_source":"unknown","classification_confidence":"high","review_required":False,"warning":"","notes":"Debt repayment is not property OPEX.","active":True},
+    {"rule_id":"R009_debt_interest","priority":100,"rule_name":"Debt interest","match_fields":"Tipo","match_pattern":"interes","semantic_bucket":"debt_movement","semantic_subbucket":"interest","direction":"unknown","direction_source":"unknown","classification_confidence":"high","review_required":False,"warning":"","notes":"Debt interest remains separate from property OPEX.","active":True},
+    {"rule_id":"R010_dividend","priority":110,"rule_name":"Dividend/distribution","match_fields":"Tipo","match_pattern":"dividendo","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"dividend","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Dividend-like outflows are not property OPEX.","active":True},
+    {"rule_id":"R012_transfer_expense","priority":120,"rule_name":"Transfer to family expense","match_fields":"Flujo,Tipo","match_pattern":"Flujo=transfer; Tipo=gasto","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"transfer_to_family_expense","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Transfer/gasto is not property OPEX unless later explicitly substantiated.","active":True},
+    {"rule_id":"R013_internal_transfer","priority":130,"rule_name":"Internal transfer","match_fields":"Flujo","match_pattern":"transfer","semantic_bucket":"internal_transfer","semantic_subbucket":"transfer","direction":"internal","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review if this transfer crosses economic owners","notes":"Internal transfers excluded from operating result.","active":True},
+    {"rule_id":"R999_unknown_review_required","priority":999,"rule_name":"Unknown review required","match_fields":"*","match_pattern":"no conservative semantic rule matched","semantic_bucket":"unknown","semantic_subbucket":"review_required","direction":"unknown","direction_source":"unknown","classification_confidence":"low","review_required":True,"warning":"review_required","notes":"Ambiguous rows stay visible and are not forced into OPEX.","active":True},
+]
 AUDIT_COLUMNS = [
-    "tx_id", "Date", "period", "Currency", "amount", "Box", "Flujo", "Tipo", "Detalle",
-    "payer", "receiver", "status", "semantic_bucket", "semantic_subbucket", "direction",
-    "rule_id", "rule_version", "classification_confidence", "classification_status",
+    "tx_id", "Date", "period", "period_end", "Currency", "amount", "Box", "Lugar",
+    "payer", "receiver", "Flujo", "Tipo", "Detalle", "semantic_bucket", "semantic_subbucket", "direction",
+    "direction_source", "direction_confidence", "actor", "counterparty", "channel", "cash_path", "rule_id", "rule_version", "classification_confidence", "classification_status",
     "review_required", "warning", "notes",
 ]
 SUMMARY_COLUMNS = [
@@ -19,7 +40,8 @@ SUMMARY_COLUMNS = [
     "sample_detalle", "sample_payer", "sample_receiver",
 ]
 MONTHLY_COLUMNS = [
-    "period", "period_end", "Currency", "Box", "semantic_bucket", "semantic_subbucket",
+    "period", "period_end", "Currency", "Box", "Lugar", "actor", "counterparty", "payer",
+    "receiver", "channel", "cash_path", "semantic_bucket", "semantic_subbucket",
     "amount_in", "amount_out", "net_amount", "amount_abs", "n_tx", "classification_status",
     "classification_confidence", "review_required", "source_table", "source_tx_ids_sample",
     "rule_ids", "notes",
@@ -31,7 +53,7 @@ OPERATING_STATEMENT_COLUMNS = [
     "unknown_amount", "review_required_amount", "caveat", "frontend_suitability",
 ]
 OPERATING_STATEMENT_QA_COLUMNS = ["check", "status", "detail", "severity"]
-SEMANTIC_LEAKAGE_QA_COLUMNS = ["tx_id", "period", "Currency", "amount", "Box", "Flujo", "Tipo", "Detalle", "payer", "receiver", "semantic_bucket", "semantic_subbucket", "rule_id", "leakage_pattern", "severity", "recommended_bucket", "notes"]
+SEMANTIC_LEAKAGE_QA_COLUMNS = ["tx_id", "period", "Currency", "amount", "Box", "Lugar", "Flujo", "Tipo", "Detalle", "payer", "receiver", "semantic_bucket", "semantic_subbucket", "rule_id", "leakage_pattern", "severity", "recommended_bucket", "notes"]
 
 
 def _norm(value: Any) -> str:
@@ -51,6 +73,10 @@ def _infer_box_party(box: Any) -> str:
     if b.casefold() == "household":
         return "HH"
     return "".join(part[0].upper() for part in b.split() if part and part[0].isalpha())
+
+
+def semantic_rule_registry_frame() -> pd.DataFrame:
+    return pd.DataFrame([{**r, "rule_version": RULE_VERSION} for r in SEMANTIC_RULES], columns=RULE_REGISTRY_COLUMNS)
 
 
 def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
@@ -81,7 +107,7 @@ def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
     if tipo == "dividendo":
         return ("family_withdrawal_candidate", "dividend", "R010_dividend", "medium", False, "classified", "review family/informal withdrawal candidate")
     if flujo == "transfer" and tipo == "gasto":
-        return ("family_withdrawal_candidate", "transfer_to_expense", "R012_transfer_expense", "medium", False, "classified", "review family/informal withdrawal candidate")
+        return ("family_withdrawal_candidate", "transfer_to_family_expense", "R012_transfer_expense", "medium", False, "classified", "review family/informal withdrawal candidate")
     if flujo == "transfer":
         return ("internal_transfer", "transfer", "R013_internal_transfer", "medium", False, "classified", "review if this transfer crosses economic owners")
     return ("unknown", "review_required", "R999_unknown_review_required", "low", True, "review_required", "no conservative semantic rule matched")
@@ -97,7 +123,7 @@ def _prepare_ledger(ledger: pd.DataFrame, freq: str = "M") -> pd.DataFrame:
     period = df["Date"].dt.to_period(freq)
     df["period"] = period.astype(str)
     df["period_end"] = period.dt.end_time.dt.date.astype(str)
-    for col in ["tx_id", "Currency", "Box", "Flujo", "Tipo", "Detalle", "payer", "receiver", "status", "notes"]:
+    for col in ["tx_id", "Currency", "Box", "Lugar", "Flujo", "Tipo", "Detalle", "payer", "receiver", "status", "notes", "channel", "cash_path"]:
         if col not in df.columns:
             df[col] = ""
     return df
@@ -108,23 +134,36 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     out_dir.mkdir(parents=True, exist_ok=True)
     df = _prepare_ledger(ledger, freq=freq)
 
+    rule_registry = semantic_rule_registry_frame()
     classified = df.apply(_classify_row, axis=1, result_type="expand")
     classified.columns = ["semantic_bucket", "semantic_subbucket", "rule_id", "classification_confidence", "review_required", "classification_status", "warning"]
     audit = pd.concat([df, classified], axis=1)
     audit["rule_version"] = RULE_VERSION
+    if "channel" not in audit.columns or audit["channel"].astype(str).str.strip().eq("").all():
+        audit["channel"] = audit["Box"]
+    if "cash_path" not in audit.columns or audit["cash_path"].astype(str).str.strip().eq("").all():
+        audit["cash_path"] = audit["Flujo"].astype(str) + ":" + audit["Tipo"].astype(str)
 
     payer = audit["payer"].map(_norm).str.upper()
     receiver = audit["receiver"].map(_norm).str.upper()
     box_party = audit["Box"].map(_infer_box_party).str.upper()
     audit["direction"] = "unknown"
-    audit.loc[receiver.eq(box_party) & box_party.ne(""), "direction"] = "in"
-    audit.loc[payer.eq(box_party) & box_party.ne(""), "direction"] = "out"
-    audit.loc[payer.eq(box_party) & receiver.eq(box_party) & box_party.ne(""), "direction"] = "internal"
+    audit["direction_source"] = "unknown"
+    audit["direction_confidence"] = "low"
+    matched_in = receiver.eq(box_party) & box_party.ne("")
+    matched_out = payer.eq(box_party) & box_party.ne("")
+    audit.loc[matched_in, ["direction", "direction_source", "direction_confidence"]] = ["in", "box_party_match", "high"]
+    audit.loc[matched_out, ["direction", "direction_source", "direction_confidence"]] = ["out", "box_party_match", "high"]
+    audit.loc[matched_in & matched_out, ["direction", "direction_source", "direction_confidence"]] = ["internal", "box_party_match", "high"]
 
-    unknown_direction = audit["direction"].eq("unknown")
-    audit.loc[unknown_direction & audit["semantic_bucket"].isin(["operating_revenue", "funding_contribution"]), "direction"] = "in"
-    audit.loc[unknown_direction & audit["semantic_bucket"].isin(["property_opex", "family_withdrawal_candidate", "family_withdrawal"]), "direction"] = "out"
-    audit.loc[unknown_direction & audit["semantic_bucket"].eq("internal_transfer"), "direction"] = "internal"
+    default_direction = audit["rule_id"].map(rule_registry.set_index("rule_id")["direction"]).fillna("unknown")
+    default_source = audit["rule_id"].map(rule_registry.set_index("rule_id")["direction_source"]).fillna("unknown")
+    unknown_direction = audit["direction"].eq("unknown") & default_direction.ne("unknown")
+    audit.loc[unknown_direction, "direction"] = default_direction[unknown_direction]
+    audit.loc[unknown_direction, "direction_source"] = default_source[unknown_direction].where(default_source[unknown_direction].ne("unknown"), "semantic_fallback")
+    audit.loc[unknown_direction, "direction_confidence"] = audit.loc[unknown_direction, "direction_source"].map({"semantic_fallback":"medium", "rule_default":"medium", "explicit_direction":"high"}).fillna("low")
+    audit["actor"] = audit["Box"].where(audit["Box"].astype(str).str.strip().ne(""), box_party)
+    audit["counterparty"] = audit["receiver"].where(audit["direction"].eq("out"), audit["payer"])
 
     audit["Date"] = audit["Date"].dt.date.astype(str)
     audit["review_required"] = audit["review_required"].astype(bool)
@@ -141,7 +180,7 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     work["amount_out"] = work["amount"].where(work["direction"].eq("out"), 0.0)
     work["net_amount"] = work["amount_in"] - work["amount_out"]
     work["amount_abs"] = work["amount"].abs()
-    monthly = work.groupby(["period", "Currency", "Box", "semantic_bucket", "semantic_subbucket"], dropna=False).agg(
+    monthly = work.groupby(["period", "Currency", "Box", "Lugar", "actor", "counterparty", "payer", "receiver", "channel", "cash_path", "semantic_bucket", "semantic_subbucket"], dropna=False).agg(
         amount_in=("amount_in", "sum"), amount_out=("amount_out", "sum"), net_amount=("net_amount", "sum"), amount_abs=("amount_abs", "sum"),
         n_tx=("tx_id", "count"), classification_status=("classification_status", lambda s: "review_required" if (s == "review_required").any() else "classified"),
         classification_confidence=("classification_confidence", lambda s: "low" if "low" in set(s) else ("medium" if "medium" in set(s) else "high")),
@@ -155,18 +194,45 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     validations = _build_validation_rows(audit, monthly)
     leakage = build_semantic_leakage_qa(audit)
     paths = {
+        "semantic_rule_registry": out_dir / "semantic_rule_registry.csv",
         "classification_audit": out_dir / "classification_audit.csv",
         "classification_audit_summary": out_dir / "classification_audit_summary.csv",
         "monthly_flow_semantic_split": out_dir / "monthly_flow_semantic_split.csv",
         "classification_validation": out_dir / "classification_validation.csv",
         "semantic_leakage_qa": out_dir / "semantic_leakage_qa.csv",
+        "semantic_dashboard_coverage": out_dir / "semantic_dashboard_coverage.csv",
     }
+    rule_registry.to_csv(paths["semantic_rule_registry"], index=False)
     audit.to_csv(paths["classification_audit"], index=False)
     summary.to_csv(paths["classification_audit_summary"], index=False)
     monthly.to_csv(paths["monthly_flow_semantic_split"], index=False)
     validations.to_csv(paths["classification_validation"], index=False)
     leakage.to_csv(paths["semantic_leakage_qa"], index=False)
+    build_semantic_dashboard_coverage().to_csv(paths["semantic_dashboard_coverage"], index=False)
     return paths
+
+
+def build_semantic_dashboard_coverage() -> pd.DataFrame:
+    rows = [
+        ("Renta total", "operating_revenue", "rent", "Currency", "monthly_flow_semantic_split.csv", "supported", "", "Aggregate amount_in for rent revenue."),
+        ("Renta CABA", "operating_revenue", "rent", "Lugar", "monthly_flow_semantic_split.csv", "supported_if_present", "", "Filter rent by Lugar when populated."),
+        ("Renta Torcuato", "operating_revenue", "rent", "Lugar", "monthly_flow_semantic_split.csv", "supported_if_present", "", "Filter rent by Lugar when populated."),
+        ("Impuestos", "property_opex", "taxes", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line taxes."),
+        ("Servicios", "property_opex", "services", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line services."),
+        ("Mantenimiento", "property_opex", "maintenance", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line maintenance."),
+        ("Legal", "property_opex", "legal", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line legal."),
+        ("OPEX patrimonial", "property_opex", "*", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line property_opex_true excludes funding, debt, and distributions."),
+        ("Resultado operativo", "operating_result", "net_operating", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line net_operating."),
+        ("Contribuciones por actor", "funding_contribution", "family_or_tenant_contribution", "actor,counterparty", "monthly_flow_semantic_split.csv", "supported_if_present", "", "Use actor/counterparty dimensions."),
+        ("Gasto personal", "family_withdrawal_candidate", "personal_expense", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line personal_expenses."),
+        ("Dividendos", "family_withdrawal_candidate", "dividend", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line dividends."),
+        ("Retiros/distribución", "family_withdrawal_candidate", "*", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line family_draws_or_distributions."),
+        ("Cobertura después de retiros", "coverage", "coverage_after_draws", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line coverage_after_draws."),
+        ("Unknown / review-required", "unknown", "review_required", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line unknown_or_ambiguous_outflows plus audit rows."),
+        ("Caja FB", "cash", "cash_close", "cash mart", "monthly_cash_close.csv", "not_semantic_mart", "cash mart responsibility", "Semantic mart does not validate cash."),
+        ("Deuda fin", "debt", "debt_position", "debt mart", "monthly_debt_position.csv", "not_semantic_mart", "debt mart responsibility", "Semantic mart only excludes debt movement from OPEX."),
+    ]
+    return pd.DataFrame(rows, columns=["dashboard_line", "required_semantic_bucket", "required_semantic_subbucket", "required_dimension", "source_output", "status", "missing_reason", "notes"])
 
 
 def build_semantic_leakage_qa(audit: pd.DataFrame) -> pd.DataFrame:
@@ -191,7 +257,7 @@ def build_semantic_leakage_qa(audit: pd.DataFrame) -> pd.DataFrame:
         for hit in hits:
             rows.append({
                 "tx_id": r.get("tx_id", ""), "period": r.get("period", ""), "Currency": r.get("Currency", ""),
-                "amount": r.get("amount", pd.NA), "Box": r.get("Box", ""), "Flujo": r.get("Flujo", ""),
+                "amount": r.get("amount", pd.NA), "Box": r.get("Box", ""), "Lugar": r.get("Lugar", ""), "Flujo": r.get("Flujo", ""),
                 "Tipo": r.get("Tipo", ""), "Detalle": r.get("Detalle", ""), "payer": r.get("payer", ""),
                 "receiver": r.get("receiver", ""), "semantic_bucket": r.get("semantic_bucket", ""),
                 "semantic_subbucket": r.get("semantic_subbucket", ""), "rule_id": r.get("rule_id", ""),
@@ -270,7 +336,11 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
         explicit_opex = {"taxes", "services", "maintenance", "legal"}
         other_opex = g.loc[g["semantic_bucket"].eq("property_opex") & ~g["semantic_subbucket"].isin(explicit_opex), "amount_out"].sum()
         funding = g.loc[g["semantic_bucket"].eq("funding_contribution"), "amount_in"].sum()
-        draws = g.loc[g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"]), "amount_out"].sum()
+        draws_mask = g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"])
+        draws = g.loc[draws_mask, "amount_out"].sum()
+        personal_expenses = g.loc[draws_mask & g["semantic_subbucket"].eq("personal_expense"), "amount_out"].sum()
+        dividends = g.loc[draws_mask & g["semantic_subbucket"].eq("dividend"), "amount_out"].sum()
+        transfer_family_expense = g.loc[draws_mask & g["semantic_subbucket"].eq("transfer_to_family_expense"), "amount_out"].sum()
         debt = g.loc[g["semantic_bucket"].eq("debt_movement"), "amount_abs"].sum()
         transfers = g.loc[g["semantic_bucket"].eq("internal_transfer"), "amount_abs"].sum()
         unknown_out = g.loc[unknown_mask, "amount_out"].sum()
@@ -298,7 +368,10 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
         add_row(base, "other_property_opex", "Other property OPEX", "property_opex_detail", other_opex, "semantic_bucket=property_opex; semantic_subbucket not in explicit property opex list; amount_out", ntx("property_opex"), coverage, unknown_amount, review_amount, "Should remain zero unless future explicit OPEX rules are added.", "review_before_frontend")
         add_row(base, "net_operating", "Net operating", "operating_result", net_operating, "operating_revenue - property_opex_true", ntx("operating_revenue") + ntx("property_opex"), coverage, unknown_amount, review_amount, caveat)
         add_row(base, "funding_contributions", "Funding contributions", "non_operating_funding", funding, "semantic_bucket=funding_contribution; amount_in", ntx("funding_contribution"), coverage, unknown_amount, review_amount, "Shown separately; not operating revenue.")
-        add_row(base, "family_draws_or_distributions", "Family draws or distributions", "non_operating_distribution", draws, "semantic_bucket in family_withdrawal_candidate,family_withdrawal; amount_out", int(g.loc[g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"]), "n_tx"].sum()), coverage, unknown_amount, review_amount, "Candidate line for review; not property OPEX.", "review_before_frontend")
+        add_row(base, "family_draws_or_distributions", "Family draws or distributions", "non_operating_distribution", draws, "semantic_bucket in family_withdrawal_candidate,family_withdrawal; amount_out", int(g.loc[draws_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "Candidate line for review; not property OPEX.", "review_before_frontend")
+        add_row(base, "personal_expenses", "Personal expenses", "non_operating_distribution_detail", personal_expenses, "semantic_subbucket=personal_expense; amount_out", ntx("family_withdrawal_candidate", "personal_expense"), coverage, unknown_amount, review_amount, "Personal expenses are distribution candidates; not property OPEX.", "review_before_frontend")
+        add_row(base, "dividends", "Dividends", "non_operating_distribution_detail", dividends, "semantic_subbucket=dividend; amount_out", ntx("family_withdrawal_candidate", "dividend"), coverage, unknown_amount, review_amount, "Dividend-like flows are not property OPEX.", "review_before_frontend")
+        add_row(base, "transfer_to_family_expense", "Transfer to family expense", "non_operating_distribution_detail", transfer_family_expense, "semantic_subbucket=transfer_to_family_expense; amount_out", ntx("family_withdrawal_candidate", "transfer_to_family_expense"), coverage, unknown_amount, review_amount, "Transfer/gasto candidate; not property OPEX.", "review_before_frontend")
         add_row(base, "coverage_after_draws", "Coverage after draws", "coverage", coverage_after_draws, "net_operating + funding_contributions - family_draws_or_distributions", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Coverage-like cash view; not a pure operating result.", "review_before_frontend")
         add_row(base, "unknown_or_ambiguous_outflows", "Unknown or ambiguous outflows", "data_quality", unknown_out, "semantic_bucket=unknown or review_required=true; amount_out else amount_abs", int(g.loc[unknown_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "Requires accounting review before decision-grade reporting.", "not_frontend_ready")
         add_row(base, "classification_coverage", "Classification coverage", "data_quality", coverage, "classified_amount_abs / eligible_amount_abs", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Ratio, not money.", "safe_canonical")
@@ -336,7 +409,7 @@ def build_monthly_operating_statement_qa(statement: pd.DataFrame) -> pd.DataFram
     add("monthly_operating_statement_exists", not statement.empty, f"rows={len(statement)}")
     for line in [
         "operating_revenue", "property_opex_true", "net_operating", "funding_contributions",
-        "family_draws_or_distributions", "coverage_after_draws",
+        "family_draws_or_distributions", "personal_expenses", "dividends", "transfer_to_family_expense", "coverage_after_draws",
     ]:
         add(f"has_{line}", line in lines, line)
     add("classification_coverage_present", "classification_coverage" in lines and statement["classification_coverage_ratio"].notna().all(), "coverage ratio populated")
