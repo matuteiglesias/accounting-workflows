@@ -53,6 +53,7 @@ SOURCE_AUTHORITIES = [
     "not_for_downstream_contracts",
     "source_of_truth_for_cash_only_when_is_frontend_safe_true",
     "source_of_truth_for_debt_stock",
+    "source_of_truth_for_debt_activity",
     "frontend_contract",
 ]
 
@@ -141,6 +142,26 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "row_level",
             "source_authority": "source_of_truth_for_cash_only_when_is_frontend_safe_true",
             "notes": "Cash contract is frontend-safe only for rows where is_frontend_safe=true.",
+        }
+    if key == "validated_cash_close.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "stock",
+            "grain": "period_close",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe",
+            "source_authority": "source_of_truth",
+            "notes": "Optional explicitly validated account-level cash close input; may feed monthly_cash_close frontend-safe rows.",
+        }
+    if key == "monthly_debt_activity.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "flow",
+            "grain": "monthly",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "source_of_truth_for_debt_activity",
+            "notes": "Canonical debt movement wrapper; use for debt activity, not closing debt stock.",
         }
     if key == "monthly_debt_position.csv":
         return {

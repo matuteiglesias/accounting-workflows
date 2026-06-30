@@ -496,6 +496,8 @@ _run_debt_balance_action:
 			--write-dir "$(RUN_OUT)"; \
 		test -s "$(RUN_OUT)/monthly_debt_position.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_position_qa.csv"; \
+		test -s "$(RUN_OUT)/monthly_debt_activity.csv"; \
+		test -s "$(RUN_OUT)/monthly_debt_activity_qa.csv"; \
 	'
 
 
