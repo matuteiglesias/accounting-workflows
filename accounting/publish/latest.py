@@ -28,25 +28,48 @@ DEFAULT_PUBLIC_SUBDIR = Path("public") / "accounting" / "latest"
 
 # Keep this intentionally small and dumb.
 # The UI should depend on a stable, minimal bundle, not on the full producer tree.
-METRIC_FILES = [
-    "build_manifest.json",
-    "balance_cash_y.csv",
-    "income_statement_y.csv",
-    "metric_views/income_statement_monthly_last6.csv",
-    "metric_views/rent_rollup_by_place_m_last6.csv",
-    "metric_views/flow_type_rollup_m_last6.csv",
-    "metric_views/draws_discipline_monthly_last6.csv",
-    "metric_contract_frontier.csv",
-    "frontend_metric_series.csv",
-    "metrics_frontier_qa.csv",
-    "frontier_source_qa.csv",
+METRIC_FILES_BY_CLASS = {
+    "public_contract": [
+        "annual_balance_dashboard_contract.csv",
+        "metric_contract_frontier.csv",
+        "artifact_contracts.csv",
+    ],
+    "canonical_dashboard": [
+        "annual_balance_dashboard_metrics.csv",
+        "annual_balance_dashboard_qa.csv",
+        "frontend_metric_series.csv",
+        "monthly_operating_statement.csv",
+        "monthly_flow_semantic_split.csv",
+        "monthly_cash_close.csv",
+        "monthly_debt_position.csv",
+        "monthly_debt_activity.csv",
+    ],
+    "legacy_reconciliation": [
+        "balance_cash_y.csv",
+        "income_statement_y.csv",
+    ],
+    "internal_diagnostic": [
+        "build_manifest.json",
+        "metrics_frontier_qa.csv",
+        "frontier_source_qa.csv",
+    ],
+}
+
+PRESENTATION_FILES = [
+    "human_dashboard.html",
+    "human_dashboard.md",
+    "human_dashboard_qa.csv",
 ]
 
-DEBT_FILES = [
-    "debt_open_items.csv",
-    "debt_repayment_events.csv",
-    "debt_status_reconciliation.csv",
-]
+DEBT_FILES_BY_CLASS = {
+    "internal_diagnostic": [
+        "debt_status_reconciliation.csv",
+    ],
+    "unsafe_for_frontend": [
+        "debt_open_items.csv",
+        "debt_repayment_events.csv",
+    ],
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -184,9 +207,9 @@ def _published_contract_row(public_relpath: str) -> dict[str, Any]:
     if contract["artifact_role"] == "canonical_source" and contract["source_authority"] in {"frontend_contract", "source_of_truth", "source_of_truth_for_debt_stock", "source_of_truth_for_cash_only_when_is_frontend_safe_true"}:
         publish_class = "public_contract"
     elif contract["artifact_role"] == "presentation_only":
-        publish_class = "presentation_only"
+        publish_class = "presentation"
     elif contract["artifact_role"] == "legacy":
-        publish_class = "legacy_compatibility"
+        publish_class = "legacy_reconciliation"
     elif contract["frontend_suitability"] in {"forbidden", "internal_only"}:
         publish_class = "unsafe_for_frontend" if contract["frontend_suitability"] == "forbidden" else "internal_diagnostic"
     else:
@@ -201,37 +224,54 @@ def write_publish_artifact_contracts(paths: PublishPaths, files: list[str]) -> s
     return relative_to_project(out, paths.project_root)
 
 
+def _publish_classified_files(src_root: Path, public_root: Path, files_by_class: dict[str, list[str]], mode: str) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for publish_class, rels in files_by_class.items():
+        out[publish_class] = publish_selected_files(src_root, public_root / publish_class, rels, mode)
+    return out
+
+
+def _flatten_published(published_by_class: dict[str, list[str]]) -> list[str]:
+    return [rel for rels in published_by_class.values() for rel in rels]
+
+
 def publish_metrics(paths: PublishPaths, mode: str) -> dict[str, Any]:
-    dst_root = paths.public_root / "metrics"
-    published = publish_selected_files(paths.metrics_latest, dst_root, METRIC_FILES, mode)
+    published_by_class = _publish_classified_files(paths.metrics_latest, paths.public_root, METRIC_FILES_BY_CLASS, mode)
 
     build_manifest_path = paths.metrics_latest / "build_manifest.json"
     build_manifest = read_json(build_manifest_path) if build_manifest_path.exists() else {}
 
     return {
         "source_dir": relative_to_project(paths.metrics_latest, paths.project_root),
-        "build_manifest": "metrics/build_manifest.json" if build_manifest_path.exists() else None,
-        "published_files": published,
+        "build_manifest": "internal_diagnostic/build_manifest.json" if build_manifest_path.exists() else None,
+        "published_files": _flatten_published(published_by_class),
+        "published_by_class": published_by_class,
         "run_id": build_manifest.get("run_id"),
         "as_of_date": build_manifest.get("as_of_date"),
     }
 
 
+def publish_presentation(paths: PublishPaths, mode: str) -> dict[str, Any]:
+    published = publish_selected_files(paths.human_latest, paths.public_root / "presentation", PRESENTATION_FILES, mode)
+    return {"source_dir": relative_to_project(paths.human_latest, paths.project_root), "published_files": published}
+
+
 def publish_debt(paths: PublishPaths, mode: str) -> dict[str, Any]:
-    dst_root = paths.public_root / "debt"
-    published = publish_selected_files(paths.debt_latest, dst_root, DEBT_FILES, mode)
+    published_by_class = _publish_classified_files(paths.debt_latest, paths.public_root, DEBT_FILES_BY_CLASS, mode)
     return {
         "source_dir": relative_to_project(paths.debt_latest, paths.project_root),
-        "published_files": published,
+        "published_files": _flatten_published(published_by_class),
+        "published_by_class": published_by_class,
         "primary_tables": {
-            "open_items": "debt/debt_open_items.csv",
-            "repayment_events": "debt/debt_repayment_events.csv",
-            "reconciliation": "debt/debt_status_reconciliation.csv",
+            "stock_contract": "canonical_dashboard/monthly_debt_position.csv",
+            "activity_contract": "canonical_dashboard/monthly_debt_activity.csv",
+            "raw_open_items_diagnostic": "unsafe_for_frontend/debt_open_items.csv",
+            "raw_repayment_events_diagnostic": "unsafe_for_frontend/debt_repayment_events.csv",
         },
     }
 
 
-def _snapshot_file_list(report_info: dict[str, Any], metrics_info: dict[str, Any], debt_info: dict[str, Any]) -> list[str]:
+def _snapshot_file_list(report_info: dict[str, Any], metrics_info: dict[str, Any], debt_info: dict[str, Any], presentation_info: dict[str, Any] | None = None) -> list[str]:
     files = [
         "manifest.json",
         report_info.get("entry_html"),
@@ -239,20 +279,42 @@ def _snapshot_file_list(report_info: dict[str, Any], metrics_info: dict[str, Any
         metrics_info.get("build_manifest"),
         *metrics_info.get("published_files", []),
         *debt_info.get("published_files", []),
+        *((presentation_info or {}).get("published_files", [])),
     ]
     return sorted({str(x) for x in files if x})
 
 
-def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], metrics_info: dict[str, Any], debt_info: dict[str, Any], mode: str) -> dict[str, Any]:
+def build_publish_contract_qa(paths: PublishPaths, files: list[str]) -> str:
+    rows = []
+    classes = {Path(f).parts[0] for f in files if Path(f).parts}
+    def add(check: str, ok: bool, detail: str, severity: str = "error") -> None:
+        rows.append({"check": check, "status": "pass" if ok else "fail", "detail": detail, "severity": severity})
+    expected = {"public_contract", "canonical_dashboard", "presentation", "legacy_reconciliation", "internal_diagnostic", "unsafe_for_frontend"}
+    add("publish_bundle_labels_all_artifacts", all(Path(f).parts and Path(f).parts[0] in expected | {"report"} or f in {"manifest.json", "artifact_contracts.csv", "publish_contract_qa.csv"} for f in files), f"classes={sorted(classes)}")
+    add("no_unsafe_artifacts_in_public_contract", not any(f.startswith("public_contract/") and Path(f).name in {"debt_open_items.csv", "debt_repayment_events.csv"} for f in files), "raw debt files are diagnostic/internal only")
+    add("legacy_artifacts_labeled_legacy", not any(Path(f).name in {"income_statement_y.csv", "balance_cash_y.csv"} and not f.startswith("legacy_reconciliation/") for f in files), "legacy annual views under legacy_reconciliation")
+    add("debt_stock_activity_separated", "canonical_dashboard/monthly_debt_position.csv" in files and "canonical_dashboard/monthly_debt_activity.csv" in files, "debt stock/activity canonical contracts are separate")
+    out = paths.public_root / "publish_contract_qa.csv"
+    ensure_dir(out.parent)
+    import csv
+    with out.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["check", "status", "detail", "severity"])
+        writer.writeheader()
+        writer.writerows(rows)
+    return relative_to_project(out, paths.project_root)
+
+
+def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], metrics_info: dict[str, Any], debt_info: dict[str, Any], presentation_info: dict[str, Any], mode: str) -> dict[str, Any]:
     story_manifest_path = paths.public_root / "report" / "story_manifest.json"
     story_manifest = read_json(story_manifest_path)
 
-    build_manifest_path = paths.public_root / "metrics" / "build_manifest.json"
+    build_manifest_path = paths.public_root / "internal_diagnostic" / "build_manifest.json"
     build_manifest = read_json(build_manifest_path) if build_manifest_path.exists() else {}
     source_run_id = build_manifest.get("run_id") or story_manifest.get("run_root", "").split("/")[-1] or None
 
-    files = _snapshot_file_list(report_info, metrics_info, debt_info)
+    files = _snapshot_file_list(report_info, metrics_info, debt_info, presentation_info)
     contracts_rel = write_publish_artifact_contracts(paths, files)
+    publish_qa_rel = build_publish_contract_qa(paths, [*files, "artifact_contracts.csv"])
     return build_frontend_snapshot_manifest(
         source_run_id=source_run_id,
         status="ok",
@@ -262,10 +324,10 @@ def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], met
             "debt_latest": relative_to_project(paths.debt_latest, paths.project_root),
             "public_root": relative_to_project(paths.public_root, paths.project_root),
         },
-        files=sorted(set([*files, "artifact_contracts.csv"])),
+        files=sorted(set([*files, "artifact_contracts.csv", "publish_contract_qa.csv"])),
         metrics=metrics_info,
         debt=debt_info,
-        reports={"balance_human_v2": report_info},
+        reports={"balance_human_v2": report_info, "presentation": presentation_info},
         extra={
             "surface_id": "accounting_surface",
             "published_at_utc": None,  # compatibility key; prefer built_at
@@ -281,10 +343,12 @@ def build_surface_manifest(paths: PublishPaths, report_info: dict[str, Any], met
                 {"id": "debt", "title": "Deudas", "path": "/debt"},
             ],
             "artifact_contracts": "artifact_contracts.csv",
+            "publish_contract_qa": "publish_contract_qa.csv",
             "publish_contract_summary": {
                 "public_contract": "metric frontier/series and explicitly safe contracts",
-                "presentation_only": "human or metric convenience views",
-                "legacy_compatibility": "kept for compatibility; not source of truth",
+                "canonical_dashboard": "canonical/report-safe metrics and monthly contracts",
+                "presentation": "human dashboard and report renderings",
+                "legacy_reconciliation": "kept for reconciliation; not source of truth",
                 "internal_diagnostic": "internal evidence only",
                 "unsafe_for_frontend": "must not be displayed as dashboard fact",
             },
@@ -330,15 +394,17 @@ def main() -> None:
     report_info = publish_report(paths, args.mode)
     metrics_info = publish_metrics(paths, args.mode)
     debt_info = publish_debt(paths, args.mode)
+    presentation_info = publish_presentation(paths, args.mode)
 
-    manifest = build_surface_manifest(paths, report_info, metrics_info, debt_info, args.mode)
+    manifest = build_surface_manifest(paths, report_info, metrics_info, debt_info, presentation_info, args.mode)
     manifest["published_at_utc"] = manifest["built_at"]
     write_json(paths.public_root / "manifest.json", manifest)
 
     print(f"Published accounting surface bundle to: {paths.public_root}")
     print(f"  report -> {paths.public_root / 'report'}")
-    print(f"  metrics -> {paths.public_root / 'metrics'}")
-    print(f"  debt -> {paths.public_root / 'debt'}")
+    print(f"  public_contract -> {paths.public_root / 'public_contract'}")
+    print(f"  canonical_dashboard -> {paths.public_root / 'canonical_dashboard'}")
+    print(f"  presentation -> {paths.public_root / 'presentation'}")
     print(f"  manifest -> {paths.public_root / 'manifest.json'}")
 
 
