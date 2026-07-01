@@ -320,9 +320,9 @@ smoke-full: smoke-core validate
 
 smoke-accounting: smoke-core
 
-run-canonical: run-debt-views
+run-canonical: run-marts
 
-run-full: run-canonical run-metrics run-dashboard run-human publish-latest release-check
+run-full: run-canonical run-debt-views run-metrics run-dashboard run-human publish-latest release-check
 
 run-accounting: run-accounting-full
 run-accounting-full: run-full
@@ -336,6 +336,57 @@ run-downstream-from-ledger:
 	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+
+
+
+.PHONY: update-latest-light
+
+update-latest-light:
+	@echo "[RUN][LATEST-LIGHT] run=$(RUN_REL)"
+	@bash -eu -o pipefail -c '\
+		link_swap () { \
+			base="$$1"; \
+			target="$$2"; \
+			latest="$$base/latest"; \
+			mkdir -p "$$base"; \
+			if [ -d "$$latest" ] && [ ! -L "$$latest" ]; then \
+				echo "[LATEST] WARN: $$latest is a directory. Moving aside."; \
+				rm -rf "$$latest.bak"; \
+				mv "$$latest" "$$latest.bak"; \
+			fi; \
+			tmp="$$base/.latest_tmp"; \
+			ln -sfn "$$target" "$$tmp"; \
+			rm -f "$$latest"; \
+			mv -f "$$tmp" "$$latest"; \
+			ls -lah "$$latest"; \
+		}; \
+		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
+		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
+		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
+		echo "[LATEST-LIGHT] updated run,metrics,human latest links; debt untouched"; \
+	'
+.PHONY: run-live-light
+
+run-live-light:
+	@$(MAKE) run-marts RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
+	@$(MAKE) run-metrics RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+	@$(MAKE) run-dashboard RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+	@$(MAKE) run-human RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
+	@$(MAKE) update-latest-light RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
+	@echo "[LIVE-LIGHT] refreshed non-debt live outputs"
+	
+
+.PHONY: assert-live-light-no-debt
+
+assert-live-light-no-debt:
+	@before=$$(find "$(OUT)/debt_resolution" -maxdepth 1 -type d -name 'LIVE_*' 2>/dev/null | wc -l); \
+	$(MAKE) run-live-light; \
+	after=$$(find "$(OUT)/debt_resolution" -maxdepth 1 -type d -name 'LIVE_*' 2>/dev/null | wc -l); \
+	if [ "$$before" != "$$after" ]; then \
+		echo "ERROR: run-live-light created debt artifacts: before=$$before after=$$after"; \
+		exit 2; \
+	fi; \
+	echo "OK: run-live-light did not create debt artifacts"
 
 run-metrics-and-human:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -501,7 +552,7 @@ _run_debt_action:
 	'
 
 .PHONY: run-debt-views run-debt-balance _run_debt_balance_action
-run-debt-views: run-debt _run_debt_balance_action
+run-debt-views: run-canonical run-debt _run_debt_balance_action
 
 # Compatibility alias; prefer run-debt-views.
 run-debt-balance: run-debt-views
