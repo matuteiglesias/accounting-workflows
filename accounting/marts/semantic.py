@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
-RULE_VERSION = "semantic_pr2_2026-06-30"
+RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
 RULE_REGISTRY_COLUMNS = [
     "rule_id", "rule_version", "priority", "rule_name", "match_fields", "match_pattern",
     "semantic_bucket", "semantic_subbucket", "direction", "direction_source",
@@ -26,8 +26,8 @@ SEMANTIC_RULES = [
     {"rule_id":"R010_dividend","priority":110,"rule_name":"Dividend/distribution","match_fields":"Tipo","match_pattern":"dividendo","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"dividend","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Dividend-like outflows are not property OPEX.","active":True},
     {"rule_id":"R012_transfer_expense","priority":120,"rule_name":"Transfer to family expense","match_fields":"Flujo,Tipo","match_pattern":"Flujo=transfer; Tipo=gasto","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"transfer_to_family_expense","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Transfer/gasto is not property OPEX unless later explicitly substantiated.","active":True},
     {"rule_id":"R013_internal_transfer","priority":130,"rule_name":"Internal transfer","match_fields":"Flujo","match_pattern":"transfer","semantic_bucket":"internal_transfer","semantic_subbucket":"transfer","direction":"internal","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review if this transfer crosses economic owners","notes":"Internal transfers excluded from operating result.","active":True},
-    {"rule_id":"R014_fx_conversion_proceeds","priority":140,"rule_name":"FX conversion proceeds","match_fields":"Flujo,Tipo,payer,receiver,cash_path","match_pattern":"Cambio:FX|payer=FX|receiver=FX","semantic_bucket":"treasury_fx","semantic_subbucket":"fx_conversion_proceeds","direction":"unknown","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"","notes":"FX conversion, not revenue/funding/OPEX.","active":True},
-    {"rule_id":"R015_fx_cost","priority":150,"rule_name":"FX cost","match_fields":"Flujo,Tipo,cash_path","match_pattern":"Costo Operativo:FX|Tipo=FX","semantic_bucket":"treasury_fx","semantic_subbucket":"fx_cost_or_spread","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"","notes":"Treasury/financial FX cost, not property OPEX unless explicitly reclassified.","active":True},
+    {"rule_id":"R014_fx_conversion_proceeds","priority":140,"rule_name":"FX conversion proceeds","match_fields":"Flujo,Tipo,payer,receiver,cash_path","match_pattern":"Cambio:FX|payer=FX|receiver=FX","semantic_bucket":"treasury_fx","semantic_subbucket":"fx_conversion_proceeds","direction":"unknown","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"FX conversion proceeds; not revenue, not funding, not property OPEX","notes":"ARS proceeds from currency conversion. Treasury movement only.","active":True},
+    {"rule_id":"R015_fx_cost_or_spread","priority":150,"rule_name":"FX cost or spread","match_fields":"Flujo,Tipo,cash_path","match_pattern":"Costo Operativo:FX|Tipo=FX","semantic_bucket":"treasury_fx","semantic_subbucket":"fx_cost_or_spread","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"FX cost/spread/loss; not property OPEX unless explicitly reclassified","notes":"Treasury/financial FX cost.","active":True},
     {"rule_id":"R999_unknown_review_required","priority":999,"rule_name":"Unknown review required","match_fields":"*","match_pattern":"no conservative semantic rule matched","semantic_bucket":"unknown","semantic_subbucket":"review_required","direction":"unknown","direction_source":"unknown","classification_confidence":"low","review_required":True,"warning":"review_required","notes":"Ambiguous rows stay visible and are not forced into OPEX.","active":True},
 ]
 
@@ -108,6 +108,30 @@ def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
         return ("debt_movement", "repayment", "R008_debt_repayment", "high", False, "classified", "")
     if tipo == "interes":
         return ("debt_movement", "interest", "R009_debt_interest", "high", False, "classified", "")
+
+    cash_path = _norm_key(row.get("cash_path"))
+    payer = _norm_key(row.get("payer"))
+    receiver = _norm_key(row.get("receiver"))
+    fx_blob = " ".join([flujo, tipo, cash_path, detail_blob, payer, receiver])
+    is_debt = tipo in {"prestamo", "repago", "interes"} or any(token in fx_blob for token in ["principal", "repago", "repayment", "interest", "interes"])
+    is_fx_cost = (
+        "costo operativo:fx" in fx_blob
+        or (receiver == "costos" and "fx" in fx_blob)
+        or any(token in fx_blob for token in ["fx cost", "spread", "commission", "comision", "comisión", "loss", "perdida", "pérdida"])
+    )
+    if is_fx_cost and not is_debt:
+        return ("treasury_fx", "fx_cost_or_spread", "R015_fx_cost_or_spread", "high", False, "classified", "FX cost/spread/loss; not property OPEX unless explicitly reclassified")
+    is_fx_conversion = (
+        "cambio:fx" in fx_blob
+        or payer == "fx"
+        or receiver == "fx"
+        or ("cambio" in fx_blob and "fx" in fx_blob)
+    )
+    if is_fx_conversion and not is_debt:
+        subbucket = "fx_conversion_outflow" if receiver == "fx" and payer != "fx" else "fx_conversion_proceeds"
+        confidence = "high" if "cambio:fx" in fx_blob or payer == "fx" or receiver == "fx" else "medium"
+        return ("treasury_fx", subbucket, "R014_fx_conversion_proceeds", confidence, False, "classified", "FX conversion proceeds; not revenue, not funding, not property OPEX")
+
     if tipo == "dividendo":
         return ("family_withdrawal_candidate", "dividend", "R010_dividend", "medium", False, "classified", "review family/informal withdrawal candidate")
     if flujo == "transfer" and tipo == "gasto":
@@ -233,6 +257,7 @@ def build_semantic_dashboard_coverage() -> pd.DataFrame:
         ("Retiros/distribución", "family_withdrawal_candidate", "*", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line family_draws_or_distributions."),
         ("Cobertura después de retiros", "coverage", "coverage_after_draws", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line coverage_after_draws."),
         ("Unknown / review-required", "unknown", "review_required", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line unknown_or_ambiguous_outflows plus audit rows."),
+        ("Treasury FX", "treasury_fx", "*", "Currency,Box", "monthly_operating_statement.csv", "supported", "", "Treasury FX bridge lines; excluded from operating result, funding, draws, debt, and property OPEX."),
         ("Caja FB", "cash", "cash_close", "cash mart", "monthly_cash_close.csv", "not_semantic_mart", "cash mart responsibility", "Semantic mart does not validate cash."),
         ("Deuda fin", "debt", "debt_position", "debt mart", "monthly_debt_position.csv", "not_semantic_mart", "debt mart responsibility", "Semantic mart only excludes debt movement from OPEX."),
     ]
@@ -347,6 +372,12 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
         transfer_family_expense = g.loc[draws_mask & g["semantic_subbucket"].eq("transfer_to_family_expense"), "amount_out"].sum()
         debt = g.loc[g["semantic_bucket"].eq("debt_movement"), "amount_abs"].sum()
         transfers = g.loc[g["semantic_bucket"].eq("internal_transfer"), "amount_abs"].sum()
+        fx_mask = g["semantic_bucket"].eq("treasury_fx")
+        fx_conversion_in = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_conversion_proceeds"), "amount_in"].sum()
+        fx_conversion_out = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_conversion_outflow"), "amount_out"].sum()
+        fx_cost = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_cost_or_spread"), "amount_out"].sum()
+        fx_other = g.loc[fx_mask & ~g["semantic_subbucket"].isin(["fx_conversion_proceeds", "fx_conversion_outflow", "fx_cost_or_spread"]), "net_amount"].sum()
+        fx_net = float(fx_conversion_in - fx_conversion_out - fx_cost + fx_other)
         unknown_out = g.loc[unknown_mask, "amount_out"].sum()
         if unknown_out == 0:
             unknown_out = unknown_amount
@@ -377,6 +408,10 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
         add_row(base, "dividends", "Dividends", "non_operating_distribution_detail", dividends, "semantic_subbucket=dividend; amount_out", ntx("family_withdrawal_candidate", "dividend"), coverage, unknown_amount, review_amount, "Dividend-like flows are not property OPEX.", "review_before_frontend")
         add_row(base, "transfer_to_family_expense", "Transfer to family expense", "non_operating_distribution_detail", transfer_family_expense, "semantic_subbucket=transfer_to_family_expense; amount_out", ntx("family_withdrawal_candidate", "transfer_to_family_expense"), coverage, unknown_amount, review_amount, "Transfer/gasto candidate; not property OPEX.", "review_before_frontend")
         add_row(base, "coverage_after_draws", "Coverage after draws", "coverage", coverage_after_draws, "net_operating + funding_contributions - family_draws_or_distributions", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Coverage-like cash view; not a pure operating result.", "review_before_frontend")
+        add_row(base, "treasury_fx_conversion_in", "FX conversion proceeds", "treasury", fx_conversion_in, "semantic_bucket=treasury_fx; semantic_subbucket=fx_conversion_proceeds; amount_in", ntx("treasury_fx", "fx_conversion_proceeds"), coverage, unknown_amount, review_amount, "FX conversion changes liquidity by currency but is not operating income or funding.", "safe_with_caveat")
+        add_row(base, "treasury_fx_conversion_out", "FX conversion outflow", "treasury", fx_conversion_out, "semantic_bucket=treasury_fx; semantic_subbucket=fx_conversion_outflow; amount_out", ntx("treasury_fx", "fx_conversion_outflow"), coverage, unknown_amount, review_amount, "FX conversion changes liquidity by currency but is not operating income or funding.", "safe_with_caveat")
+        add_row(base, "treasury_fx_cost", "FX cost / spread", "treasury", fx_cost, "semantic_bucket=treasury_fx; semantic_subbucket=fx_cost_or_spread; amount_out", ntx("treasury_fx", "fx_cost_or_spread"), coverage, unknown_amount, review_amount, "Treasury/financial FX cost; not property OPEX unless explicitly reclassified.", "safe_with_caveat")
+        add_row(base, "treasury_fx_net", "FX net treasury effect", "treasury", fx_net, "treasury_fx_conversion_in - treasury_fx_conversion_out - treasury_fx_cost +/- other_fx", int(g.loc[fx_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "FX conversion changes liquidity by currency but is not operating income or funding.", "safe_with_caveat")
         add_row(base, "unknown_or_ambiguous_outflows", "Unknown or ambiguous outflows", "data_quality", unknown_out, "semantic_bucket=unknown or review_required=true; amount_out else amount_abs", int(g.loc[unknown_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "Requires accounting review before decision-grade reporting.", "not_frontend_ready")
         add_row(base, "classification_coverage", "Classification coverage", "data_quality", coverage, "classified_amount_abs / eligible_amount_abs", int(g["n_tx"].sum()), coverage, unknown_amount, review_amount, "Ratio, not money.", "safe_canonical")
         add_row(base, "debt_movements", "Debt movements", "non_operating_debt", debt, "semantic_bucket=debt_movement; amount_abs", ntx("debt_movement"), coverage, unknown_amount, review_amount, "Excluded from property OPEX and net operating.", "review_before_frontend")
@@ -414,6 +449,7 @@ def build_monthly_operating_statement_qa(statement: pd.DataFrame) -> pd.DataFram
     for line in [
         "operating_revenue", "property_opex_true", "net_operating", "funding_contributions",
         "family_draws_or_distributions", "personal_expenses", "dividends", "transfer_to_family_expense", "coverage_after_draws",
+        "treasury_fx_conversion_in", "treasury_fx_conversion_out", "treasury_fx_cost", "treasury_fx_net",
     ]:
         add(f"has_{line}", line in lines, line)
     add("classification_coverage_present", "classification_coverage" in lines and statement["classification_coverage_ratio"].notna().all(), "coverage ratio populated")
@@ -429,6 +465,10 @@ def build_monthly_operating_statement_qa(statement: pd.DataFrame) -> pd.DataFram
     add("no_dividend_in_property_opex", "dividend" not in source_filter("property_opex_true").lower() and "dividendo" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
     add("no_transfer_gasto_in_property_opex", "transfer" not in source_filter("property_opex_true").lower() and "gasto" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
     add("no_debt_principal_in_property_opex", "debt_movement" not in source_filter("property_opex_true") and "principal" not in source_filter("property_opex_true"), source_filter("property_opex_true"))
+    add("fx_not_in_operating_revenue", "treasury_fx" not in source_filter("operating_revenue"), source_filter("operating_revenue"))
+    add("fx_not_in_property_opex", "treasury_fx" not in source_filter("property_opex_true") and "fx" not in source_filter("property_opex_true").lower(), source_filter("property_opex_true"))
+    add("fx_not_funding", "treasury_fx" not in source_filter("funding_contributions"), source_filter("funding_contributions"))
+    add("fx_not_draws", "treasury_fx" not in source_filter("family_draws_or_distributions"), source_filter("family_draws_or_distributions"))
     return pd.DataFrame(rows, columns=OPERATING_STATEMENT_QA_COLUMNS)
 
 
@@ -447,4 +487,8 @@ def _build_validation_rows(audit: pd.DataFrame, monthly: pd.DataFrame) -> pd.Dat
     add("family_withdrawal_candidate_amount_by_month", audit["semantic_bucket"].eq("family_withdrawal_candidate"))
     add("funding_amount_by_month", audit["semantic_bucket"].eq("funding_contribution"))
     add("rent_amount_by_month", audit["semantic_bucket"].eq("operating_revenue") & audit["semantic_subbucket"].eq("rent"))
+    fx_cols = [c for c in ["Flujo", "Tipo", "Detalle", "notes", "payer", "receiver", "cash_path"] if c in audit.columns]
+    fx_text = audit[fx_cols].astype(str).agg(" ".join, axis=1).str.contains("FX|Cambio", case=False, na=False) if fx_cols else pd.Series(False, index=audit.index)
+    add("fx_rows_not_unknown", fx_text & (audit["semantic_bucket"].astype(str).eq("unknown") | audit["review_required"]))
+    add("treasury_fx_amount_by_month", audit["semantic_bucket"].eq("treasury_fx"))
     return pd.DataFrame(rows, columns=VALIDATION_COLUMNS)

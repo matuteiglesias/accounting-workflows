@@ -30,6 +30,7 @@ REQUIRED = [
     "ID.DEBT.TOTAL.OPEN","ID.DEBT.OPEN.BY_COUNTERPARTY","ID.DEBT.PRINCIPAL.OPEN","ID.DEBT.INTEREST.OPEN","ID.DEBT.NET_PM_POSITION",
     "ID.DEBT.ACTIVITY.NEW_CLAIMS","ID.DEBT.ACTIVITY.REPAYMENTS","ID.DEBT.ACTIVITY.INTEREST_ACCRUED","ID.DEBT.ACTIVITY.ADJUSTMENTS","ID.DEBT.ACTIVITY.NET_CHANGE",
     "DQ.CLASSIFICATION.COVERAGE","DQ.UNKNOWN.AMOUNT","DQ.OPEX.LEAKAGE.AMOUNT","DQ.DEBT.ACTIVITY.RECONCILIATION",
+    "TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE",
 ]
 LEGACY = ["IS.INCOME.TOTAL","IS.NET.AFTER_COSTS","IS.NET.POST_DRAWS","IS.CONTRIB.TOTAL","IS.DRAWS.PERSONAL","BS.CASH.FB","BS.CASH.PM"]
 
@@ -82,6 +83,18 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
             status="available" if pd.notna(den) and den!=0 else "not_applicable"
             val=(r.get("coverage_after_draws",0)/den) if status=="available" else pd.NA
             rows.append(_base("COV.SAVINGS_RATE",r.period,r.Currency,val,status,"ratio","coverage","2. Funding and distributions","monthly_operating_statement.csv","statement_line in coverage_after_draws,net_operating","annual ratio = annual coverage_after_draws / annual net_operating",run_id,as_of_date,suit="safe_with_caveat",caveat="Ratio of annual aggregates; not an average of monthly ratios."))
+
+        fx_caveat = "FX conversion changes liquidity by currency but is not operating income or funding."
+        fx_stmt = {
+            "treasury_fx_conversion_in": "TR.FX.CONVERSION.IN",
+            "treasury_fx_conversion_out": "TR.FX.CONVERSION.OUT",
+            "treasury_fx_cost": "TR.FX.COST.OUT",
+            "treasury_fx_net": "TR.FX.NET",
+        }
+        for line, mid in fx_stmt.items():
+            sub=w[w["statement_line"].astype(str).eq(line)]
+            for _,r in sub.groupby(["period","Currency"],dropna=False)["amount"].sum().reset_index().iterrows():
+                rows.append(_base(mid,r.period,r.Currency,r.amount,"available","flow","treasury","treasury_fx","monthly_operating_statement.csv",f"statement_line={line}","annual flow = sum monthly flow by year and currency",run_id,as_of_date,suit="safe_with_caveat",caveat=fx_caveat))
         cov=w[w["statement_line"].astype(str).eq("classification_coverage")]
         for _,r in cov.sort_values("period_end").groupby(["period","Currency"],dropna=False).tail(1).iterrows():
             rows.append(_base("DQ.CLASSIFICATION.COVERAGE",r.period,r.Currency,r.amount,"available","quality","data_quality","6. Data quality and caveats","monthly_operating_statement.csv","statement_line=classification_coverage","last valid monthly coverage value in year",run_id,as_of_date,suit="safe_with_caveat"))
@@ -104,8 +117,22 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
             if dim in sub.columns:
                 for _,r in sub.groupby(["period","Currency",dim],dropna=False)[amt].sum().reset_index().iterrows():
                     rows.append(_base(emit_mid,r.period,r.Currency,r[amt],"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv",f"semantic filter; dimension={dim}","annual flow = sum monthly flow by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat"))
+
+        fx=s[s.semantic_bucket.astype(str).eq("treasury_fx")].copy()
+        if not fx.empty:
+            fx_caveat = "FX conversion changes liquidity by currency but is not operating income or funding."
+            for dim, mid in [("Box","TR.FX.BY_BOX"),("semantic_subbucket","TR.FX.BY_TYPE")]:
+                if dim in fx.columns:
+                    for _,r in fx.groupby(["period","Currency",dim],dropna=False)["net_amount"].sum().reset_index().iterrows():
+                        rows.append(_base(mid,r.period,r.Currency,r.net_amount,"available","flow","treasury","treasury_fx","monthly_flow_semantic_split.csv",f"semantic_bucket=treasury_fx; dimension={dim}","annual flow = sum monthly net FX by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat",caveat=fx_caveat))
+            for _,r in fx.groupby(["period","Currency"],dropna=False)["amount_abs"].sum().reset_index().iterrows():
+                rows.append(_base("DQ.FX.ONE_SIDED.AMOUNT",r.period,r.Currency,r.amount_abs,"available","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","semantic_bucket=treasury_fx; placeholder one-sided visibility","one-sided FX visibility placeholder; native rows remain by currency",run_id,as_of_date,suit="safe_with_caveat",caveat="One-sided FX proceeds are allowed but cannot be treated as economic income in hard-currency projections."))
+                rows.append(_base("DQ.FX.MISSING_RATE.AMOUNT",r.period,r.Currency,pd.NA,"unavailable","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","future CCL projection rate availability","missing CCL rate produces unavailable, not zero",run_id,as_of_date,suit="unavailable",validation="warn",caveat="Hard-currency CCL projection is not implemented in this PR."))
+                rows.append(_base("DQ.FX.ROWS.REVIEW_REQUIRED",r.period,r.Currency,0,"available","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","review_required treasury_fx rows","count/sum placeholder for FX rows needing review",run_id,as_of_date,suit="safe_with_caveat",caveat="FX rows are classified; future matching may add review-required rows."))
     for mid in ["IS.RENT.BY_PROPERTY","IS.OPEX.BY_CATEGORY","FUND.CONTRIB.BY_ACTOR","DIST.DRAWS.BY_TYPE"]:
         if not any(r["metric_id"]==mid for r in rows): unavailable(mid,"monthly_flow_semantic_split.csv","1. Operating result",caveat="blocked_by_missing_dimension")
+    for mid in ["TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE"]:
+        if not any(r["metric_id"]==mid for r in rows): unavailable(mid,"monthly_flow_semantic_split.csv","treasury_fx",caveat="No treasury FX rows classified in canonical semantic split.")
 
     if cash is not None and not cash.empty and "is_frontend_safe" in cash:
         c=_year(cash[_truth(cash["is_frontend_safe"])]); c["close_amount"]=pd.to_numeric(c.get("close_amount",0),errors="coerce")
@@ -165,5 +192,8 @@ def build_annual_balance_dashboard_qa(metrics: pd.DataFrame, contract: pd.DataFr
     add("debt_stock_not_mixed_with_flows", not metrics[metrics.metric_id.str.startswith("ID.DEBT") & metrics.metric_id.str.contains("OPEN|POSITION")].flow_or_stock.eq("flow").any(), "debt OPEN/POSITION are stock")
     add("debt_activity_reconciles_or_residual_visible", "ID.DEBT.ACTIVITY.ADJUSTMENTS" in set(metrics.metric_id) and "DQ.DEBT.ACTIVITY.RECONCILIATION" in set(metrics.metric_id), "adjustments and reconciliation metric present")
     add("legacy_metrics_marked_legacy", metrics[metrics.metric_id.isin(LEGACY)].legacy_flag.astype(str).eq("true").all(), "legacy IDs demoted")
-    ids=set(metrics.metric_id.astype(str)); missing=[m for m in REQUIRED if m not in ids]; unavailable=metrics[metrics.metric_id.isin(REQUIRED)&~metrics.value_status.eq("available")].metric_id.drop_duplicates().tolist(); add("required_dashboard_metrics_present_or_unavailable", not missing, f"missing={missing}; unavailable_or_not_applicable={unavailable}")
+    ids=set(metrics.metric_id.astype(str)); missing=[m for m in REQUIRED if m not in ids]; unavailable=metrics[metrics.metric_id.isin(REQUIRED)&~metrics.value_status.eq("available")].metric_id.drop_duplicates().tolist()
+    fx_ids={"TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE"}
+    add("fx_metrics_present_or_unavailable", fx_ids.issubset(ids), f"missing={sorted(fx_ids-ids)}")
+    add("required_dashboard_metrics_present_or_unavailable", not missing, f"missing={missing}; unavailable_or_not_applicable={unavailable}")
     return pd.DataFrame(rows,columns=QA_COLUMNS)
