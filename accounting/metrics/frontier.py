@@ -23,6 +23,7 @@ INITIAL_METRICS = [
     "FUND.CONTRIB.TOTAL", "DIST.DRAWS.PERSONAL", "COV.NET.AFTER_DRAWS",
     "BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "ID.DEBT.OPEN.BY_COUNTERPARTY",
     "DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT",
+    "TR.FX.CONVERSION.IN", "TR.FX.CONVERSION.OUT", "TR.FX.COST.OUT", "TR.FX.NET", "TR.FX.BY_BOX", "TR.FX.BY_TYPE",
 ]
 
 
@@ -161,6 +162,31 @@ def build_metrics_frontier(run_root: Path, metrics_dir: Path, run_id: str, as_of
                 value_line = "unknown_or_ambiguous_outflows"
             series.extend(_statement_series(statement, value_line, metric_id, run_id, as_of_date, suitability, caveat))
 
+
+    # Treasury FX metrics: public aggregate bridge, explicitly outside income/funding/draws/debt.
+    fx_caveat = "FX conversion changes liquidity by currency but is not operating income or funding."
+    fx_stmt_defs = [
+        ("TR.FX.CONVERSION.IN", "FX conversion proceeds", "treasury_fx", "treasury_fx_conversion_in", "statement_line=treasury_fx_conversion_in"),
+        ("TR.FX.CONVERSION.OUT", "FX conversion outflow", "treasury_fx", "treasury_fx_conversion_out", "statement_line=treasury_fx_conversion_out"),
+        ("TR.FX.COST.OUT", "FX cost / spread", "treasury_fx", "treasury_fx_cost", "statement_line=treasury_fx_cost"),
+        ("TR.FX.NET", "FX net treasury effect", "treasury_fx", "treasury_fx_net", "statement_line=treasury_fx_net"),
+    ]
+    for metric_id, label, category, line, rule in fx_stmt_defs:
+        unavailable = stmt_status == "unavailable"
+        rows.append(_contract_row(metric_id, label, category, "flow", "monthly_operating_statement.csv", rule, suitability="unavailable" if unavailable else "safe_with_caveat", caveat=stmt_caveat or fx_caveat, status="unavailable" if unavailable else "active", validation=stmt_validation))
+        if not unavailable:
+            series.extend(_statement_series(statement, line, metric_id, run_id, as_of_date, "safe_with_caveat", fx_caveat))
+
+    split_fx_unavailable = split_status == "unavailable"
+    for metric_id, label, dim in [("TR.FX.BY_BOX", "FX by box", "Box"), ("TR.FX.BY_TYPE", "FX by type", "semantic_subbucket")]:
+        rows.append(_contract_row(metric_id, label, "treasury_fx", "flow", "monthly_flow_semantic_split.csv", f"sum net_amount where semantic_bucket=treasury_fx by {dim}", suitability="unavailable" if split_fx_unavailable else "safe_with_caveat", caveat=split_caveat or fx_caveat, status="unavailable" if split_fx_unavailable else "active", validation=split_validation, notes=f"dimension_name={dim}"))
+        if not split_fx_unavailable and split is not None and not split.empty and dim in split.columns:
+            fx = split.loc[split["semantic_bucket"].astype(str).eq("treasury_fx")].copy()
+            if not fx.empty:
+                grouped = fx.groupby(["period", "period_end", "Currency", dim], dropna=False)["net_amount"].sum().reset_index()
+                for _, r in grouped.iterrows():
+                    series.append(_series_row(metric_id, r["period"], r["period_end"], r["Currency"], r["net_amount"], "monthly_flow_semantic_split.csv", run_id, as_of_date, "safe_with_caveat", True, False, False, fx_caveat, dimension_name=dim, dimension_value=str(r[dim])))
+
     # Rent from semantic split.
     rent_unavailable = split_status == "unavailable"
     rows.append(_contract_row("IS.RENT.TOTAL", "Rent revenue", "operating_revenue", "flow", "monthly_flow_semantic_split.csv", "sum amount_in where semantic_bucket=operating_revenue and semantic_subbucket=rent", suitability="unavailable" if rent_unavailable else "safe", caveat=split_caveat, status="unavailable" if rent_unavailable else "active", validation=split_validation))
@@ -271,6 +297,8 @@ def build_frontier_qa(frontier: pd.DataFrame, series: pd.DataFrame, cash: pd.Dat
     add("metrics_frontier_uses_canonical_sources_when_available", used_sources.issubset(canonical_sources | {"metric_values.csv"}), f"source_contracts={source_contracts}")
     add("notebooks_do_not_classify_flows", True, "enforced by backend frontier contract; notebook static audit documented separately", "warning")
     add("classification_quality_metrics_present", {"DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT"}.issubset(ids), "DQ metrics present")
+    fx_ids={"TR.FX.CONVERSION.IN", "TR.FX.CONVERSION.OUT", "TR.FX.COST.OUT", "TR.FX.NET", "TR.FX.BY_BOX", "TR.FX.BY_TYPE"}
+    add("treasury_fx_metrics_present", fx_ids.issubset(ids), f"missing={sorted(fx_ids-ids)}")
     public = frontier.loc[frontier["public_flag"].astype(str).eq("true")]
     needs_caveat = public.loc[public["frontend_suitability"].isin(["safe_with_caveat", "legacy_only", "unavailable"])]
     add("public_metrics_have_caveats_when_needed", needs_caveat.empty or needs_caveat["caveat"].astype(str).str.strip().ne("").all(), f"checked={len(needs_caveat)}")

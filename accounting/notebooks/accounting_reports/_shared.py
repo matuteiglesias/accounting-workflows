@@ -243,6 +243,12 @@ METRIC_LABELS = {
     "DQ.OPEX.LEAKAGE.AMOUNT": "OPEX leakage detectado",
     "DQ.CASH.FRONTEND_SAFE": "Cash frontend-safe",
     "DQ.DEBT.ACTIVITY.RECONCILIATION": "Reconciliación actividad de deuda",
+    "TR.FX.CONVERSION.IN": "FX conversion proceeds",
+    "TR.FX.CONVERSION.OUT": "FX conversion outflow",
+    "TR.FX.COST.OUT": "FX cost / spread",
+    "TR.FX.NET": "FX net treasury effect",
+    "TR.FX.BY_BOX": "FX by box",
+    "TR.FX.BY_TYPE": "FX by type",
 }
 
 DIMENSION_LABELS = {
@@ -266,6 +272,11 @@ DIMENSION_LABELS = {
     "Primos": "Primos",
     "Hector": "Héctor",
     "Inq": "Inquilinos",
+    "fx_conversion_proceeds": "FX conversion proceeds",
+    "fx_conversion_outflow": "FX conversion outflow",
+    "fx_cost_or_spread": "FX cost / spread",
+    "fx_other_review": "FX other / review",
+    "treasury_fx": "Treasury FX",
 }
 
 
