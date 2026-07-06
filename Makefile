@@ -693,3 +693,15 @@ smoke: smoke-core
 run: run-accounting
 run-all: run-accounting
 	@echo "[RUN] done. latest -> $(RUN_REL)"
+
+.PHONY: professional-drilldowns professional-linked-digest
+professional-drilldowns:
+	@$(PY) -m accounting.professional.drilldown \
+		--repo-root "$(ROOT)" \
+		--pack "$(ROOT)/out/professional_pack/latest" \
+		--run-root "$(ROOT)/out/run/accounting/latest"
+
+professional-linked-digest:
+	@$(PY) -m accounting.professional.render_linked_digest \
+		--repo-root "$(ROOT)" \
+		--pack "$(ROOT)/out/professional_pack/latest"

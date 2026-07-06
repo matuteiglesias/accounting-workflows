@@ -488,7 +488,7 @@ def _build_validation_rows(audit: pd.DataFrame, monthly: pd.DataFrame) -> pd.Dat
     add("funding_amount_by_month", audit["semantic_bucket"].eq("funding_contribution"))
     add("rent_amount_by_month", audit["semantic_bucket"].eq("operating_revenue") & audit["semantic_subbucket"].eq("rent"))
     fx_cols = [c for c in ["Flujo", "Tipo", "Detalle", "notes", "payer", "receiver", "cash_path"] if c in audit.columns]
-    fx_text = audit[fx_cols].astype(str).agg(" ".join, axis=1).str.contains("FX|Cambio", case=False, na=False) if fx_cols else pd.Series(False, index=audit.index)
+    fx_text = audit[fx_cols].apply(lambda row: " ".join(_norm(v) for v in row), axis=1).str.contains("FX|Cambio", case=False, na=False) if fx_cols else pd.Series(False, index=audit.index)
     add("fx_rows_not_unknown", fx_text & (audit["semantic_bucket"].astype(str).eq("unknown") | audit["review_required"]))
     add("treasury_fx_amount_by_month", audit["semantic_bucket"].eq("treasury_fx"))
     return pd.DataFrame(rows, columns=VALIDATION_COLUMNS)
