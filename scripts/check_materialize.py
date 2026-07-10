@@ -11,6 +11,8 @@ import pandas as pd
 
 from accounting.artifacts.manifest import artifact_from_path, append_artifacts
 
+REQUIRED_LEDGER_DIMENSIONS = ["Box", "Currency", "Flujo", "Tipo"]
+
 
 def _utc_now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
@@ -33,6 +35,50 @@ def _read_csv_if_exists(p: Path) -> Optional[pd.DataFrame]:
     if not p.exists():
         return None
     return pd.read_csv(p, low_memory=False)
+
+
+def _empty_required_dimension_mask(df: pd.DataFrame, cols: List[str]) -> pd.Series:
+    """Return rows where any required dimension is missing or blank."""
+    if df.empty:
+        return pd.Series(False, index=df.index)
+    mask = pd.Series(False, index=df.index)
+    for col in cols:
+        if col not in df.columns:
+            continue
+        values = df[col]
+        mask = mask | values.isna() | values.astype("string").str.strip().isin(["", "nan", "None", "<NA>"])
+    return mask
+
+
+def _format_empty_dimension_error(df: pd.DataFrame, cols: List[str], sample_size: int = 10) -> str:
+    mask = _empty_required_dimension_mask(df, cols)
+    bad = df.loc[mask].copy()
+    missing_counts = {}
+    for col in cols:
+        if col not in df.columns:
+            missing_counts[col] = "missing_column"
+            continue
+        values = df[col]
+        col_mask = values.isna() | values.astype("string").str.strip().isin(["", "nan", "None", "<NA>"])
+        missing_counts[col] = int(col_mask.sum())
+
+    amount_total = 0.0
+    if "amount" in bad.columns:
+        amount_total = float(pd.to_numeric(bad["amount"], errors="coerce").fillna(0).sum())
+
+    sample_cols = [
+        c
+        for c in ["tx_id", "Date", "amount", "Box", "Currency", "Flujo", "Tipo", "source_file", "source_row", "notes"]
+        if c in bad.columns
+    ]
+    sample = bad[sample_cols].head(sample_size).fillna("").to_dict(orient="records") if sample_cols else []
+    return (
+        "ledger_canonical has rows with empty required dimensions "
+        f"{cols}: rows={int(mask.sum())}, amount_sum={amount_total}, missing_by_column={missing_counts}, "
+        f"sample_first_{sample_size}={sample}. "
+        "Fill Box/Currency/Flujo/Tipo in the source ledger for these rows; materialized flow tables keep these rows "
+        "for reconciliation, but the pipeline treats blank dimensions as data-quality errors."
+    )
 
 
 def main() -> int:
@@ -72,6 +118,27 @@ def main() -> int:
             errors.append("ledger_canonical has 0 rows")
         else:
             checks.append({"name": "ledger_rows", "ok": True, "details": {"rows": int(ledger.shape[0])}})
+
+        missing_dimension_cols = [c for c in REQUIRED_LEDGER_DIMENSIONS if c not in ledger.columns]
+        if missing_dimension_cols:
+            errors.append(f"ledger_canonical missing required dimension columns: {missing_dimension_cols}")
+        else:
+            empty_dimension_mask = _empty_required_dimension_mask(ledger, REQUIRED_LEDGER_DIMENSIONS)
+            empty_dimension_rows = int(empty_dimension_mask.sum())
+            hard_fail_empty_dimensions = mode != "smoke"
+            checks.append(
+                {
+                    "name": "ledger_required_dimensions_non_empty",
+                    "ok": empty_dimension_rows == 0 or not hard_fail_empty_dimensions,
+                    "details": {
+                        "columns": REQUIRED_LEDGER_DIMENSIONS,
+                        "empty_rows": empty_dimension_rows,
+                        "severity": "error" if hard_fail_empty_dimensions else "warning",
+                    },
+                }
+            )
+            if empty_dimension_rows and hard_fail_empty_dimensions:
+                errors.append(_format_empty_dimension_error(ledger, REQUIRED_LEDGER_DIMENSIONS))
 
     if per_flow is not None:
         if per_flow.shape[0] <= 0:

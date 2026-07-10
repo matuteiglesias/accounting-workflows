@@ -132,7 +132,7 @@ def aggregate_per_flow(
     df["_amount_for_agg"] = s_amount
     # group and aggregate
     group = ["TimePeriod"] + grp_cols
-    agg = df.groupby(group).agg(_amount_for_agg=("_amount_for_agg", "sum"), n_tx=("tx_id", "nunique"))
+    agg = df.groupby(group, dropna=False).agg(_amount_for_agg=("_amount_for_agg", "sum"), n_tx=("tx_id", "nunique"))
     # reset_index
     agg = agg.reset_index()
     agg = agg.rename(columns={"_amount_for_agg": "amount"})
@@ -252,7 +252,7 @@ def aggregate_per_party(
     LOG.debug("aggregate_per_party prepared rows=%d group_cols=%s", len(df), group_cols)
 
 
-    agg = df.groupby(group_cols).agg(amount=("_amt", "sum"), n_tx=("tx_id", "nunique")).reset_index()
+    agg = df.groupby(group_cols, dropna=False).agg(amount=("_amt", "sum"), n_tx=("tx_id", "nunique")).reset_index()
     agg["TimePeriod_ts_end"] = agg["TimePeriod"].apply(lambda p: p.to_timestamp(how="end") if pd.notna(p) else pd.NaT)
     cols = ["TimePeriod", "TimePeriod_ts_end", "Box", "party", "Currency", "role", "Flujo", "Tipo", "amount", "n_tx"]
 
