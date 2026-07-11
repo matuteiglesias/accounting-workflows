@@ -24,7 +24,6 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
-from accounting.logging_utils import configure_logging, get_logger
 from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.semantic import build_monthly_operating_statement, build_semantic_outputs
 from accounting.core.timeseries import (
@@ -35,6 +34,7 @@ from accounting.core.timeseries import (
     expand_party_rows,
 )
 
+from accounting.logging_utils import configure_logging, get_logger
 LOG = get_logger("materialize")
 
 
