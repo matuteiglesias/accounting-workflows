@@ -32,7 +32,7 @@ METRIC_FILES_BY_CLASS = {
     "public_contract": [
         "annual_balance_dashboard_contract.csv",
         "metric_contract_frontier.csv",
-        "artifact_contracts.csv",
+        # "artifact_contracts.csv",
     ],
     "canonical_dashboard": [
         "annual_balance_dashboard_metrics.csv",
@@ -284,6 +284,8 @@ def _snapshot_file_list(report_info: dict[str, Any], metrics_info: dict[str, Any
     return sorted({str(x) for x in files if x})
 
 
+
+
 def build_publish_contract_qa(paths: PublishPaths, files: list[str]) -> str:
     rows = []
     classes = {Path(f).parts[0] for f in files if Path(f).parts}
@@ -293,7 +295,14 @@ def build_publish_contract_qa(paths: PublishPaths, files: list[str]) -> str:
     add("publish_bundle_labels_all_artifacts", all(Path(f).parts and Path(f).parts[0] in expected | {"report"} or f in {"manifest.json", "artifact_contracts.csv", "publish_contract_qa.csv"} for f in files), f"classes={sorted(classes)}")
     add("no_unsafe_artifacts_in_public_contract", not any(f.startswith("public_contract/") and Path(f).name in {"debt_open_items.csv", "debt_repayment_events.csv"} for f in files), "raw debt files are diagnostic/internal only")
     add("legacy_artifacts_labeled_legacy", not any(Path(f).name in {"income_statement_y.csv", "balance_cash_y.csv"} and not f.startswith("legacy_reconciliation/") for f in files), "legacy annual views under legacy_reconciliation")
-    add("debt_stock_activity_separated", "canonical_dashboard/monthly_debt_position.csv" in files and "canonical_dashboard/monthly_debt_activity.csv" in files, "debt stock/activity canonical contracts are separate")
+    
+    # Updated check for debt stock/activity separation
+    stock_activity_contracts = {"debt_stock", "debt_activity"}
+    stock_activity_present = stock_activity_contracts.intersection(
+        {artifact_contract_for_name(Path(f).name, f).get("artifact_role") for f in files}
+    )
+    add("debt_stock_activity_separated", stock_activity_present == stock_activity_contracts, "debt stock/activity contracts are properly separated in the contract/frontier")
+
     out = paths.public_root / "publish_contract_qa.csv"
     ensure_dir(out.parent)
     import csv

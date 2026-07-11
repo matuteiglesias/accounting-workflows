@@ -435,6 +435,15 @@ smoke-materialize: smoke-ingest
 	@test -s "$(SMOKE_OUT)/monthly_cash_close.csv"
 	@test -s "$(SMOKE_OUT)/monthly_cash_close_qa.csv"
 
+# 2026-07-09T23:34:22Z INFO [materialize] Stage finish outputs={'ledger_canonical.csv': None, 'per_flow_time_long.freq=M.csv': 484, 'per_party_time_long.freq=M.csv': 1030, 'box_balance_time_long.freq=M.csv': 161, 'box_flow_balance_time_long.freq=M.csv': 451, 'loans_time.freq=M.csv': 0, 'daily_cash_position.csv': 65640, 'monthly_cash_close.csv': None, 'monthly_cash_close_qa.csv': None, 'semantic_rule_registry.csv': None, 'classification_audit.csv': None, 'classification_audit_summary.csv': None, 'monthly_flow_semantic_split.csv': None, 'classification_validation.csv': None, 'semantic_leakage_qa.csv': None, 'semantic_dashboard_coverage.csv': None, 'monthly_operating_statement.csv': None, 'monthly_operating_statement_qa.csv': None} partitions=out/run/accounting/20260709T233409Z/partitions.json
+#[FAIL] check_materialize
+#  - ledger_sum != per_flow_sum (diff=110000.0)
+#make[1]: *** [Makefile:672: _check_materialize] Error 2
+#make: *** [Makefile:483: _run_materialize_action] Error 2
+#(new_env) matias@matias-ThinkPad-T470-W10DG:~/repos/accounting-backend$ 
+
+
+
 .PHONY: smoke-views
 smoke-views: smoke-materialize
 	@$(call _guard_out_dir,$(SMOKE_OUT))

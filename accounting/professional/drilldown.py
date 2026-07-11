@@ -297,8 +297,19 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
         return CellSpec(table_id, "amount_out", lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "property_opex") & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_unknown_review_net_matrix":
         return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _unknown_mask(df))
+
     if table_id == "monthly_tables_fx_treasury_compact":
-        return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _fx_mask(df))
+        metric = _metric_name(row)
+        mapping = {
+            "fx_conversion_proceeds": ("amount_in", _fx_mask),
+            "fx_conversion_outflow": ("amount_out", _fx_mask),
+            "fx_cost_or_spread": ("amount_out", _fx_mask),
+            "fx_net": ("net_amount", _fx_mask),
+        }
+        if metric not in mapping:
+            return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _fx_mask(df), unsupported_if=lambda r: True)
+
+
     if table_id == "monthly_tables_fb_bridge_matrix":
         metric = _metric_name(row)
         mapping = {

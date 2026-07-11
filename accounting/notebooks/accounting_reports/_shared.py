@@ -777,10 +777,26 @@ def display_statement(df: pd.DataFrame, title: str, subtitle: str | None = None,
     return out
 
 
-def export_table(df: pd.DataFrame, repo_root: str | Path, filename: str) -> Path:
-    out = professional_pack_dir(repo_root) / "tables" / filename
+# def export_table(df: pd.DataFrame, repo_root: str | Path, filename: str) -> Path:
+#     out = professional_pack_dir(repo_root) / "tables" / filename
+#     out.parent.mkdir(parents=True, exist_ok=True)
+#     df.to_csv(out, index=False)
+#     return out
+
+def export_table(df: pd.DataFrame, repo_root: Path, filename: str) -> Path | None:
+    out = repo_root / "out" / "professional_pack" / "latest" / "tables" / filename
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    if df is None or df.empty:
+        # Avoid writing a zero-byte/headerless CSV that crashes pd.read_csv later.
+        print(f"skip empty table: {filename}")
+        if out.exists():
+            out.unlink()
+            print(f"removed stale empty table: {out}")
+        return None
+
     df.to_csv(out, index=False)
+    print(f"wrote: {out} rows={len(df)} cols={len(df.columns)}")
     return out
 
 
