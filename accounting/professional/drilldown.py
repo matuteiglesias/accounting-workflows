@@ -17,6 +17,9 @@ MANIFEST_FILENAME = "professional_drilldown_manifest.json"
 QA_FILENAME = "professional_drilldown_qa.csv"
 DETAILS_DIRNAME = "details"
 DEFAULT_TOLERANCE = 1e-6
+FAST_TABLE_CELL_LIMIT = 100
+MAX_TABLE_CELL_LIMIT = 500
+TABLE_TOO_LARGE_WARNING = "Table has too many cells to afford triggering drilldowns; skipping drilldown build for this table."
 STATUS_OK = "ok"
 STATUS_EMPTY = "empty"
 STATUS_RESIDUAL_WARNING = "residual_warning"
@@ -2452,6 +2455,7 @@ def build_professional_flow_drilldowns(
     run_root: Path | None = None,
     tables_dir: Path | None = None,
     tolerance: float = DEFAULT_TOLERANCE,
+    fast: bool = False,
 ) -> dict[str, Path]:
     t0 = time.perf_counter()
 
@@ -2463,12 +2467,13 @@ def build_professional_flow_drilldowns(
 
     LOG.info(
         "[drilldown] start build_professional_flow_drilldowns "
-        "repo_root=%s pack_dir=%s run_root=%s tables_dir=%s tolerance=%s",
+        "repo_root=%s pack_dir=%s run_root=%s tables_dir=%s tolerance=%s fast=%s",
         repo_root,
         pack_dir,
         run_root,
         tables_dir,
         tolerance,
+        fast,
     )
 
     details_dir.mkdir(parents=True, exist_ok=True)
@@ -2485,7 +2490,8 @@ def build_professional_flow_drilldowns(
     debt_position_path = _find_source(repo_root, pack_dir, run_root, "monthly_debt_position.csv")
 
     LOG.info(
-        "[drilldown] source paths found: split=%s audit=%s stmt=%s annual=%s",
+        "[drilldown] source paths found: split=%s audit=%s stmt=%s annual=%s "
+        "cash_close=%s debt_activity=%s debt_position=%s",
         split_path,
         audit_path,
         stmt_path,
@@ -2587,7 +2593,13 @@ def build_professional_flow_drilldowns(
     index_rows: list[dict[str, Any]] = []
     qa_rows: list[dict[str, Any]] = []
 
-    LOG.info("[drilldown] processing %s supported tables", len(scope))
+    table_cell_limit = FAST_TABLE_CELL_LIMIT if fast else MAX_TABLE_CELL_LIMIT
+    LOG.info(
+        "[drilldown] processing %s supported tables fast=%s table_cell_limit=%s",
+        len(scope),
+        fast,
+        table_cell_limit,
+    )
 
     overall_cell_i = 0
     overall_table_i = 0
@@ -2659,6 +2671,33 @@ def build_professional_flow_drilldowns(
             months[-1],
             table_total_cells,
         )
+
+        if table_total_cells > table_cell_limit:
+            detail = (
+                f"{TABLE_TOO_LARGE_WARNING} table_id={table_id}; "
+                f"cells={table_total_cells}; rows={len(table)}; periods={len(months)}; "
+                f"limit={table_cell_limit}; fast={fast}"
+            )
+            LOG.warning("[drilldown] %s", detail)
+            qa_rows.append(
+                {
+                    "table_id": table_id,
+                    "drilldown_id": "",
+                    "check": "table_cell_limit",
+                    "status": "warning",
+                    "detail": detail,
+                }
+            )
+            table_status_counts["skipped_table_too_large"] = 1
+            LOG.info(
+                "[drilldown] table skipped table_id=%s cells=%s limit=%s fast=%s elapsed=%.2fs",
+                table_id,
+                table_total_cells,
+                table_cell_limit,
+                fast,
+                time.perf_counter() - table_t0,
+            )
+            continue
 
         for row_pos, (row_idx, row) in enumerate(table.iterrows(), start=1):
             row_t0 = time.perf_counter()
@@ -3241,6 +3280,10 @@ def build_professional_flow_drilldowns(
         "monthly_debt_activity": str(debt_activity_path or ""),
         "monthly_debt_position": str(debt_position_path or ""),
         "tolerance": tolerance,
+        "fast": bool(fast),
+        "table_cell_limit": int(table_cell_limit),
+        "max_table_cell_limit": int(MAX_TABLE_CELL_LIMIT),
+        "fast_table_cell_limit": int(FAST_TABLE_CELL_LIMIT),
         "index_rows": int(len(index)),
         "qa_rows": int(len(qa)),
         "status_counts": index["status"].value_counts().to_dict() if not index.empty else {},
@@ -3284,8 +3327,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-root", type=Path, default=None)
     parser.add_argument("--tables-dir", type=Path, default=None)
     parser.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip professional drilldown builds for tables with more than 100 cells.",
+    )
     args = parser.parse_args(argv)
-    paths = build_professional_flow_drilldowns(args.repo_root, args.pack, args.run_root, args.tables_dir, args.tolerance)
+    paths = build_professional_flow_drilldowns(
+        args.repo_root,
+        args.pack,
+        args.run_root,
+        args.tables_dir,
+        args.tolerance,
+        fast=args.fast,
+    )
     for name, path in paths.items():
         print(f"{name}: {path}")
     return 0

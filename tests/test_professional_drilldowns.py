@@ -215,3 +215,79 @@ def test_derived_statement_and_annual_drilldowns_link_supported_flows(tmp_path: 
     text = digest.read_text(encoding="utf-8")
     assert "monthly_tables_operating_statement_matrix" in text
     assert text.count("class='drilldown'") >= 5
+
+
+def test_fast_mode_skips_tables_over_100_cells(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    rows = [
+        {
+            "measure": "amount_out",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "property_opex",
+            "semantic_subbucket": f"services_{i}",
+            "2026-01": 1,
+        }
+        for i in range(101)
+    ]
+    _write(tables / "monthly_tables_flow_subbucket_all_measures.csv", rows)
+
+    paths = build_professional_flow_drilldowns(repo, pack, run, fast=True)
+    index = pd.read_csv(paths["index"])
+    qa = pd.read_csv(paths["qa"])
+    manifest = pd.read_json(paths["manifest"], typ="series")
+
+    assert index.empty
+    warnings = qa[
+        qa["table_id"].eq("monthly_tables_flow_subbucket_all_measures")
+        & qa["check"].eq("table_cell_limit")
+    ]
+    assert len(warnings) == 1
+    assert warnings.iloc[0]["status"] == "warning"
+    assert "Table has too many cells to afford triggering drilldowns" in warnings.iloc[0]["detail"]
+    assert "cells=101" in warnings.iloc[0]["detail"]
+    assert "limit=100" in warnings.iloc[0]["detail"]
+    assert bool(manifest["fast"]) is True
+    assert int(manifest["table_cell_limit"]) == 100
+
+
+def test_default_mode_skips_tables_over_500_cells(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    rows = [
+        {
+            "measure": "amount_out",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "property_opex",
+            "semantic_subbucket": f"services_{i}",
+            "2026-01": 1,
+        }
+        for i in range(501)
+    ]
+    _write(tables / "monthly_tables_flow_subbucket_all_measures.csv", rows)
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+    qa = pd.read_csv(paths["qa"])
+    manifest = pd.read_json(paths["manifest"], typ="series")
+
+    assert index.empty
+    warnings = qa[
+        qa["table_id"].eq("monthly_tables_flow_subbucket_all_measures")
+        & qa["check"].eq("table_cell_limit")
+    ]
+    assert len(warnings) == 1
+    assert warnings.iloc[0]["status"] == "warning"
+    assert "Table has too many cells to afford triggering drilldowns" in warnings.iloc[0]["detail"]
+    assert "cells=501" in warnings.iloc[0]["detail"]
+    assert "limit=500" in warnings.iloc[0]["detail"]
+    assert bool(manifest["fast"]) is False
+    assert int(manifest["table_cell_limit"]) == 500
