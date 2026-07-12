@@ -111,6 +111,8 @@ def test_enrich_professional_table_adds_overview_annual_metric_contracts() -> No
             {"Currency": "ARS", "metric": "Funding / aportes", "2026": 100},
             {"Currency": "ARS", "metric": "Retiros / gasto personal", "2026": 80},
             {"Currency": "ARS", "metric": "Dividendos", "2026": 20},
+            {"Currency": "ARS", "metric": "Cobertura después de funding y retiros", "metric_id": "FUND.CONTRIB.TOTAL", "2026": 150},
+            {"Currency": "ARS", "metric": "Retiros / resultado operativo", "metric_id": "FUND.CONTRIB.TOTAL", "2026": 0.4},
             {"Currency": "ARS", "metric": "Deuda total abierta", "metric_id": "FUND.CONTRIB.DEBT_LINKED", "2026": 300},
             {"Currency": "ARS", "metric": "Principal abierto", "2026": 250},
             {"Currency": "ARS", "metric": "Interés abierto", "2026": 50},
@@ -123,6 +125,8 @@ def test_enrich_professional_table_adds_overview_annual_metric_contracts() -> No
         "Funding / aportes": "FUND.CONTRIB.TOTAL",
         "Retiros / gasto personal": "DIST.DRAWS.PERSONAL",
         "Dividendos": "DIST.DIVIDENDS",
+        "Cobertura después de funding y retiros": "COV.NET.AFTER_DRAWS",
+        "Retiros / resultado operativo": "RATIO.DRAWS_TO_OPERATING_RESULT",
         "Deuda total abierta": "ID.DEBT.TOTAL.OPEN",
         "Principal abierto": "ID.DEBT.PRINCIPAL.OPEN",
         "Interés abierto": "ID.DEBT.INTEREST.OPEN",
@@ -133,6 +137,9 @@ def test_enrich_professional_table_adds_overview_annual_metric_contracts() -> No
     debt = out[out["metric"].eq("Deuda total abierta")].iloc[0]
     assert debt["dimension_name"] == ""
     assert debt["funding_channel"] == ""
+
+    formula_ratio = out[out["metric"].isin(["Cobertura después de funding y retiros", "Retiros / resultado operativo"])]
+    assert not formula_ratio["metric_id"].eq("FUND.CONTRIB.TOTAL").any()
 
 
 def test_enrich_professional_table_keeps_cash_bridge_net_debt_signed() -> None:
