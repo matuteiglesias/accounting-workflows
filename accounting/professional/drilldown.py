@@ -318,6 +318,9 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
         "amount_abs": "amount_abs",
     }
 
+    if metric in {"", "monthly_tables_fx_treasury_compact"} and table_id == "monthly_tables_fx_treasury_compact":
+        return "net_amount"
+
     return mapping.get(metric, "")
 
 
@@ -765,6 +768,49 @@ def _funding_metric_semantic_mask(split: pd.DataFrame, metric_id: str) -> pd.Ser
     return pd.Series(False, index=split.index)
 
 
+
+
+ANNUAL_PRESENTATION_METRIC_IDS = {
+    "funding / aportes": "FUND.CONTRIB.TOTAL",
+    "aportes": "FUND.CONTRIB.TOTAL",
+    "retiros / gasto personal": "DIST.DRAWS.PERSONAL",
+    "gasto personal": "DIST.DRAWS.PERSONAL",
+    "dividendos": "DIST.DIVIDENDS",
+    "deuda total abierta": "ID.DEBT.TOTAL.OPEN",
+    "principal abierto": "ID.DEBT.PRINCIPAL.OPEN",
+    "interés abierto": "ID.DEBT.INTEREST.OPEN",
+    "interes abierto": "ID.DEBT.INTEREST.OPEN",
+}
+
+ANNUAL_METRIC_ID_ALIASES = {
+    "ID.DEBT.TOTAL.OPEN": ("BS.DEBT.TOTAL.OPEN",),
+    "ID.DEBT.PRINCIPAL.OPEN": ("BS.DEBT.PRINCIPAL.OPEN",),
+    "ID.DEBT.INTEREST.OPEN": ("BS.DEBT.INTEREST.OPEN",),
+    "BS.DEBT.TOTAL.OPEN": ("ID.DEBT.TOTAL.OPEN",),
+    "BS.DEBT.PRINCIPAL.OPEN": ("ID.DEBT.PRINCIPAL.OPEN",),
+    "BS.DEBT.INTEREST.OPEN": ("ID.DEBT.INTEREST.OPEN",),
+}
+
+def _annual_metric_id_for_row(row: pd.Series) -> str:
+    """Stable annual metric id from row metadata, falling back from Spanish labels."""
+    candidates = _annual_metric_id_candidates_for_row(row)
+    return candidates[0] if candidates else ""
+
+
+def _annual_metric_id_candidates_for_row(row: pd.Series) -> list[str]:
+    """Candidate metric IDs, including compatibility aliases for renamed contracts."""
+    explicit = _norm(row.get("metric_id"))
+    label = _metric_name(row)
+    # Curated professional presentation labels win over injected metadata;
+    # table-contract enrichment can otherwise stamp a generic metric_id that
+    # conflicts with the human row object (notably stock/debt labels).
+    primary = ANNUAL_PRESENTATION_METRIC_IDS.get(label.casefold()) or explicit or label
+    if not primary:
+        return []
+    out = [primary]
+    out.extend(ANNUAL_METRIC_ID_ALIASES.get(primary, ()))
+    return list(dict.fromkeys(out))
+
 def _statement_components(stmt: pd.DataFrame, period: str, currency: str, component_lines: list[str]) -> pd.DataFrame:
     if stmt.empty:
         return pd.DataFrame()
@@ -777,10 +823,15 @@ def _statement_components(stmt: pd.DataFrame, period: str, currency: str, compon
 def _annual_source_rows(annual: pd.DataFrame, row: pd.Series, period: str) -> pd.DataFrame:
     if annual.empty:
         return pd.DataFrame()
-    metric_id = _norm(_first_present(row, "metric_id", "metric", "line"))
+
+    # Match on stable metadata first. Human-facing Spanish labels such as
+    # "Funding / aportes" intentionally do not have to share tokens with the
+    # internal metric contract (for example FUND.CONTRIB.TOTAL).
+    metric_ids = _annual_metric_id_candidates_for_row(row)
     mask = annual.get("period", pd.Series("", index=annual.index)).astype(str).eq(str(period)) & _eq_col(annual, "Currency", row.get("Currency"))
-    if metric_id and "metric_id" in annual.columns:
-        mask &= annual["metric_id"].astype(str).eq(metric_id)
+    if metric_ids and "metric_id" in annual.columns:
+        mask &= annual["metric_id"].astype(str).isin(metric_ids)
+
     for dim_col in ["dimension_name", "dimension_value", "section", "dashboard_section"]:
         if dim_col in row.index and dim_col in annual.columns and _norm(row.get(dim_col)):
             mask &= annual[dim_col].astype(str).eq(_as_str(row.get(dim_col)))
@@ -1123,6 +1174,136 @@ def _extract_after_marker(text: str, marker: str) -> str:
         return ""
     return text.split(marker, 1)[1].strip()
 
+
+
+
+@dataclass(frozen=True)
+class AnnualFormulaSpec:
+    formula_id: str
+    label: str
+    component_metric_ids: tuple[str, ...]
+    formula: str
+
+
+def _annual_formula_spec(row: pd.Series) -> AnnualFormulaSpec | None:
+    """Formula/ratio presentation rows that should not look for one raw row."""
+    label = _metric_name(row).casefold().strip()
+    if label == "margen operativo":
+        return AnnualFormulaSpec(
+            "operating_margin",
+            "Margen operativo",
+            ("IS.NET.OPERATING", "IS.REVENUE.OPERATING"),
+            "IS.NET.OPERATING / IS.REVENUE.OPERATING",
+        )
+    if label == "opex / renta":
+        return AnnualFormulaSpec(
+            "opex_to_rent",
+            "OPEX / renta",
+            ("IS.OPEX.PROPERTY", "IS.REVENUE.OPERATING"),
+            "IS.OPEX.PROPERTY / IS.REVENUE.OPERATING",
+        )
+    if label == "retiros / resultado operativo":
+        return AnnualFormulaSpec(
+            "draws_to_operating_result",
+            "Retiros / resultado operativo",
+            ("DIST.DRAWS.PERSONAL", "IS.NET.OPERATING"),
+            "DIST.DRAWS.PERSONAL / IS.NET.OPERATING",
+        )
+    if label == "cobertura después de funding y retiros":
+        return AnnualFormulaSpec(
+            "coverage_after_funding_and_draws",
+            "Cobertura después de funding y retiros",
+            ("COV.NET.AFTER_DRAWS", "IS.NET.OPERATING", "FUND.CONTRIB.TOTAL", "DIST.DRAWS.PERSONAL"),
+            "COV.NET.AFTER_DRAWS or IS.NET.OPERATING + FUND.CONTRIB.TOTAL - DIST.DRAWS.PERSONAL",
+        )
+    return None
+
+
+def _annual_component_rows(annual: pd.DataFrame, period: str, currency: str, metric_ids: tuple[str, ...]) -> pd.DataFrame:
+    if annual.empty:
+        return pd.DataFrame()
+    mask = annual.get("period", pd.Series("", index=annual.index)).astype(str).eq(str(period)) & _eq_col(annual, "Currency", currency)
+    if "metric_id" in annual.columns:
+        mask &= annual["metric_id"].astype(str).isin(metric_ids)
+    return annual.loc[mask].copy()
+
+
+def _value_by_metric(component_rows: pd.DataFrame) -> dict[str, float]:
+    if component_rows.empty or "metric_id" not in component_rows.columns:
+        return {}
+    values: dict[str, float] = {}
+    for metric_id, group in component_rows.groupby(component_rows["metric_id"].astype(str), dropna=False):
+        values[str(metric_id)] = _measure_sum(group, "value")
+    return values
+
+
+def _safe_div(numerator: float, denominator: float) -> float:
+    return numerator / denominator if abs(denominator) > DEFAULT_TOLERANCE else 0.0
+
+
+def _build_annual_formula_cell(
+    *,
+    table_id: str,
+    row: pd.Series,
+    period: str,
+    currency: str,
+    display_value: float,
+    annual: pd.DataFrame,
+    tolerance: float,
+) -> tuple[str, float, float, str, str, dict[str, Any], str, pd.DataFrame, list[tuple[str, pd.DataFrame]]] | None:
+    spec = _annual_formula_spec(row)
+    if spec is None:
+        return None
+
+    component_rows = _annual_component_rows(annual, period, currency, spec.component_metric_ids)
+    values = _value_by_metric(component_rows)
+
+    if spec.formula_id == "operating_margin":
+        matched = _safe_div(values.get("IS.NET.OPERATING", 0.0), values.get("IS.REVENUE.OPERATING", 0.0))
+    elif spec.formula_id == "opex_to_rent":
+        matched = _safe_div(values.get("IS.OPEX.PROPERTY", 0.0), values.get("IS.REVENUE.OPERATING", 0.0))
+    elif spec.formula_id == "draws_to_operating_result":
+        matched = _safe_div(values.get("DIST.DRAWS.PERSONAL", 0.0), values.get("IS.NET.OPERATING", 0.0))
+    elif spec.formula_id == "coverage_after_funding_and_draws":
+        matched = values.get(
+            "COV.NET.AFTER_DRAWS",
+            values.get("IS.NET.OPERATING", 0.0) + values.get("FUND.CONTRIB.TOTAL", 0.0) - values.get("DIST.DRAWS.PERSONAL", 0.0),
+        )
+    else:
+        matched = 0.0
+
+    residual = matched - display_value
+    status = STATUS_EMPTY if component_rows.empty else STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+    formula_rows = pd.DataFrame([
+        {
+            "formula_id": spec.formula_id,
+            "formula": spec.formula,
+            "displayed_value": display_value,
+            "matched_value": matched,
+            "residual": residual,
+            **values,
+        }
+    ])
+    sections = [("Formula", formula_rows), ("Component annual rows", component_rows)]
+    filters = {
+        "period": period,
+        "Currency": currency,
+        "formula_id": spec.formula_id,
+        "formula": spec.formula,
+        "component_metric_ids": list(spec.component_metric_ids),
+        "row_context": _row_context(table_id, row),
+    }
+    return (
+        status,
+        matched,
+        residual,
+        "annual_formula_components",
+        "annual_balance_dashboard_metrics.csv",
+        filters,
+        "Formula/ratio drilldown: components are annual metric rows, not one raw ledger row.",
+        component_rows if not component_rows.empty else formula_rows,
+        sections,
+    )
 
 def _annual_professional_line_spec(
     row: pd.Series,
@@ -2408,6 +2589,18 @@ def _build_derived_cell(
         return status, matched, residual, lineage, "monthly_operating_statement.csv", filters, caveat, detail_rows if not detail_rows.empty else source, sections
 
     if table_id in {"overview_balance_dashboard", "income_operating_statement"}:
+        formula_cell = _build_annual_formula_cell(
+            table_id=table_id,
+            row=row,
+            period=period,
+            currency=currency,
+            display_value=display_value,
+            annual=annual,
+            tolerance=tolerance,
+        )
+        if formula_cell is not None:
+            return formula_cell
+
         annual_rows = _annual_source_rows(annual, row, period)
 
         if annual.empty or annual_rows.empty:
@@ -2429,7 +2622,26 @@ def _build_derived_cell(
         source_table = _norm(annual_rows.iloc[0].get("source_table"))
         flow_type = _norm(annual_rows.iloc[0].get("flow_type"))
         calc_rule = _norm(annual_rows.iloc[0].get("calculation_rule"))
-        if flow_type == "stock" or source_table in {"monthly_cash_close.csv", "monthly_debt_position.csv"}:
+        if source_table == "monthly_debt_position.csv":
+            matched = _measure_sum(annual_rows, "value")
+            metric_id = _norm(annual_rows.iloc[0].get("metric_id"))
+            debt_rows = debt_position.loc[_year_mask(debt_position, period) & _eq_col(debt_position, "Currency", currency)].copy() if not debt_position.empty else pd.DataFrame()
+            component = ""
+            if metric_id in {"ID.DEBT.TOTAL.OPEN", "BS.DEBT.TOTAL.OPEN"}:
+                component = "total"
+            elif metric_id in {"ID.DEBT.PRINCIPAL.OPEN", "BS.DEBT.PRINCIPAL.OPEN"}:
+                component = "principal"
+            elif metric_id in {"ID.DEBT.INTEREST.OPEN", "BS.DEBT.INTEREST.OPEN"}:
+                component = "interest"
+            if component and not debt_rows.empty and "component" in debt_rows.columns:
+                debt_rows = debt_rows.loc[_source_filter_eq(debt_rows, "component", component)].copy()
+            residual = matched - display_value
+            status = STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+            sections = [("Annual metric row", annual_rows), ("Debt position rows", debt_rows)]
+            filters = {"period": period, "Currency": currency, "metric_id": metric_id, "source_table": source_table, "component": component, "row_context": _row_context(table_id, row)}
+            return status, matched, residual, "annual_to_monthly_debt_position", "annual_balance_dashboard_metrics.csv", filters, "Debt stock lineage uses monthly_debt_position.csv, not flow split rows.", debt_rows if not debt_rows.empty else annual_rows, sections
+
+        if flow_type == "stock" or source_table == "monthly_cash_close.csv":
             return STATUS_UNSUPPORTED, 0.0, -display_value, "unsupported", "annual_balance_dashboard_metrics.csv", {"unsupported": True, "reason": "stock/cash metric is not a flow drilldown", "source_table": source_table}, "Stock/cash metrics are not treated as flow ledger drilldowns.", annual_rows, [("Annual metric row", annual_rows)]
         matched = _measure_sum(annual_rows, "value")
         sections.append(("Annual metric row", annual_rows))
@@ -2452,12 +2664,14 @@ def _build_derived_cell(
                 sem_mask &= _bucket_eq(split, "operating_revenue") & _eq_col(split, "semantic_subbucket", "rent")
             elif metric_id in {"IS.OPEX.BY_CATEGORY"}:
                 sem_mask &= _bucket_eq(split, "property_opex")
-            elif metric_id in {"FUND.CONTRIB.BY_ACTOR"}:
+            elif metric_id in {"FUND.CONTRIB.TOTAL", "FUND.CONTRIB.BY_ACTOR"}:
                 sem_mask &= _bucket_eq(split, "funding_contribution")
             elif metric_id.startswith("FUND.CONTRIB."):
                 sem_mask &= _funding_metric_semantic_mask(split, metric_id)
-            elif metric_id in {"DIST.DRAWS.BY_TYPE"}:
+            elif metric_id in {"DIST.DRAWS.PERSONAL", "DIST.DRAWS.BY_TYPE", "DIST.DIVIDENDS"}:
                 sem_mask &= _bucket_eq(split, "family_withdrawal_candidate")
+                if metric_id == "DIST.DIVIDENDS" and "semantic_subbucket" in split.columns:
+                    sem_mask &= _regex_any(split["semantic_subbucket"], r"dividend|dividendo")
             if dim_name and dim_value and dim_name in split.columns:
                 sem_mask &= _eq_col(split, dim_name, dim_value)
             semantic_rows = split.loc[sem_mask].copy()
