@@ -618,3 +618,50 @@ def test_cash_annual_bridge_net_debt_movement_uses_signed_net_amount(tmp_path: P
     assert row["matched_value_sum"] == -60
     assert row["residual"] == 0
     assert "movimiento_neto_deuda" in row["filter_json"]
+
+def test_debt_position_drilldown_uses_latest_snapshot_not_month_sum(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2025-03", "as_of_date": "2025-03-19", "Currency": "USD", "debtor": "PM", "creditor": "MI", "component": "principal", "open_amount": 8804.2, "open_principal": 8804.2, "open_interest": 104.0, "open_total": 8908.2},
+        {"period": "2025-03", "as_of_date": "2025-03-31", "Currency": "USD", "debtor": "PM", "creditor": "MI", "component": "principal", "open_amount": 8726.2, "open_principal": 8726.2, "open_interest": 0.0, "open_total": 8726.2},
+        {"period": "2025-03", "as_of_date": "2025-03-31", "Currency": "USD", "debtor": "Alejandro", "creditor": "PM", "component": "principal", "open_amount": 100.0, "open_principal": 100.0, "open_interest": 0.0, "open_total": 100.0},
+        {"period": "2025-03", "as_of_date": "2025-03-31", "Currency": "USD", "debtor": "Hector", "creditor": "MI", "component": "principal", "open_amount": 200.0, "open_principal": 200.0, "open_interest": 0.0, "open_total": 200.0},
+        {"period": "2025-03", "as_of_date": "2025-03-31", "Currency": "USD", "debtor": "PM", "creditor": "Primos", "component": "principal", "open_amount": 300.0, "open_principal": 300.0, "open_interest": 0.0, "open_total": 300.0},
+    ])
+    _write(tables / "monthly_tables_debt_position_matrix.csv", [
+        {"measure": "open_principal", "Currency": "USD", "pair": "PM → MI", "metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR", "dimension_name": "funding_actor", "dimension_value": "Matías", "funding_actor": "Matías", "2025-03": 8726.2},
+        {"measure": "open_principal", "Currency": "USD", "pair": "Alejandro → PM", "2025-03": 100.0},
+        {"measure": "open_principal", "Currency": "USD", "pair": "Hector → MI", "2025-03": 200.0},
+        {"measure": "open_principal", "Currency": "USD", "pair": "PM → Primos", "2025-03": 300.0},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    debt_rows = index[index["table_id"].eq("monthly_tables_debt_position_matrix")].copy()
+    row = debt_rows[debt_rows["filter_json"].str.contains('"pair": "PM → MI"', na=False)].iloc[0]
+    assert row["status"] == "ok"
+    assert float(row["matched_value_sum"]) == 8726.2
+    assert int(row["matched_rows"]) == 1
+    assert float(row["residual"]) == 0.0
+    assert "FUND.CONTRIB" not in row["filter_json"]
+    assert "funding_actor" not in row["filter_json"]
+    assert "Matías" not in row["filter_json"]
+
+    detail_csv = (pack / row["detail_csv_relpath"]).read_text(encoding="utf-8")
+    detail_html = (pack / row["detail_html_relpath"]).read_text(encoding="utf-8")
+    assert "2025-03-31" in detail_csv
+    assert "2025-03-19" not in detail_csv
+    assert "Selected monthly close snapshot" in detail_html
+    assert "All candidate snapshots in period" in detail_html
+    assert "2025-03-19" in detail_html
+
+    singles = debt_rows[debt_rows["filter_json"].str.contains("Alejandro → PM|Hector → MI|PM → Primos", na=False)]
+    assert len(singles) == 3
+    assert set(singles["status"]) == {"ok"}
+    assert set(singles["matched_rows"].astype(int)) == {1}
+    assert singles["residual"].astype(float).abs().sum() == 0.0

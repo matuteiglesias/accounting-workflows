@@ -81,6 +81,30 @@ def test_enrich_professional_table_does_not_contaminate_debt_position_matrix() -
     assert "metric_id" not in out.columns
 
 
+def test_enrich_professional_table_clears_stale_funding_metadata_from_debt_matrix() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Currency": "USD",
+                "measure": "open_principal",
+                "pair": "PM → MI",
+                "metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR",
+                "dimension_name": "funding_actor",
+                "dimension_value": "Matías",
+                "funding_actor": "Matías",
+                "2025-03": 8726.2,
+            }
+        ]
+    )
+
+    out = enrich_professional_table(df, "monthly_tables_debt_position_matrix")
+
+    assert out.loc[0, "metric_id"] == ""
+    assert out.loc[0, "dimension_name"] == ""
+    assert out.loc[0, "dimension_value"] == ""
+    assert out.loc[0, "funding_actor"] == ""
+
+
 def test_enrich_professional_table_adds_overview_annual_metric_contracts() -> None:
     df = pd.DataFrame(
         [

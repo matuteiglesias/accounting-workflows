@@ -2389,6 +2389,32 @@ DEBT_COMPONENT_FOR_MEASURE = {
 }
 
 
+def _select_monthly_debt_position_snapshot(rows: pd.DataFrame) -> pd.DataFrame:
+    """Return the selected monthly debt stock snapshot for a filtered cell.
+
+    Debt position rows are stock snapshots, not flows.  When more than one
+    snapshot exists for the same period / debtor / creditor / currency /
+    component, reconciliation must use the latest as_of_date in the period
+    instead of summing all snapshots.
+    """
+    if rows.empty or "as_of_date" not in rows.columns:
+        return rows.copy()
+
+    out = rows.copy()
+    out["__as_of_date"] = pd.to_datetime(out["as_of_date"], errors="coerce")
+    valid = out["__as_of_date"].notna()
+    if not valid.any():
+        return out.drop(columns=["__as_of_date"])
+
+    selected = (
+        out.loc[valid]
+        .sort_values(["__as_of_date"], na_position="first")
+        .tail(1)
+        .copy()
+    )
+    return selected.drop(columns=["__as_of_date"])
+
+
 def _build_debt_position_cell(
     *,
     row: pd.Series,
@@ -2447,8 +2473,9 @@ def _build_debt_position_cell(
     if component and "component" in debt_position.columns:
         mask &= _source_filter_eq(debt_position, "component", component)
 
-    source = debt_position.loc[mask].copy()
-    matched = _measure_sum(source, measure)
+    candidates = debt_position.loc[mask].copy()
+    source = _select_monthly_debt_position_snapshot(candidates)
+    matched = _num(source.iloc[0].get(measure)) if not source.empty else 0.0
     residual = matched - display_value
 
     status = (
@@ -2470,7 +2497,10 @@ def _build_debt_position_cell(
         "source": "monthly_debt_position.csv",
     }
 
-    sections = [("Debt position rows", source)]
+    sections = [
+        ("Selected monthly close snapshot", source),
+        ("All candidate snapshots in period", candidates),
+    ]
 
     return (
         status,
