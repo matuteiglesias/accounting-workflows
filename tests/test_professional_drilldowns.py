@@ -397,9 +397,10 @@ def test_funding_drilldowns_use_stable_metric_contracts_and_debt_evidence(tmp_pa
     assert "Debt activity rows" in debt_html
     assert "Debt position rows" in debt_html
 
-    debt_stock = index[index["filter_json"].str.contains("stock/cash metric", na=False)]
+    debt_stock = index[index["filter_json"].str.contains("monthly_debt_position.csv", na=False)]
     assert not debt_stock.empty
-    assert set(debt_stock["status"]) == {"unsupported"}
+    assert set(debt_stock["status"]) == {"ok"}
+    assert set(debt_stock["lineage_level"]) == {"annual_to_monthly_debt_position"}
 
 
 def test_fast_mode_skips_tables_over_100_cells(tmp_path: Path) -> None:
@@ -476,3 +477,119 @@ def test_default_mode_skips_tables_over_500_cells(tmp_path: Path) -> None:
     assert "limit=500" in warnings.iloc[0]["detail"]
     assert bool(manifest["fast"]) is False
     assert int(manifest["table_cell_limit"]) == 500
+
+
+def test_annual_human_labels_match_stable_metric_ids(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_flow_semantic_split.csv", [
+        {"period": "2023-01", "Currency": "ARS", "semantic_bucket": "funding_contribution", "semantic_subbucket": "owner_contribution", "amount_in": 2006220, "amount_out": 0, "net_amount": 2006220, "amount_abs": 2006220, "n_tx": 1, "source_tx_ids_sample": "fund1"},
+    ])
+    _write(run / "classification_audit.csv", [
+        {"tx_id": "fund1", "period": "2023-01", "Currency": "ARS", "amount": 2006220, "semantic_bucket": "funding_contribution", "semantic_subbucket": "owner_contribution"},
+    ])
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "FUND.CONTRIB.TOTAL", "period": "2023", "Currency": "ARS", "value": 2006220, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "source_filter": "semantic_bucket=funding_contribution"},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"Currency": "ARS", "metric": "Funding / aportes", "2023": 2006220},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    assert index.iloc[0]["status"] == "ok"
+    assert "FUND.CONTRIB.TOTAL" in index.iloc[0]["filter_json"] or "funding_contribution" in index.iloc[0]["filter_json"]
+    html = (pack / index.iloc[0]["detail_html_relpath"]).read_text(encoding="utf-8")
+    assert "Annual metric row" in html
+    assert "Semantic rows" in html
+
+
+def test_annual_debt_stock_links_to_monthly_debt_position(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2026-12", "Currency": "USD", "debtor": "Property Management", "creditor": "Matias", "component": "total", "open_amount": 50, "open_total": 50, "open_principal": 40, "open_interest": 10},
+    ])
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "BS.DEBT.TOTAL.OPEN", "period": "2026", "Currency": "USD", "value": 50, "flow_type": "stock", "source_table": "monthly_debt_position.csv", "source_filter": "component=total"},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"Currency": "USD", "metric_id": "BS.DEBT.TOTAL.OPEN", "metric": "Deuda total abierta", "2026": 50},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    assert index.iloc[0]["status"] == "ok"
+    assert index.iloc[0]["lineage_level"] == "annual_to_monthly_debt_position"
+    html = (pack / index.iloc[0]["detail_html_relpath"]).read_text(encoding="utf-8")
+    assert "Debt position rows" in html
+
+
+def test_annual_formula_ratio_rows_build_formula_pages(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "IS.REVENUE.OPERATING", "period": "2026", "Currency": "ARS", "value": 1000, "flow_type": "flow", "source_table": "monthly_operating_statement.csv"},
+        {"metric_id": "IS.OPEX.PROPERTY", "period": "2026", "Currency": "ARS", "value": 250, "flow_type": "flow", "source_table": "monthly_operating_statement.csv"},
+        {"metric_id": "IS.NET.OPERATING", "period": "2026", "Currency": "ARS", "value": 750, "flow_type": "flow", "source_table": "monthly_operating_statement.csv"},
+        {"metric_id": "DIST.DRAWS.PERSONAL", "period": "2026", "Currency": "ARS", "value": 300, "flow_type": "flow", "source_table": "monthly_operating_statement.csv"},
+        {"metric_id": "FUND.CONTRIB.TOTAL", "period": "2026", "Currency": "ARS", "value": 100, "flow_type": "flow", "source_table": "monthly_operating_statement.csv"},
+        {"metric_id": "COV.NET.AFTER_DRAWS", "period": "2026", "Currency": "ARS", "value": 550, "flow_type": "mixed", "source_table": "monthly_operating_statement.csv"},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"Currency": "ARS", "metric": "Margen operativo", "2026": 0.75},
+        {"Currency": "ARS", "metric": "OPEX / renta", "2026": 0.25},
+        {"Currency": "ARS", "metric": "Retiros / resultado operativo", "2026": 0.4},
+        {"Currency": "ARS", "metric": "Cobertura después de funding y retiros", "2026": 550},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    assert set(index["status"]) == {"ok"}
+    assert set(index["lineage_level"]) == {"annual_formula_components"}
+    for relpath in index["detail_html_relpath"]:
+        html = (pack / relpath).read_text(encoding="utf-8")
+        assert "Formula" in html
+        assert "Component annual rows" in html
+
+
+def test_annual_debt_stock_spanish_labels_match_id_metric_contracts(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2026-12", "Currency": "USD", "debtor": "Property Management", "creditor": "Matias", "component": "total", "open_amount": 50, "open_total": 50, "open_principal": 40, "open_interest": 10},
+        {"period": "2026-12", "Currency": "USD", "debtor": "Property Management", "creditor": "Matias", "component": "principal", "open_amount": 40, "open_total": 50, "open_principal": 40, "open_interest": 0},
+        {"period": "2026-12", "Currency": "USD", "debtor": "Property Management", "creditor": "Matias", "component": "interest", "open_amount": 10, "open_total": 50, "open_principal": 0, "open_interest": 10},
+    ])
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "ID.DEBT.TOTAL.OPEN", "period": "2026", "Currency": "USD", "value": 50, "flow_type": "stock", "source_table": "monthly_debt_position.csv", "source_filter": "component=total"},
+        {"metric_id": "ID.DEBT.PRINCIPAL.OPEN", "period": "2026", "Currency": "USD", "value": 40, "flow_type": "stock", "source_table": "monthly_debt_position.csv", "source_filter": "component=principal"},
+        {"metric_id": "ID.DEBT.INTEREST.OPEN", "period": "2026", "Currency": "USD", "value": 10, "flow_type": "stock", "source_table": "monthly_debt_position.csv", "source_filter": "component=interest"},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"Currency": "USD", "metric": "Deuda total abierta", "2026": 50},
+        {"Currency": "USD", "metric": "Principal abierto", "2026": 40},
+        {"Currency": "USD", "metric": "Interés abierto", "2026": 10},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    assert set(index["status"]) == {"ok"}
+    assert set(index["lineage_level"]) == {"annual_to_monthly_debt_position"}
+    assert set(index["filter_json"].str.extract(r'"component": "([^"]+)"', expand=False)) == {"total", "principal", "interest"}
