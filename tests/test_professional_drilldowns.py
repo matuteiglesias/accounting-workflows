@@ -593,3 +593,28 @@ def test_annual_debt_stock_spanish_labels_match_id_metric_contracts(tmp_path: Pa
     assert set(index["status"]) == {"ok"}
     assert set(index["lineage_level"]) == {"annual_to_monthly_debt_position"}
     assert set(index["filter_json"].str.extract(r'"component": "([^"]+)"', expand=False)) == {"total", "principal", "interest"}
+
+
+def test_cash_annual_bridge_net_debt_movement_uses_signed_net_amount(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_flow_semantic_split.csv", [
+        {"period": "2026-01", "Currency": "ARS", "Box": "Property Management", "semantic_bucket": "debt_movement", "semantic_subbucket": "repayment", "funding_actor": "Matías", "funding_channel": "debt_settlement", "cash_effect": "cash_out_box", "debt_effect": "settles_debt", "amount_in": 0, "amount_out": 100, "net_amount": -100, "amount_abs": 100, "n_tx": 1, "source_tx_ids_sample": "debt-repay"},
+        {"period": "2026-02", "Currency": "ARS", "Box": "Property Management", "semantic_bucket": "debt_movement", "semantic_subbucket": "principal", "funding_actor": "Matías", "funding_channel": "debt_creation", "cash_effect": "non_cash_support", "debt_effect": "creates_debt", "amount_in": 0, "amount_out": 0, "net_amount": 40, "amount_abs": 40, "n_tx": 1, "source_tx_ids_sample": "debt-create"},
+    ])
+    _write(tables / "cash_annual_box_flow_bridge_wide.csv", [
+        {"Currency": "ARS", "Box": "Property Management", "line": "Movimiento neto de deuda", "metric_id": "FUND.CONTRIB.DEBT_LINKED", "2026": -60},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    row = index.iloc[0]
+    assert row["status"] == "ok"
+    assert row["measure"] == "net_amount"
+    assert row["matched_value_sum"] == -60
+    assert row["residual"] == 0
+    assert "movimiento_neto_deuda" in row["filter_json"]

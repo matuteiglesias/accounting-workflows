@@ -1418,6 +1418,17 @@ def _annual_professional_line_spec(
     return None
 
 
+def _is_cash_bridge_debt_movement_line(row: pd.Series) -> bool:
+    line = _metric_name(row).casefold()
+    return (
+        "movimiento neto de deuda" in line
+        or "debt net" in line
+        or "net debt" in line
+        or ("deuda" in line and "neto" in line)
+        or ("debt" in line and "net" in line)
+    )
+
+
 def _cash_bridge_semantic_rows(
     split: pd.DataFrame,
     row: pd.Series,
@@ -1430,7 +1441,7 @@ def _cash_bridge_semantic_rows(
     bool,
 ]:
     metric_id = _norm(row.get("metric_id"))
-    if metric_id.startswith("FUND.CONTRIB."):
+    if metric_id.startswith("FUND.CONTRIB.") and not _is_cash_bridge_debt_movement_line(row):
         mask = _year_mask(split, period) & _eq_col(split, "Currency", row.get("Currency"))
         mask &= _funding_metric_semantic_mask(split, metric_id)
 
