@@ -733,3 +733,57 @@ def test_debt_position_drilldown_uses_latest_snapshot_not_month_sum(tmp_path: Pa
     assert set(singles["status"]) == {"ok"}
     assert set(singles["matched_rows"].astype(int)) == {1}
     assert singles["residual"].astype(float).abs().sum() == 0.0
+
+
+def test_annual_companion_tables_have_drilldowns_and_digest_section(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_cash_close.csv", [
+        {"period": "2026-12", "Currency": "ARS", "Box": "Property Management", "close_amount": 10},
+    ])
+    _write(run / "monthly_flow_semantic_split.csv", [
+        {"period": "2026-01", "Currency": "ARS", "Box": "Property Management", "semantic_bucket": "funding_contribution", "funding_actor": "Tenants", "funding_channel": "tenant_to_box", "cash_effect": "cash_in_box", "target_box": "Property Management", "amount_in": 50, "amount_abs": 50, "net_amount": 50, "source_tx_ids_sample": "fund1"},
+    ])
+    _write(run / "classification_audit.csv", [
+        {"tx_id": "fund1", "period": "2026-01", "Currency": "ARS", "semantic_bucket": "funding_contribution", "funding_actor": "Tenants", "funding_channel": "tenant_to_box", "cash_effect": "cash_in_box", "amount": 50},
+    ])
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2026-12", "as_of_date": "2026-12-31", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "open_principal": 70, "open_interest": 7, "open_total": 77},
+    ])
+    _write(run / "monthly_debt_activity.csv", [
+        {"period": "2026-01", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "repayments": 10, "new_principal": 0, "net_change": -10},
+        {"period": "2026-02", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "repayments": 15, "new_principal": 0, "net_change": -15},
+    ])
+
+    _write(tables / "annual_cash_close_by_box_wide.csv", [
+        {"metric_id": "CASH.CLOSE.BY_BOX", "line_id": "cash.pm", "Box": "Property Management", "Currency": "ARS", "2026": 10},
+    ])
+    _write(tables / "annual_funding_by_actor_channel_wide.csv", [
+        {"metric_id": "FUND.CONTRIB.BY_CHANNEL", "line_id": "fund.tenant", "Currency": "ARS", "funding_actor": "Tenants", "funding_channel": "tenant_to_box", "cash_effect": "cash_in_box", "target_box": "Property Management", "beneficiary_box": "", "obligation_box": "", "2026": 50},
+    ])
+    _write(tables / "annual_debt_stock_by_pair_wide.csv", [
+        {"metric_id": "DEBT.STOCK.BY_PAIR.OPEN_TOTAL", "line_id": "debt.stock", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "component": "open_total", "2026": 77},
+    ])
+    _write(tables / "annual_debt_activity_by_pair_wide.csv", [
+        {"metric_id": "DEBT.ACTIVITY.REPAYMENT.BY_PAIR", "line_id": "debt.repay", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "activity_type": "repayments", "2026": 25},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+    expected = {
+        "annual_cash_close_by_box_wide",
+        "annual_funding_by_actor_channel_wide",
+        "annual_debt_stock_by_pair_wide",
+        "annual_debt_activity_by_pair_wide",
+    }
+    ok = index[index["status"].eq("ok")]
+    assert expected.issubset(set(ok["table_id"]))
+
+    digest = build_professional_linked_digest(repo, pack)
+    text = digest.read_text(encoding="utf-8")
+    assert "Annual management companion tables" in text
+    for table_id in expected:
+        assert table_id in text

@@ -39,6 +39,7 @@ GAP_COLUMNS = [
 DISPLAY_RE = re.compile(r"display_table\s*\((?P<df>[^,\n\)]+).*?[\"'](?P<name>[^\"']+\.(?:csv|html|md))[\"']", re.S)
 EXPORT_RE = re.compile(r"export_table\s*\((?P<df>[^,\n\)]+).*?[\"'](?P<name>[^\"']+\.csv)[\"']", re.S)
 TOCSV_RE = re.compile(r"(?P<df>[A-Za-z_][A-Za-z0-9_]*)\.to_csv\s*\(\s*(?P<path>[^\)]+)", re.S)
+ANNUAL_WRITER_RE = re.compile(r"write_annual_long_and_wide\s*\(\s*(?P<long>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(?P<wide>[A-Za-z_][A-Za-z0-9_]*).*?[\"\'](?P<stem>annual_[^\"\']+)[\"\']", re.S)
 READ_RE = re.compile(r"pd\.read_csv\s*\((?P<path>[^\)]+)\)")
 MONTH_RE = re.compile(r"^20\d{2}-(0[1-9]|1[0-2])$")
 YEAR_RE = re.compile(r"^20\d{2}$")
@@ -52,6 +53,14 @@ KNOWN_OUTPUTS: dict[str, dict[str, str]] = {
     "monthly_tables_cash_close_matrix.csv": dict(source_dataframe="cash", upstream="monthly_cash_close.csv", groupby="Currency, Box, metric", pivot="period months as columns", values="value", agg="snapshot matrix", rule="Monthly cash close stock by Box/Currency/metric; frontend-safe status matters.", stock="stock"),
     "monthly_tables_diagnostic_box_level_matrix.csv": dict(source_dataframe="box_level", upstream="box_balance_time_long.freq=M.csv", groupby="Currency, Box, metric", pivot="period months as columns", values="value", agg="snapshot/delta matrix", rule="Diagnostic box-level monthly net/delta from box balance motor; stock-derived diagnostic, not validated cash.", stock="diagnostic"),
     "monthly_tables_debt_activity_matrix.csv": dict(source_dataframe="debt_act", upstream="monthly_debt_activity.csv", groupby="Currency, pair, measure", pivot="period months as columns", values="new_principal, interest_accrued, repayments, adjustments, net_change", agg="sum by month", rule="Monthly debt activity flows by pair.", stock="flow"),
+    "annual_cash_close_by_box_long.csv": dict(source_dataframe="cash", upstream="monthly_cash_close.csv", groupby="year, Box, Currency", pivot="long rows", values="value", agg="latest month in year", rule="Annual cash close is a stock selected from latest monthly cash close in each year by Box/Currency; never summed.", stock="stock"),
+    "annual_cash_close_by_box_wide.csv": dict(source_dataframe="cash", upstream="monthly_cash_close.csv", groupby="year, Box, Currency", pivot="Box/Currency rows x annual year columns", values="value", agg="latest month in year", rule="Wide companion for annual cash close by Box/Currency.", stock="stock"),
+    "annual_funding_by_actor_channel_long.csv": dict(source_dataframe="flow", upstream="monthly_flow_semantic_split.csv", groupby="year, Currency, funding_actor, funding_channel, cash_effect, target_box, obligation_box", pivot="long rows", values="amount_in", agg="sum", rule="Annual funding/support is a flow summed by explicit funding dimensions; direct obligations are flagged as non-cash-in-box.", stock="flow"),
+    "annual_funding_by_actor_channel_wide.csv": dict(source_dataframe="flow", upstream="monthly_flow_semantic_split.csv", groupby="year, Currency, funding_actor, funding_channel, cash_effect, target_box, obligation_box", pivot="funding dimension rows x annual year columns", values="amount_in", agg="sum", rule="Wide companion for annual funding/support by actor/channel/cash effect.", stock="flow"),
+    "annual_debt_stock_by_pair_long.csv": dict(source_dataframe="debt_pos", upstream="monthly_debt_position.csv", groupby="year, Currency, debtor, creditor, pair, component", pivot="long rows", values="open_principal, open_interest, open_total", agg="latest as_of_date within month, latest month in year", rule="Annual debt stock is selected from latest monthly debt position in each year by pair, after choosing latest as_of_date inside month; never summed.", stock="stock"),
+    "annual_debt_stock_by_pair_wide.csv": dict(source_dataframe="debt_pos", upstream="monthly_debt_position.csv", groupby="year, Currency, debtor, creditor, pair, component", pivot="pair/component rows x annual year columns", values="open_principal, open_interest, open_total", agg="latest as_of_date within month, latest month in year", rule="Wide companion for annual debt stock by pair using selected close snapshot policy.", stock="stock"),
+    "annual_debt_activity_by_pair_long.csv": dict(source_dataframe="debt_act", upstream="monthly_debt_activity.csv", groupby="year, Currency, debtor, creditor, pair, activity_type", pivot="long rows", values="repayments, settlements, new_principal, net_change, interest_accrued, adjustments", agg="sum", rule="Annual debt activity is a flow summed by pair/activity type; settlements use explicit settlements when present or a repayment view otherwise.", stock="flow"),
+    "annual_debt_activity_by_pair_wide.csv": dict(source_dataframe="debt_act", upstream="monthly_debt_activity.csv", groupby="year, Currency, debtor, creditor, pair, activity_type", pivot="pair/activity rows x annual year columns", values="repayments, settlements, new_principal, net_change, interest_accrued, adjustments", agg="sum", rule="Wide companion for annual debt activity by pair, including repayment/settlement/increase/net movement views.", stock="flow"),
 }
 
 def rel(path: Path) -> str:
@@ -128,6 +137,10 @@ def discover(notebooks_dir: Path, pack: Path) -> tuple[pd.DataFrame, pd.DataFram
                 raw = m.group("path")
                 names = re.findall(r"[\"']([^\"']+\.csv)[\"']", raw)
                 matches.append((m.group("df"), names[0] if names else raw.strip()[:80], "to_csv"))
+            for m in ANNUAL_WRITER_RE.finditer(src):
+                stem = m.group("stem")
+                matches.append((m.group("long"), f"{stem}_long.csv", "write_annual_long_and_wide"))
+                matches.append((m.group("wide"), f"{stem}_wide.csv", "write_annual_long_and_wide"))
             for dfname, outname, prod in matches:
                 outpath = resolve_output(outname, pack)
                 exists, rows, cols, columns, colset = csv_info(outpath)
@@ -218,15 +231,15 @@ Top parsed output notebooks:
 
 {bullet_outputs(key)}
 
-Funding/contribution outputs currently appear mostly as monthly flow and bridge matrices, not as dedicated annual actor/channel tables. Debt position and activity outputs are produced by `07_monthly_dynamics_tables.ipynb` monthly matrices.
+Funding/contribution outputs now include dedicated annual actor/channel companion tables when `07_monthly_dynamics_tables.ipynb` calls the annual table builders. Debt position and activity are available as monthly matrices plus annual pair-level companion tables.
 
 ## 4. Current professional tables used by linked digest
 
-The linked digest currently includes `overview_balance_dashboard.csv`, `income_operating_statement.csv`, `cash_annual_box_flow_bridge_wide.csv`, and `monthly_tables_*.csv` tables. Dedicated annual cash-close-by-box, funding-by-actor/channel, debt-stock-by-pair, and debt-activity-by-pair tables are not yet present as stable annual professional contracts.
+The linked digest currently includes `overview_balance_dashboard.csv`, `income_operating_statement.csv`, `cash_annual_box_flow_bridge_wide.csv`, and `monthly_tables_*.csv` tables. The annual companion table contracts are now generated by notebook helper calls, but still need an explicit linked-digest/drilldown wiring pass.
 
 ## 5. Current drilldown-supported vs unsupported outputs
 
-Drilldown-supported now: overview dashboard, income statement, annual cash flow bridge, monthly debt position, monthly cash close, and diagnostic box-level matrices. Unsupported or weakly supported: dedicated annual funding actor/channel, annual debt pair stock/activity, and deposits/guarantees because those output CSVs do not yet exist.
+Drilldown-supported now: overview dashboard, income statement, annual cash flow bridge, monthly debt position, monthly cash close, and diagnostic box-level matrices. New annual companion tables carry stable metadata for future drilldown wiring; deposits/guarantees remain unsupported until source evidence exists.
 
 ## 6. Missing dashboard needs
 

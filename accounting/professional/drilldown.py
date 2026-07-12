@@ -38,6 +38,10 @@ DERIVED_TABLE_IDS = (
     "monthly_tables_debt_activity_matrix",
     "monthly_tables_diagnostic_box_level_matrix",
     "monthly_tables_debt_position_matrix",
+    "annual_cash_close_by_box_wide",
+    "annual_funding_by_actor_channel_wide",
+    "annual_debt_stock_by_pair_wide",
+    "annual_debt_activity_by_pair_wide",
 )
 SUPPORTED_TABLE_IDS = (
     "monthly_tables_flow_bucket_all_measures",
@@ -131,7 +135,15 @@ def _month_columns(df: pd.DataFrame) -> list[str]:
 
 
 def _period_columns(table_id: str, df: pd.DataFrame) -> list[str]:
-    if table_id in {"overview_balance_dashboard", "income_operating_statement", "cash_annual_box_flow_bridge_wide"}:
+    if table_id in {
+        "overview_balance_dashboard",
+        "income_operating_statement",
+        "cash_annual_box_flow_bridge_wide",
+        "annual_cash_close_by_box_wide",
+        "annual_funding_by_actor_channel_wide",
+        "annual_debt_stock_by_pair_wide",
+        "annual_debt_activity_by_pair_wide",
+    }:
         return [str(c) for c in df.columns if YEAR_RE.match(str(c))]
     return _month_columns(df)
 
@@ -2582,6 +2594,108 @@ def _build_debt_position_cell(
 
 
 
+
+def _filter_optional(df: pd.DataFrame, col: str, value: Any) -> pd.Series:
+    if col not in df.columns or _norm(value) == "":
+        return pd.Series(True, index=df.index)
+    return df[col].astype(str).fillna("").str.strip().eq(_norm(value))
+
+
+def _latest_period_rows(df: pd.DataFrame, period_col: str = "period") -> pd.DataFrame:
+    if df.empty or period_col not in df.columns:
+        return df.copy()
+    periods = sorted(df[period_col].astype(str).dropna().unique().tolist())
+    if not periods:
+        return df.iloc[0:0].copy()
+    return df[df[period_col].astype(str).eq(periods[-1])].copy()
+
+
+def _annual_companion_long_row(row: pd.Series, period: str, display_value: float) -> pd.DataFrame:
+    out = row.to_frame().T.copy()
+    out["period"] = period
+    out["value"] = display_value
+    return out
+
+
+def _build_annual_cash_close_companion_cell(*, row: pd.Series, period: str, display_value: float, cash_close: pd.DataFrame, tolerance: float):
+    currency = _norm(row.get("Currency"))
+    box = _norm(row.get("Box"))
+    if cash_close.empty:
+        return STATUS_ERROR, 0.0, -display_value, "missing_source", "monthly_cash_close.csv", {"error": "missing monthly_cash_close.csv", "period": period, "Currency": currency, "Box": box}, "Annual cash close drilldown requires monthly_cash_close.csv.", pd.DataFrame(), []
+    value_col = "close_amount" if "close_amount" in cash_close.columns else ("value" if "value" in cash_close.columns else "balance")
+    if value_col not in cash_close.columns:
+        return STATUS_UNSUPPORTED, 0.0, -display_value, "unsupported", "monthly_cash_close.csv", {"reason": "no cash close value column", "available_columns": list(cash_close.columns)}, "Cash close source has no supported value column.", pd.DataFrame(), []
+    candidates = cash_close.loc[_year_mask(cash_close, period) & _filter_optional(cash_close, "Currency", currency) & _filter_optional(cash_close, "Box", box)].copy()
+    source = _latest_period_rows(candidates)
+    matched = _measure_sum(source, value_col)
+    residual = matched - display_value
+    status = STATUS_EMPTY if source.empty else STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+    filters = {"period": period, "Currency": currency, "Box": box, "measure": "cash_close", "source_measure": value_col, "calculation_rule": "annual stock = latest monthly cash close in year; not sum of monthly closes"}
+    sections = [("Annual companion row", _annual_companion_long_row(row, period, display_value)), ("Selected monthly_cash_close rows", source), ("Candidate monthly_cash_close rows in year", candidates)]
+    return status, matched, residual, "annual_cash_close_to_monthly_cash_close", "monthly_cash_close.csv", filters, "Cash close is stock lineage; selected latest month in year, not annual sum.", source, sections
+
+
+def _build_annual_funding_companion_cell(*, row: pd.Series, period: str, display_value: float, split: pd.DataFrame, audit: pd.DataFrame, tolerance: float):
+    currency = _norm(row.get("Currency"))
+    if split.empty:
+        return STATUS_ERROR, 0.0, -display_value, "missing_source", "monthly_flow_semantic_split.csv", {"error": "missing monthly_flow_semantic_split.csv", "period": period, "Currency": currency}, "Annual funding drilldown requires monthly_flow_semantic_split.csv.", pd.DataFrame(), []
+    source = split.loc[_year_mask(split, period) & _filter_optional(split, "Currency", currency)].copy()
+    for col in ["funding_actor", "funding_channel", "cash_effect", "target_box", "beneficiary_box", "obligation_box"]:
+        source = source.loc[_filter_optional(source, col, row.get(col))].copy()
+    direct = _norm(row.get("funding_channel")).startswith("tenant_direct") or _norm(row.get("cash_effect")) == "no_cash_in_box_direct_payment"
+    if direct:
+        value_col = "amount_abs" if "amount_abs" in source.columns else "net_amount"
+        matched = _measure_sum(source, value_col) if value_col == "amount_abs" else float(source.get("net_amount", pd.Series(dtype=float)).abs().sum())
+    else:
+        value_col = "amount_in" if "amount_in" in source.columns else "net_amount"
+        matched = _measure_sum(source, value_col)
+    residual = matched - display_value
+    status = STATUS_EMPTY if source.empty else STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+    audit_rows = audit.loc[_year_mask(audit, period) & _filter_optional(audit, "Currency", currency)].copy() if not audit.empty else pd.DataFrame()
+    filters = {"period": period, "Currency": currency, "funding_actor": _norm(row.get("funding_actor")), "funding_channel": _norm(row.get("funding_channel")), "cash_effect": _norm(row.get("cash_effect")), "value_col": value_col, "calculation_rule": "annual flow/support = sum source funding rows by year and explicit funding dimensions"}
+    sections = [("Annual companion row", _annual_companion_long_row(row, period, display_value)), ("Matched monthly_flow_semantic_split rows", source)]
+    if not audit_rows.empty:
+        sections.append(("Classification audit rows for year/currency", audit_rows))
+    return status, matched, residual, "annual_funding_to_monthly_flow_semantic_split", "monthly_flow_semantic_split.csv", filters, "Funding is flow/support lineage; direct obligations are not PM/FB cash inflow.", source, sections
+
+
+def _build_annual_debt_stock_companion_cell(*, row: pd.Series, period: str, display_value: float, debt_position: pd.DataFrame, tolerance: float):
+    currency = _norm(row.get("Currency")); pair = _norm(row.get("pair")); debtor = _norm(row.get("debtor")); creditor = _norm(row.get("creditor")); component = _norm(row.get("component"))
+    measure = component if component in {"open_principal", "open_interest", "open_total"} else "open_total"
+    if debt_position.empty:
+        return STATUS_ERROR, 0.0, -display_value, "missing_source", "monthly_debt_position.csv", {"error": "missing monthly_debt_position.csv", "period": period, "pair": pair}, "Annual debt stock drilldown requires monthly_debt_position.csv.", pd.DataFrame(), []
+    candidates = debt_position.loc[_year_mask(debt_position, period) & _filter_optional(debt_position, "Currency", currency) & _filter_optional(debt_position, "debtor", debtor) & _filter_optional(debt_position, "creditor", creditor)].copy()
+    if "pair" in candidates.columns and pair:
+        candidates = candidates[candidates["pair"].astype(str).str.strip().eq(pair)].copy()
+    month_rows = _latest_period_rows(candidates)
+    source = _select_monthly_debt_position_snapshot(month_rows)
+    matched = _num(source.iloc[0].get(measure)) if not source.empty and measure in source.columns else 0.0
+    residual = matched - display_value
+    status = STATUS_EMPTY if source.empty else STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+    filters = {"period": period, "Currency": currency, "pair": pair, "debtor": debtor, "creditor": creditor, "component": component, "measure": measure, "calculation_rule": "annual stock = latest selected monthly close in year; latest as_of_date within selected month; not a sum"}
+    sections = [("Annual companion row", _annual_companion_long_row(row, period, display_value)), ("Selected annual close row", source), ("Candidate debt position rows in year", candidates)]
+    return status, matched, residual, "annual_debt_stock_to_monthly_debt_position", "monthly_debt_position.csv", filters, "Debt stock is stock lineage; selected close snapshot, not annual flow.", source, sections
+
+
+def _build_annual_debt_activity_companion_cell(*, row: pd.Series, period: str, display_value: float, debt_activity: pd.DataFrame, tolerance: float):
+    currency = _norm(row.get("Currency")); pair = _norm(row.get("pair")); debtor = _norm(row.get("debtor")); creditor = _norm(row.get("creditor")); activity_type = _norm(row.get("activity_type"))
+    measure = {"settlements": "settlements", "repayments": "repayments", "new_principal": "new_principal", "net_change": "net_change"}.get(activity_type, activity_type)
+    if measure == "settlements" and "settlements" not in debt_activity.columns:
+        measure = "repayments"
+    if debt_activity.empty:
+        return STATUS_ERROR, 0.0, -display_value, "missing_source", "monthly_debt_activity.csv", {"error": "missing monthly_debt_activity.csv", "period": period, "pair": pair}, "Annual debt activity drilldown requires monthly_debt_activity.csv.", pd.DataFrame(), []
+    if measure not in debt_activity.columns:
+        return STATUS_UNSUPPORTED, 0.0, -display_value, "unsupported", "monthly_debt_activity.csv", {"reason": "activity measure missing", "measure": measure, "available_columns": list(debt_activity.columns)}, "Debt activity source has no matching measure column.", pd.DataFrame(), []
+    source = debt_activity.loc[_year_mask(debt_activity, period) & _filter_optional(debt_activity, "Currency", currency) & _filter_optional(debt_activity, "debtor", debtor) & _filter_optional(debt_activity, "creditor", creditor)].copy()
+    if "pair" in source.columns and pair:
+        source = source[source["pair"].astype(str).str.strip().eq(pair)].copy()
+    matched = _measure_sum(source, measure)
+    residual = matched - display_value
+    status = STATUS_EMPTY if source.empty else STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
+    filters = {"period": period, "Currency": currency, "pair": pair, "debtor": debtor, "creditor": creditor, "activity_type": activity_type, "measure": measure, "calculation_rule": "annual flow = sum monthly debt activity by year/Currency/pair/activity_type"}
+    sections = [("Annual companion row", _annual_companion_long_row(row, period, display_value)), ("Matched monthly_debt_activity rows", source)]
+    return status, matched, residual, "annual_debt_activity_to_monthly_debt_activity", "monthly_debt_activity.csv", filters, "Debt activity is flow lineage; repayments/settlements/increases/net movements are annual sums.", source, sections
+
 def _build_derived_cell(
     *,
     table_id: str,
@@ -2605,6 +2719,14 @@ def _build_derived_cell(
     sections: list[tuple[str, pd.DataFrame]] = []
     caveat = "Derived drilldown: explanation page, not necessarily raw ledger rows."
 
+    if table_id == "annual_cash_close_by_box_wide":
+        return _build_annual_cash_close_companion_cell(row=row, period=period, display_value=display_value, cash_close=cash_close, tolerance=tolerance)
+    if table_id == "annual_funding_by_actor_channel_wide":
+        return _build_annual_funding_companion_cell(row=row, period=period, display_value=display_value, split=split, audit=audit, tolerance=tolerance)
+    if table_id == "annual_debt_stock_by_pair_wide":
+        return _build_annual_debt_stock_companion_cell(row=row, period=period, display_value=display_value, debt_position=debt_position, tolerance=tolerance)
+    if table_id == "annual_debt_activity_by_pair_wide":
+        return _build_annual_debt_activity_companion_cell(row=row, period=period, display_value=display_value, debt_activity=debt_activity, tolerance=tolerance)
 
 
     # if table_id == "monthly_tables_cash_close_matrix":
