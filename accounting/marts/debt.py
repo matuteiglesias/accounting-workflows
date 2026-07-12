@@ -567,7 +567,9 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     if "period_end" not in base.columns:
         base["period_end"] = _period_end(base["period"])
 
-    # debt_balance_monthly may contain one row per item_type. Use one balance row per debtor/creditor/currency/month.
+    # debt_balance_monthly may contain repeated rows per item_type and, in
+    # legacy artifacts, multiple stock snapshots inside one month. Use the
+    # selected monthly close: latest as_of_date per debtor/creditor/currency.
     unique = base.drop_duplicates(
         ["period", "debtor", "creditor", "Currency", "as_of_date"]
     )[
@@ -583,6 +585,14 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             "open_total",
         ]
     ].copy()
+    unique["__as_of_date"] = pd.to_datetime(unique["as_of_date"], errors="coerce")
+    unique = (
+        unique.sort_values(["period", "debtor", "creditor", "Currency", "__as_of_date", "as_of_date"], na_position="first")
+        .groupby(["period", "debtor", "creditor", "Currency"], dropna=False, as_index=False)
+        .tail(1)
+        .drop(columns=["__as_of_date"])
+        .reset_index(drop=True)
+    )
 
     counts = pd.DataFrame(
         columns=["period", "debtor", "creditor", "Currency", "n_open_items"]

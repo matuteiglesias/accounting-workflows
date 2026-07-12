@@ -10,6 +10,13 @@ FUNDING_CONTRACT_TABLE_IDS = {
     "overview_balance_dashboard",
     "income_operating_statement",
     "cash_annual_box_flow_bridge_wide",
+    "cash_annual_box_flow_bridge_long",
+}
+
+FUNDING_CONTRACT_EXCLUDED_TABLE_IDS = {
+    "monthly_tables_debt_position_matrix",
+    "monthly_tables_debt_activity_matrix",
+    "monthly_tables_diagnostic_box_level_matrix",
 }
 
 OVERVIEW_PRESENTATION_METRIC_IDS = {
@@ -194,6 +201,10 @@ def enrich_professional_table(df: pd.DataFrame, table_id: str) -> pd.DataFrame:
     # such as monthly debt position use labels like ``open_total`` and must not
     # receive stale FUND.* metadata from a previous enrichment pass.
     if table_id not in FUNDING_CONTRACT_TABLE_IDS:
+        if table_id in FUNDING_CONTRACT_EXCLUDED_TABLE_IDS:
+            for col in ["metric_id", "dimension_name", "dimension_value", "funding_channel", "funding_actor", "cash_effect"]:
+                if col in out.columns:
+                    out[col] = ""
         return out
 
     for col in CONTRACT_COLUMNS:
