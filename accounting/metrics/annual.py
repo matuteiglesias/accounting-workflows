@@ -25,7 +25,10 @@ CANONICAL = {
 RAW_OR_LEGACY = ["per_flow_time_long", "per_party_time_long", "daily_cash_position", "box_balance_time_long", "box_flow_balance_time_long", "views/", "income_statement_y", "balance_cash_y", "balance_debt_y", "metric_values.csv"]
 REQUIRED = [
     "IS.REVENUE.OPERATING","IS.RENT.TOTAL","IS.OPEX.PROPERTY","IS.NET.OPERATING","IS.RENT.BY_PROPERTY","IS.OPEX.BY_CATEGORY",
-    "FUND.CONTRIB.TOTAL","FUND.CONTRIB.BY_ACTOR","DIST.DRAWS.PERSONAL","DIST.DIVIDENDS","DIST.DRAWS.BY_TYPE","COV.NET.AFTER_DRAWS","COV.SAVINGS_RATE",
+    "FUND.CONTRIB.TOTAL","FUND.CONTRIB.BY_ACTOR","FUND.CONTRIB.BY_FUNDING_ACTOR",
+    "FUND.CONTRIB.BY_CHANNEL","FUND.CONTRIB.BY_CASH_EFFECT","FUND.CONTRIB.BY_TARGET_BOX",
+    "FUND.CONTRIB.DIRECT_OBLIGATION","FUND.CONTRIB.CASH_TO_BOX","FUND.CONTRIB.DEBT_LINKED",
+    "DIST.DRAWS.PERSONAL","DIST.DIVIDENDS","DIST.DRAWS.BY_TYPE","COV.NET.AFTER_DRAWS","COV.SAVINGS_RATE",
     "BS.CASH.TOTAL","BS.CASH.CLOSE.BOX","DQ.CASH.FRONTEND_SAFE",
     "ID.DEBT.TOTAL.OPEN","ID.DEBT.OPEN.BY_COUNTERPARTY","ID.DEBT.PRINCIPAL.OPEN","ID.DEBT.INTEREST.OPEN","ID.DEBT.NET_PM_POSITION",
     "ID.DEBT.ACTIVITY.NEW_CLAIMS","ID.DEBT.ACTIVITY.REPAYMENTS","ID.DEBT.ACTIVITY.INTEREST_ACCRUED","ID.DEBT.ACTIVITY.ADJUSTMENTS","ID.DEBT.ACTIVITY.NET_CHANGE",
@@ -50,6 +53,28 @@ def _year(df: pd.DataFrame) -> pd.DataFrame:
 
 def _base(metric_id: str, year: str, currency: str, value: Any, status: str, flow: str, acct: str, dash: str, source: str, filt: str, rule: str, run_id: str, as_of_date: str, *, dim_name: str="", dim_value: str="", suit: str="safe", public: bool=True, internal: bool=False, legacy: bool=False, validation: str="ok", caveat: str="") -> dict[str, Any]:
     return {"metric_id":metric_id,"period_grain":"Y","period":str(year),"period_start":f"{year}-01-01" if year else "","period_end":f"{year}-12-31" if year else "","Currency":currency,"value":value,"value_status":status,"flow_or_stock":flow,"accounting_section":acct,"dashboard_section":dash,"dimension_name":dim_name,"dimension_value":dim_value,"source_table":source,"source_filter":filt,"calculation_rule":rule,"frontend_suitability":suit,"public_flag":str(public).lower(),"internal_flag":str(internal).lower(),"legacy_flag":str(legacy).lower(),"validation_status":validation,"caveat":caveat,"run_id":run_id,"as_of_date":as_of_date}
+
+def _nonempty_text(s: pd.Series) -> pd.Series:
+    return s.fillna("").astype(str).str.strip().ne("")
+
+def _funding_support_mask(df: pd.DataFrame) -> pd.Series:
+    funding_channel = df.get("funding_channel", pd.Series("", index=df.index))
+    debt_effect = df.get("debt_effect", pd.Series("none", index=df.index))
+    return (
+        df["semantic_bucket"].astype(str).eq("funding_contribution")
+        | _nonempty_text(funding_channel)
+        | debt_effect.fillna("none").astype(str).str.strip().ne("none")
+    )
+
+def _funding_support_amount(df: pd.DataFrame) -> pd.Series:
+    amount_in = pd.to_numeric(df.get("amount_in", 0), errors="coerce").fillna(0.0)
+    amount_out = pd.to_numeric(df.get("amount_out", 0), errors="coerce").fillna(0.0)
+    amount_abs = pd.to_numeric(df.get("amount_abs", 0), errors="coerce").fillna(0.0)
+    cash_effect = df.get("cash_effect", pd.Series("", index=df.index)).fillna("").astype(str)
+    direct = cash_effect.eq("no_cash_in_box_direct_payment")
+    cash_in = cash_effect.eq("cash_in_box")
+    cash_out = cash_effect.eq("cash_out_box")
+    return amount_abs.where(~cash_in, amount_in).where(~direct, amount_out.where(amount_out.ne(0), amount_abs)).where(~cash_out, amount_out.where(amount_out.ne(0), amount_abs))
 
 def _contract_from_rows(metrics: pd.DataFrame) -> pd.DataFrame:
     if metrics.empty:
@@ -118,6 +143,35 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
                 for _,r in sub.groupby(["period","Currency",dim],dropna=False)[amt].sum().reset_index().iterrows():
                     rows.append(_base(emit_mid,r.period,r.Currency,r[amt],"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv",f"semantic filter; dimension={dim}","annual flow = sum monthly flow by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat"))
 
+        funding_support = s.loc[_funding_support_mask(s)].copy()
+        if not funding_support.empty:
+            funding_support["funding_support_amount"] = _funding_support_amount(funding_support)
+            funding_caveat = "Funding/support semantic metrics include cash contributions, direct obligation payments, and debt-linked support; rent is excluded."
+            dim_specs = [
+                ("funding_actor", "FUND.CONTRIB.BY_FUNDING_ACTOR"),
+                ("funding_channel", "FUND.CONTRIB.BY_CHANNEL"),
+                ("cash_effect", "FUND.CONTRIB.BY_CASH_EFFECT"),
+                ("target_box", "FUND.CONTRIB.BY_TARGET_BOX"),
+            ]
+            for dim, mid in dim_specs:
+                if dim in funding_support.columns:
+                    dim_rows = funding_support[_nonempty_text(funding_support[dim])]
+                    for _,r in dim_rows.groupby(["period","Currency",dim],dropna=False)["funding_support_amount"].sum().reset_index().iterrows():
+                        rows.append(_base(mid,r.period,r.Currency,r.funding_support_amount,"available","flow","funding_support","2. Funding and distributions","monthly_flow_semantic_split.csv",f"funding/support candidate; dimension={dim}","annual funding/support flow = sum monthly support amount by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat",caveat=funding_caveat))
+
+            direct_mask = funding_support.get("cash_effect", pd.Series("", index=funding_support.index)).astype(str).eq("no_cash_in_box_direct_payment")
+            cash_to_box_mask = funding_support.get("cash_effect", pd.Series("", index=funding_support.index)).astype(str).eq("cash_in_box")
+            debt_mask = funding_support.get("debt_effect", pd.Series("none", index=funding_support.index)).fillna("none").astype(str).str.strip().ne("none")
+            total_specs = [
+                ("FUND.CONTRIB.DIRECT_OBLIGATION", direct_mask, "cash_effect=no_cash_in_box_direct_payment"),
+                ("FUND.CONTRIB.CASH_TO_BOX", cash_to_box_mask, "cash_effect=cash_in_box"),
+                ("FUND.CONTRIB.DEBT_LINKED", debt_mask, "debt_effect != none"),
+            ]
+            for mid, mask, filt in total_specs:
+                sub = funding_support.loc[mask]
+                for _,r in sub.groupby(["period","Currency"],dropna=False)["funding_support_amount"].sum().reset_index().iterrows():
+                    rows.append(_base(mid,r.period,r.Currency,r.funding_support_amount,"available","flow","funding_support","2. Funding and distributions","monthly_flow_semantic_split.csv",f"funding/support candidate; {filt}","annual funding/support flow = sum monthly support amount by year and currency",run_id,as_of_date,suit="safe_with_caveat",caveat=funding_caveat))
+
         fx=s[s.semantic_bucket.astype(str).eq("treasury_fx")].copy()
         if not fx.empty:
             fx_caveat = "FX conversion changes liquidity by currency but is not operating income or funding."
@@ -129,8 +183,16 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
                 rows.append(_base("DQ.FX.ONE_SIDED.AMOUNT",r.period,r.Currency,r.amount_abs,"available","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","semantic_bucket=treasury_fx; placeholder one-sided visibility","one-sided FX visibility placeholder; native rows remain by currency",run_id,as_of_date,suit="safe_with_caveat",caveat="One-sided FX proceeds are allowed but cannot be treated as economic income in hard-currency projections."))
                 rows.append(_base("DQ.FX.MISSING_RATE.AMOUNT",r.period,r.Currency,pd.NA,"unavailable","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","future CCL projection rate availability","missing CCL rate produces unavailable, not zero",run_id,as_of_date,suit="unavailable",validation="warn",caveat="Hard-currency CCL projection is not implemented in this PR."))
                 rows.append(_base("DQ.FX.ROWS.REVIEW_REQUIRED",r.period,r.Currency,0,"available","quality","data_quality","treasury_fx","monthly_flow_semantic_split.csv","review_required treasury_fx rows","count/sum placeholder for FX rows needing review",run_id,as_of_date,suit="safe_with_caveat",caveat="FX rows are classified; future matching may add review-required rows."))
-    for mid in ["IS.RENT.BY_PROPERTY","IS.OPEX.BY_CATEGORY","FUND.CONTRIB.BY_ACTOR","DIST.DRAWS.BY_TYPE"]:
-        if not any(r["metric_id"]==mid for r in rows): unavailable(mid,"monthly_flow_semantic_split.csv","1. Operating result",caveat="blocked_by_missing_dimension")
+    for mid in [
+        "IS.RENT.BY_PROPERTY","IS.OPEX.BY_CATEGORY","FUND.CONTRIB.BY_ACTOR",
+        "FUND.CONTRIB.BY_FUNDING_ACTOR","FUND.CONTRIB.BY_CHANNEL",
+        "FUND.CONTRIB.BY_CASH_EFFECT","FUND.CONTRIB.BY_TARGET_BOX",
+        "FUND.CONTRIB.DIRECT_OBLIGATION","FUND.CONTRIB.CASH_TO_BOX",
+        "FUND.CONTRIB.DEBT_LINKED","DIST.DRAWS.BY_TYPE",
+    ]:
+        if not any(r["metric_id"]==mid for r in rows):
+            dash = "2. Funding and distributions" if mid.startswith(("FUND.", "DIST.")) else "1. Operating result"
+            unavailable(mid,"monthly_flow_semantic_split.csv",dash,caveat="blocked_by_missing_dimension")
     for mid in ["TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE"]:
         if not any(r["metric_id"]==mid for r in rows): unavailable(mid,"monthly_flow_semantic_split.csv","treasury_fx",caveat="No treasury FX rows classified in canonical semantic split.")
 

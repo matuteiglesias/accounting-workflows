@@ -217,6 +217,191 @@ def test_derived_statement_and_annual_drilldowns_link_supported_flows(tmp_path: 
     assert text.count("class='drilldown'") >= 5
 
 
+def test_funding_drilldowns_use_stable_metric_contracts_and_debt_evidence(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    split_rows = [
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "funding_contribution",
+            "semantic_subbucket": "tenant_cash_support",
+            "funding_actor": "Inquilino",
+            "funding_channel": "tenant_to_box",
+            "target_box": "Property Management",
+            "cash_effect": "cash_in_box",
+            "debt_effect": "none",
+            "amount_in": 50,
+            "amount_out": 0,
+            "net_amount": 50,
+            "amount_abs": 50,
+            "source_tx_ids_sample": "tenant_cash",
+        },
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "property_opex",
+            "semantic_subbucket": "taxes",
+            "funding_actor": "Inquilino",
+            "funding_channel": "tenant_direct_tax_payment",
+            "target_box": "Property Management",
+            "obligation_box": "Property Management",
+            "cash_effect": "no_cash_in_box_direct_payment",
+            "debt_effect": "none",
+            "amount_in": 0,
+            "amount_out": 30,
+            "net_amount": -30,
+            "amount_abs": 30,
+            "source_tx_ids_sample": "tenant_tax",
+        },
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Family Business",
+            "semantic_bucket": "funding_contribution",
+            "semantic_subbucket": "fb_support",
+            "funding_actor": "Alejandro",
+            "funding_channel": "family_business_contribution",
+            "target_box": "Family Business",
+            "cash_effect": "cash_in_box",
+            "debt_effect": "none",
+            "amount_in": 70,
+            "amount_out": 0,
+            "net_amount": 70,
+            "amount_abs": 70,
+            "source_tx_ids_sample": "ale_fb",
+        },
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Family Business",
+            "semantic_bucket": "funding_contribution",
+            "semantic_subbucket": "fb_support",
+            "funding_actor": "Primos",
+            "funding_channel": "family_business_contribution",
+            "target_box": "Family Business",
+            "cash_effect": "cash_in_box",
+            "debt_effect": "none",
+            "amount_in": 40,
+            "amount_out": 0,
+            "net_amount": 40,
+            "amount_abs": 40,
+            "source_tx_ids_sample": "primos_fb",
+        },
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "funding_contribution",
+            "semantic_subbucket": "household_pm_support",
+            "funding_actor": "Household",
+            "funding_channel": "household_to_pm",
+            "source_box": "Household",
+            "target_box": "Property Management",
+            "cash_effect": "cash_in_box",
+            "debt_effect": "none",
+            "amount_in": 20,
+            "amount_out": 0,
+            "net_amount": 20,
+            "amount_abs": 20,
+            "source_tx_ids_sample": "hh_pm",
+        },
+        {
+            "period": "2026-01",
+            "Currency": "ARS",
+            "Box": "Property Management",
+            "semantic_bucket": "debt_movement",
+            "semantic_subbucket": "principal",
+            "funding_actor": "Matías",
+            "funding_channel": "debt_creation",
+            "target_box": "Property Management",
+            "cash_effect": "cash_in_box",
+            "debt_effect": "creates_debt",
+            "linked_debt_id": "D-1",
+            "amount_in": 90,
+            "amount_out": 0,
+            "net_amount": 90,
+            "amount_abs": 90,
+            "source_tx_ids_sample": "matias_debt",
+        },
+    ]
+    _write(run / "monthly_flow_semantic_split.csv", split_rows)
+    _write(run / "classification_audit.csv", [
+        {
+            "tx_id": row["source_tx_ids_sample"],
+            "period": row["period"],
+            "Currency": row["Currency"],
+            "Box": row["Box"],
+            "semantic_bucket": row["semantic_bucket"],
+            "semantic_subbucket": row["semantic_subbucket"],
+            "funding_actor": row.get("funding_actor", ""),
+            "funding_channel": row.get("funding_channel", ""),
+            "target_box": row.get("target_box", ""),
+            "obligation_box": row.get("obligation_box", ""),
+            "cash_effect": row.get("cash_effect", ""),
+            "debt_effect": row.get("debt_effect", ""),
+        }
+        for row in split_rows
+    ])
+    _write(run / "monthly_debt_activity.csv", [
+        {"period": "2026-01", "Currency": "ARS", "linked_debt_id": "D-1", "debtor": "Property Management", "creditor": "Matías", "new_principal": 90},
+    ])
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2026-01", "Currency": "ARS", "linked_debt_id": "D-1", "debtor": "Property Management", "creditor": "Matías", "open_amount": 90},
+    ])
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "FUND.CONTRIB.BY_CHANNEL", "period": "2026", "Currency": "ARS", "value": 30, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "funding_channel", "dimension_value": "tenant_direct_tax_payment"},
+        {"metric_id": "FUND.CONTRIB.BY_CHANNEL", "period": "2026", "Currency": "ARS", "value": 50, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "funding_channel", "dimension_value": "tenant_to_box"},
+        {"metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR", "period": "2026", "Currency": "ARS", "value": 70, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "funding_actor", "dimension_value": "Alejandro"},
+        {"metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR", "period": "2026", "Currency": "ARS", "value": 40, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "funding_actor", "dimension_value": "Primos"},
+        {"metric_id": "FUND.CONTRIB.BY_CHANNEL", "period": "2026", "Currency": "ARS", "value": 20, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "funding_channel", "dimension_value": "household_to_pm"},
+        {"metric_id": "FUND.CONTRIB.DEBT_LINKED", "period": "2026", "Currency": "ARS", "value": 90, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv"},
+        {"metric_id": "ID.DEBT.TOTAL.OPEN", "period": "2026", "Currency": "ARS", "value": 90, "flow_type": "stock", "source_table": "monthly_debt_position.csv"},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_CHANNEL", "dimension_name": "funding_channel", "dimension_value": "tenant_direct_tax_payment", "2026": 30},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_CHANNEL", "dimension_name": "funding_channel", "dimension_value": "tenant_to_box", "2026": 50},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR", "dimension_name": "funding_actor", "dimension_value": "Alejandro", "2026": 70},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR", "dimension_name": "funding_actor", "dimension_value": "Primos", "2026": 40},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_CHANNEL", "dimension_name": "funding_channel", "dimension_value": "household_to_pm", "2026": 20},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.DEBT_LINKED", "2026": 90},
+        {"Currency": "ARS", "metric_id": "ID.DEBT.TOTAL.OPEN", "2026": 90},
+    ])
+    _write(tables / "cash_annual_box_flow_bridge_wide.csv", [
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_CHANNEL", "dimension_name": "funding_channel", "dimension_value": "tenant_direct_tax_payment", "2026": 30},
+        {"Currency": "ARS", "metric_id": "FUND.CONTRIB.BY_CHANNEL", "dimension_name": "funding_channel", "dimension_value": "tenant_to_box", "2026": 50},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+    ok = index[index["status"].eq("ok")]
+
+    assert len(ok[ok["filter_json"].str.contains("tenant_direct_tax_payment", na=False)]) == 2
+    assert len(ok[ok["filter_json"].str.contains("tenant_to_box", na=False)]) == 2
+    assert not ok[ok["filter_json"].str.contains("Alejandro", na=False)].empty
+    assert not ok[ok["filter_json"].str.contains("Primos", na=False)].empty
+    assert not ok[ok["filter_json"].str.contains("household_to_pm", na=False)].empty
+
+    direct = ok[ok["filter_json"].str.contains("tenant_direct_tax_payment", na=False)].iloc[0]
+    direct_html = (pack / direct["detail_html_relpath"]).read_text(encoding="utf-8")
+    assert "no_cash_in_box_direct_payment" in direct_html
+
+    debt = ok[ok["filter_json"].str.contains("FUND.CONTRIB.DEBT_LINKED", na=False)].iloc[0]
+    assert debt["lineage_level"] == "debt_linked_support_with_debt_evidence"
+    debt_html = (pack / debt["detail_html_relpath"]).read_text(encoding="utf-8")
+    assert "Debt activity rows" in debt_html
+    assert "Debt position rows" in debt_html
+
+    debt_stock = index[index["filter_json"].str.contains("stock/cash metric", na=False)]
+    assert not debt_stock.empty
+    assert set(debt_stock["status"]) == {"unsupported"}
+
+
 def test_fast_mode_skips_tables_over_100_cells(tmp_path: Path) -> None:
     repo = tmp_path
     run = repo / "out" / "run" / "accounting" / "latest"
