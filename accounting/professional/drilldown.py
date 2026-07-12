@@ -1133,7 +1133,9 @@ def _rule_token_mask(df: pd.DataFrame, *rule_ids: str) -> pd.Series:
 
         for rid in wanted:
             mask |= s.eq(rid)
-            mask |= s.str.contains(rf"(^|;){re.escape(rid)}(;|$)", regex=True, na=False)
+            # mask |= s.str.contains(rf"(^|;){re.escape(rid)}(;|$)", regex=True, na=False)
+            mask |= s.str.contains(rf"(?:^|%3b){re.escape(rid)}(?:$|%3b)", regex=True, na=False)
+
 
     return mask
 
