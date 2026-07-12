@@ -61,3 +61,72 @@ def test_enrich_professional_table_contracts_rewrites_csv(tmp_path: Path) -> Non
     assert row["dimension_value"] == "tenant_to_box"
     assert row["funding_channel"] == "tenant_to_box"
     assert row["cash_effect"] == "cash_in_box"
+
+
+def test_enrich_professional_table_does_not_contaminate_debt_position_matrix() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Currency": "ARS",
+                "metric": "open_total",
+                "row_label": "FUND.CONTRIB.BY_FUNDING_ACTOR",
+                "2026-06": 100,
+            }
+        ]
+    )
+
+    out = enrich_professional_table(df, "monthly_tables_debt_position_matrix")
+
+    assert list(out.columns) == list(df.columns)
+    assert "metric_id" not in out.columns
+
+
+def test_enrich_professional_table_adds_overview_annual_metric_contracts() -> None:
+    df = pd.DataFrame(
+        [
+            {"Currency": "ARS", "metric": "Funding / aportes", "2026": 100},
+            {"Currency": "ARS", "metric": "Retiros / gasto personal", "2026": 80},
+            {"Currency": "ARS", "metric": "Dividendos", "2026": 20},
+            {"Currency": "ARS", "metric": "Deuda total abierta", "metric_id": "FUND.CONTRIB.DEBT_LINKED", "2026": 300},
+            {"Currency": "ARS", "metric": "Principal abierto", "2026": 250},
+            {"Currency": "ARS", "metric": "Interés abierto", "2026": 50},
+        ]
+    )
+
+    out = enrich_professional_table(df, "overview_balance_dashboard")
+
+    expected = {
+        "Funding / aportes": "FUND.CONTRIB.TOTAL",
+        "Retiros / gasto personal": "DIST.DRAWS.PERSONAL",
+        "Dividendos": "DIST.DIVIDENDS",
+        "Deuda total abierta": "ID.DEBT.TOTAL.OPEN",
+        "Principal abierto": "ID.DEBT.PRINCIPAL.OPEN",
+        "Interés abierto": "ID.DEBT.INTEREST.OPEN",
+    }
+    got = dict(zip(out["metric"], out["metric_id"], strict=True))
+    assert got == expected
+
+    debt = out[out["metric"].eq("Deuda total abierta")].iloc[0]
+    assert debt["dimension_name"] == ""
+    assert debt["funding_channel"] == ""
+
+
+def test_enrich_professional_table_keeps_cash_bridge_net_debt_signed() -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "Currency": "ARS",
+                "Box": "Property Management",
+                "line": "Movimiento neto de deuda",
+                "metric_id": "FUND.CONTRIB.DEBT_LINKED",
+                "2026": -60,
+            }
+        ]
+    )
+
+    out = enrich_professional_table(df, "cash_annual_box_flow_bridge_wide")
+    row = out.iloc[0]
+
+    assert row["metric_id"] == ""
+    assert row["dimension_name"] == ""
+    assert row["funding_channel"] == ""

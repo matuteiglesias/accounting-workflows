@@ -6,6 +6,24 @@ from typing import Any
 
 import pandas as pd
 
+FUNDING_CONTRACT_TABLE_IDS = {
+    "overview_balance_dashboard",
+    "income_operating_statement",
+    "cash_annual_box_flow_bridge_wide",
+}
+
+OVERVIEW_PRESENTATION_METRIC_IDS = {
+    "funding / aportes": "FUND.CONTRIB.TOTAL",
+    "aportes": "FUND.CONTRIB.TOTAL",
+    "retiros / gasto personal": "DIST.DRAWS.PERSONAL",
+    "gasto personal": "DIST.DRAWS.PERSONAL",
+    "dividendos": "DIST.DIVIDENDS",
+    "deuda total abierta": "ID.DEBT.TOTAL.OPEN",
+    "principal abierto": "ID.DEBT.PRINCIPAL.OPEN",
+    "interés abierto": "ID.DEBT.INTEREST.OPEN",
+    "interes abierto": "ID.DEBT.INTEREST.OPEN",
+}
+
 CONTRACT_COLUMNS = [
     "metric_id",
     "line_id",
@@ -48,6 +66,22 @@ def _first(row: pd.Series, *cols: str) -> str:
     return ""
 
 
+def _overview_presentation_metric_id(row: pd.Series) -> str:
+    label = _first(row, "line", "metric", "label", "statement_line")
+    return OVERVIEW_PRESENTATION_METRIC_IDS.get(label.casefold(), "")
+
+
+def _is_cash_bridge_net_debt_movement(row: pd.Series) -> bool:
+    label = _first(row, "line", "metric", "label", "statement_line").casefold()
+    return (
+        "movimiento neto de deuda" in label
+        or "debt net" in label
+        or "net debt" in label
+        or ("deuda" in label and "neto" in label)
+        or ("debt" in label and "net" in label)
+    )
+
+
 def _infer_metric_contract(table_id: str, row: pd.Series) -> dict[str, str]:
     existing_metric = _text(row.get("metric_id"))
     existing_dim_name = _text(row.get("dimension_name"))
@@ -64,7 +98,25 @@ def _infer_metric_contract(table_id: str, row: pd.Series) -> dict[str, str]:
     actor = existing_actor
     cash = existing_cash
 
-    if not metric:
+    presentation_metric = _overview_presentation_metric_id(row) if table_id == "overview_balance_dashboard" else ""
+    bridge_net_debt = table_id == "cash_annual_box_flow_bridge_wide" and _is_cash_bridge_net_debt_movement(row)
+    if bridge_net_debt:
+        metric = ""
+        dim_name = ""
+        dim_value = ""
+        channel = ""
+        actor = ""
+        cash = ""
+
+    if presentation_metric:
+        metric = presentation_metric
+        dim_name = ""
+        dim_value = ""
+        channel = ""
+        actor = ""
+        cash = ""
+
+    if not metric and not bridge_net_debt:
         if "funding" in blob or "aporte" in blob or "contrib" in blob or _text(row.get("metric")) == "funding_in":
             metric = "FUND.CONTRIB.TOTAL"
         if "inquil" in blob or re.search(r"\binq\b", blob):
@@ -136,15 +188,49 @@ def _infer_metric_contract(table_id: str, row: pd.Series) -> dict[str, str]:
 
 def enrich_professional_table(df: pd.DataFrame, table_id: str) -> pd.DataFrame:
     out = df.copy()
+
+    # Funding contract inference is intentionally limited to tables whose
+    # presentation rows can contain funding/contribution lines.  Matrix tables
+    # such as monthly debt position use labels like ``open_total`` and must not
+    # receive stale FUND.* metadata from a previous enrichment pass.
+    if table_id not in FUNDING_CONTRACT_TABLE_IDS:
+        return out
+
     for col in CONTRACT_COLUMNS:
         if col not in out.columns:
             out[col] = ""
     if out.empty:
         return out
     inferred = out.apply(lambda row: _infer_metric_contract(table_id, row), axis=1, result_type="expand")
+    presentation_metric = (
+        out.apply(_overview_presentation_metric_id, axis=1).fillna("").astype(str)
+        if table_id == "overview_balance_dashboard"
+        else pd.Series("", index=out.index)
+    )
+    bridge_net_debt = (
+        out.apply(_is_cash_bridge_net_debt_movement, axis=1).fillna(False).astype(bool)
+        if table_id == "cash_annual_box_flow_bridge_wide"
+        else pd.Series(False, index=out.index)
+    )
     for col in CONTRACT_COLUMNS:
         current = out[col].fillna("").astype(str).str.strip()
         out[col] = out[col].where(current.ne(""), inferred[col])
+
+    # Curated annual overview presentation labels are authoritative.  This
+    # repairs older generated packs where a broad funding heuristic may have
+    # stamped debt stock rows as FUND.CONTRIB.DEBT_LINKED.
+    curated = presentation_metric.ne("")
+    if curated.any():
+        out.loc[curated, "metric_id"] = presentation_metric.loc[curated]
+        for col in ["dimension_name", "dimension_value", "funding_channel", "funding_actor", "cash_effect"]:
+            out.loc[curated, col] = ""
+
+    # Net debt movement is a signed cash-bridge line.  Do not let the generic
+    # debt/funding heuristic convert it into FUND.CONTRIB.DEBT_LINKED, which
+    # uses gross amount_abs semantics.
+    if bridge_net_debt.any():
+        for col in ["metric_id", "dimension_name", "dimension_value", "funding_channel", "funding_actor", "cash_effect"]:
+            out.loc[bridge_net_debt, col] = ""
     period_cols = [c for c in out.columns if YEAR_RE.match(str(c)) or MONTH_RE.match(str(c))]
     front = [c for c in CONTRACT_COLUMNS if c in out.columns]
     rest = [c for c in out.columns if c not in front and c not in period_cols]
