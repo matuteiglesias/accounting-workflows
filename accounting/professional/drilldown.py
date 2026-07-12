@@ -278,6 +278,49 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
 
 
 
+FX_TREASURY_TABLE_IDS = {
+    "monthly_tables_fx_treasury_all_measures",
+    "monthly_tables_fx_treasury_amount_in",
+    "monthly_tables_fx_treasury_amount_out",
+    "monthly_tables_fx_treasury_net_amount",
+    "monthly_tables_fx_treasury_compact",
+}
+
+FX_MEASURES = {"amount_in", "amount_out", "net_amount", "amount_abs"}
+
+
+def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
+    measure = _norm(row.get("measure"))
+
+    if measure in FX_MEASURES:
+        return measure
+
+    if table_id == "monthly_tables_fx_treasury_amount_in":
+        return "amount_in"
+
+    if table_id == "monthly_tables_fx_treasury_amount_out":
+        return "amount_out"
+
+    if table_id == "monthly_tables_fx_treasury_net_amount":
+        return "net_amount"
+
+    metric = _metric_name(row).casefold().strip()
+
+    mapping = {
+        "fx_conversion_proceeds": "amount_in",
+        "fx_conversion_outflow": "amount_out",
+        "fx_cost_or_spread": "amount_out",
+        "fx_net": "net_amount",
+        "net_amount": "net_amount",
+        "amount_in": "amount_in",
+        "amount_out": "amount_out",
+        "amount_abs": "amount_abs",
+    }
+
+    return mapping.get(metric, "")
+
+
+
 
 def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
     measure = _norm(row.get("measure"))
@@ -297,17 +340,6 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
         return CellSpec(table_id, "amount_out", lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "property_opex") & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_unknown_review_net_matrix":
         return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _unknown_mask(df))
-
-    if table_id == "monthly_tables_fx_treasury_compact":
-        metric = _metric_name(row)
-        mapping = {
-            "fx_conversion_proceeds": ("amount_in", _fx_mask),
-            "fx_conversion_outflow": ("amount_out", _fx_mask),
-            "fx_cost_or_spread": ("amount_out", _fx_mask),
-            "fx_net": ("net_amount", _fx_mask),
-        }
-        if metric not in mapping:
-            return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _fx_mask(df), unsupported_if=lambda r: True)
 
 
     if table_id == "monthly_tables_fb_bridge_matrix":
@@ -356,29 +388,20 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
         )
 
 
-    if table_id in {
-        "monthly_tables_fx_treasury_all_measures",
-        "monthly_tables_fx_treasury_amount_in",
-        "monthly_tables_fx_treasury_amount_out",
-        "monthly_tables_fx_treasury_net_amount",
-        "monthly_tables_fx_treasury_compact",
-    }:
-        measure = _norm(row.get("measure"))
+    if table_id in FX_TREASURY_TABLE_IDS:
+        fx_measure = _fx_treasury_measure_for_row(table_id, row)
 
-        if not measure:
-            if table_id == "monthly_tables_fx_treasury_amount_in":
-                measure = "amount_in"
-            elif table_id == "monthly_tables_fx_treasury_amount_out":
-                measure = "amount_out"
-            elif table_id == "monthly_tables_fx_treasury_net_amount":
-                measure = "net_amount"
-
-        if measure not in {"amount_in", "amount_out", "net_amount", "amount_abs"}:
-            return None
+        if fx_measure not in FX_MEASURES:
+            return CellSpec(
+                table_id,
+                measure or _metric_name(row),
+                lambda df, r: pd.Series(False, index=df.index),
+                unsupported_if=lambda r: True,
+            )
 
         return CellSpec(
             table_id,
-            measure,
+            fx_measure,
             lambda df, r: (
                 base_period_currency(df, r)
                 & _optional_strict_eq_col(df, "Box", r.get("Box"))
@@ -386,29 +409,6 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
                 & _optional_strict_eq_col(df, "semantic_subbucket", r.get("semantic_subbucket"))
             ),
         )
-
-
-    if table_id in FX_TREASURY_TABLE_IDS:
-        measure = _fx_treasury_measure_for_row(table_id, row)
-
-        if measure not in FX_MEASURES:
-            return None
-
-        return CellSpec(
-            table_id,
-            measure,
-            lambda df, r: (
-                base_period_currency(df, r)
-                & _optional_strict_eq_col(df, "Box", r.get("Box"))
-                & _strict_eq_col(df, "semantic_bucket", "treasury_fx")
-                & _optional_strict_eq_col(
-                    df,
-                    "semantic_subbucket",
-                    r.get("semantic_subbucket"),
-                )
-            ),
-        )
-    
 
     return None
 
