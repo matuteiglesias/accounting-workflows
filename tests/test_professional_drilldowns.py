@@ -403,6 +403,46 @@ def test_funding_drilldowns_use_stable_metric_contracts_and_debt_evidence(tmp_pa
     assert set(debt_stock["lineage_level"]) == {"annual_to_monthly_debt_position"}
 
 
+def test_overview_annual_metric_matching_normalizes_float_periods_and_blank_dimensions(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_flow_semantic_split.csv", [
+        {"period": "2023-01", "Currency": "ARS", "semantic_bucket": "funding_contribution", "amount_in": 2006220, "amount_out": 0, "net_amount": 2006220, "source_tx_ids_sample": "fund1"},
+    ])
+    _write(run / "classification_audit.csv", [
+        {"tx_id": "fund1", "period": "2023-01", "Currency": "ARS", "semantic_bucket": "funding_contribution", "amount": 2006220},
+    ])
+    _write(run / "monthly_debt_position.csv", [
+        {"period": "2025-12", "Currency": "USD", "component": "total", "open_amount": 15234.7},
+    ])
+    _write(run / "annual_balance_dashboard_metrics.csv", [
+        {"metric_id": "FUND.CONTRIB.TOTAL", "period": 2023.0, "Currency": "ARS", "value": 2006220, "flow_type": "flow", "source_table": "monthly_flow_semantic_split.csv", "dimension_name": "", "dimension_value": ""},
+        {"metric_id": "ID.DEBT.TOTAL.OPEN", "period": 2025.0, "Currency": "USD", "value": 15234.7, "flow_type": "stock", "source_table": "monthly_debt_position.csv", "dimension_name": "", "dimension_value": ""},
+    ])
+    _write(tables / "overview_balance_dashboard.csv", [
+        {"label": "Funding / aportes", "Currency": "ARS", "metric_id": "FUND.CONTRIB.TOTAL", "dimension_name": "", "dimension_value": "", "2023": 2006220},
+        {"label": "Deuda total abierta", "Currency": "USD", "metric_id": "ID.DEBT.TOTAL.OPEN", "dimension_name": "", "dimension_value": "", "2025": 15234.7},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+    overview = index[index["table_id"].eq("overview_balance_dashboard")].copy()
+
+    funding = overview[overview["filter_json"].str.contains("FUND.CONTRIB.TOTAL", na=False)].iloc[0]
+    assert funding["status"] == "ok"
+    assert funding["matched_value_sum"] == 2006220
+    assert funding["residual"] == 0
+
+    debt = overview[overview["filter_json"].str.contains("ID.DEBT.TOTAL.OPEN", na=False)].iloc[0]
+    assert debt["status"] == "ok"
+    assert debt["matched_value_sum"] == 15234.7
+    assert debt["residual"] == 0
+    assert debt["lineage_level"] == "annual_to_monthly_debt_position"
+
+
 def test_fast_mode_skips_tables_over_100_cells(tmp_path: Path) -> None:
     repo = tmp_path
     run = repo / "out" / "run" / "accounting" / "latest"
@@ -618,6 +658,34 @@ def test_cash_annual_bridge_net_debt_movement_uses_signed_net_amount(tmp_path: P
     assert row["matched_value_sum"] == -60
     assert row["residual"] == 0
     assert "movimiento_neto_deuda" in row["filter_json"]
+
+
+def test_diagnostic_box_level_uses_existing_previous_close_without_box_flag(tmp_path: Path) -> None:
+    repo = tmp_path
+    run = repo / "out" / "run" / "accounting" / "latest"
+    pack = repo / "out" / "professional_pack" / "latest"
+    tables = pack / "tables"
+
+    _write(run / "monthly_cash_close.csv", [
+        {"period": "2024-03", "Currency": "ARS", "Box": "Property Management", "close_amount": 180000},
+        {"period": "2024-04", "Currency": "ARS", "Box": "Property Management", "close_amount": 180030, "source_table": "box_balance_time_long.freq=M.csv"},
+        {"period": "2024-02", "Currency": "USD", "Box": "Property Management", "close_amount": -210},
+        {"period": "2024-03", "Currency": "USD", "Box": "Property Management", "close_amount": -20, "source_table": "box_balance_time_long.freq=M.csv"},
+    ])
+    _write(tables / "monthly_tables_diagnostic_box_level_matrix.csv", [
+        {"Currency": "ARS", "Box": "Property Management", "metric": "diagnostic_box_level", "2024-04": 30},
+        {"Currency": "USD", "Box": "Property Management", "metric": "diagnostic_box_level", "2024-03": 190},
+    ])
+
+    paths = build_professional_flow_drilldowns(repo, pack, run)
+    index = pd.read_csv(paths["index"])
+
+    assert set(index["status"]) == {"ok"}
+    assert set(index["matched_value_sum"]) == {30.0, 190.0}
+    assert set(index["residual"]) == {0.0}
+    for relpath in index["detail_html_relpath"]:
+        html = (pack / relpath).read_text(encoding="utf-8")
+        assert "box_level_fallback_reason" in html
 
 def test_debt_position_drilldown_uses_latest_snapshot_not_month_sum(tmp_path: Path) -> None:
     repo = tmp_path

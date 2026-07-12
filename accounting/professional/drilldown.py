@@ -95,6 +95,20 @@ def _norm(value: Any) -> str:
     return _as_str(value).strip()
 
 
+def _norm_period_key(value: Any) -> str:
+    s = _norm(value)
+    if not s:
+        return ""
+    # pandas may read annual year keys as floats (for example 2023.0).
+    try:
+        f = float(s)
+        if f.is_integer():
+            return str(int(f))
+    except Exception:
+        pass
+    return s
+
+
 def _num(value: Any) -> float:
     x = pd.to_numeric(value, errors="coerce")
     if pd.isna(x):
@@ -776,6 +790,9 @@ ANNUAL_PRESENTATION_METRIC_IDS = {
     "retiros / gasto personal": "DIST.DRAWS.PERSONAL",
     "gasto personal": "DIST.DRAWS.PERSONAL",
     "dividendos": "DIST.DIVIDENDS",
+    "cobertura después de funding y retiros": "COV.NET.AFTER_DRAWS",
+    "cobertura despues de funding y retiros": "COV.NET.AFTER_DRAWS",
+    "retiros / resultado operativo": "RATIO.DRAWS_TO_OPERATING_RESULT",
     "deuda total abierta": "ID.DEBT.TOTAL.OPEN",
     "principal abierto": "ID.DEBT.PRINCIPAL.OPEN",
     "interés abierto": "ID.DEBT.INTEREST.OPEN",
@@ -826,15 +843,25 @@ def _annual_source_rows(annual: pd.DataFrame, row: pd.Series, period: str) -> pd
 
     # Match on stable metadata first. Human-facing Spanish labels such as
     # "Funding / aportes" intentionally do not have to share tokens with the
-    # internal metric contract (for example FUND.CONTRIB.TOTAL).
+    # internal metric contract (for example FUND.CONTRIB.TOTAL). Normalize
+    # period keys because pandas can deserialize annual years as 2023.0 while
+    # professional presentation table columns are strings such as "2023".
     metric_ids = _annual_metric_id_candidates_for_row(row)
-    mask = annual.get("period", pd.Series("", index=annual.index)).astype(str).eq(str(period)) & _eq_col(annual, "Currency", row.get("Currency"))
-    if metric_ids and "metric_id" in annual.columns:
-        mask &= annual["metric_id"].astype(str).isin(metric_ids)
+    if not metric_ids or "metric_id" not in annual.columns:
+        return pd.DataFrame()
 
+    metric_id_set = set(metric_ids)
+    mask = annual["metric_id"].map(_norm).isin(metric_id_set)
+    mask &= annual.get("period", pd.Series("", index=annual.index)).map(_norm_period_key).eq(_norm_period_key(period))
+    mask &= annual.get("Currency", pd.Series("", index=annual.index)).map(_norm).eq(_norm(row.get("Currency")))
+
+    # Blank presentation dimensions mean total-row matching and should not
+    # force annual blank equality. Non-empty dimensions are applied when the
+    # corresponding annual columns exist.
     for dim_col in ["dimension_name", "dimension_value", "section", "dashboard_section"]:
-        if dim_col in row.index and dim_col in annual.columns and _norm(row.get(dim_col)):
-            mask &= annual[dim_col].astype(str).eq(_as_str(row.get(dim_col)))
+        dim_value = _norm(row.get(dim_col)) if dim_col in row.index else ""
+        if dim_value and dim_col in annual.columns:
+            mask &= annual[dim_col].map(_norm).eq(dim_value)
     return annual.loc[mask].copy()
 
 
@@ -1224,9 +1251,10 @@ def _annual_formula_spec(row: pd.Series) -> AnnualFormulaSpec | None:
 def _annual_component_rows(annual: pd.DataFrame, period: str, currency: str, metric_ids: tuple[str, ...]) -> pd.DataFrame:
     if annual.empty:
         return pd.DataFrame()
-    mask = annual.get("period", pd.Series("", index=annual.index)).astype(str).eq(str(period)) & _eq_col(annual, "Currency", currency)
+    mask = annual.get("period", pd.Series("", index=annual.index)).map(_norm_period_key).eq(_norm_period_key(period))
+    mask &= annual.get("Currency", pd.Series("", index=annual.index)).map(_norm).eq(_norm(currency))
     if "metric_id" in annual.columns:
-        mask &= annual["metric_id"].astype(str).isin(metric_ids)
+        mask &= annual["metric_id"].map(_norm).isin(metric_ids)
     return annual.loc[mask].copy()
 
 
@@ -1803,6 +1831,40 @@ def _cash_close_box_rows(
     return box_rows
 
 
+def _cash_close_box_rows_with_base_fallback(
+    cash_close: pd.DataFrame,
+    *,
+    period: str,
+    currency: str,
+    box: str,
+) -> pd.DataFrame:
+    box_rows = _cash_close_box_rows(
+        cash_close,
+        period=period,
+        currency=currency,
+        box=box,
+    )
+    if not box_rows.empty:
+        return box_rows
+
+    # The diagnostic table is produced from normalized box-balance sources. In
+    # some historical months the authoritative prior close row lacks the modern
+    # box-level provenance flags used by monthly cash-close drilldowns. For
+    # month-over-month diagnostics, use the same period/currency/box row rather
+    # than silently treating an existing prior month as zero.
+    fallback = _cash_close_rows(
+        cash_close,
+        period=period,
+        currency=currency,
+        box=box,
+    ).copy()
+    if not fallback.empty:
+        fallback["box_level_fallback_reason"] = (
+            "no flagged box-level row; using period/currency/box close row"
+        )
+    return fallback
+
+
 def _cash_close_party_rows(
     cash_close: pd.DataFrame,
     *,
@@ -2173,7 +2235,7 @@ def _build_cash_control_cell(
             box=box,
         )
 
-        previous_rows = _cash_close_box_rows(
+        previous_rows = _cash_close_box_rows_with_base_fallback(
             source_df,
             period=prev_period,
             currency=currency,
@@ -2199,7 +2261,9 @@ def _build_cash_control_cell(
                     "display_value": display_value,
                     "residual": residual,
                     "calculation_rule": (
-                        "current box-level close_amount - previous month box-level close_amount"
+                        "current box-level close_amount - previous month close_amount; "
+                        "previous month falls back to period/currency/box close rows "
+                        "when box-level provenance flags are absent"
                     ),
                 }
             ]
@@ -2236,7 +2300,9 @@ def _build_cash_control_cell(
             "source_measure": "close_amount",
             "source": source_name,
             "calculation_rule": (
-                "box-level current close_amount - box-level previous month close_amount"
+                "box-level current close_amount - previous month close_amount; "
+                "previous month falls back to period/currency/box close rows when "
+                "box-level provenance flags are absent"
             ),
         }
 
