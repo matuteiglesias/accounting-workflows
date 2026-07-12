@@ -35,7 +35,10 @@ SEMANTIC_RULES = [
 AUDIT_COLUMNS = [
     "tx_id", "Date", "period", "period_end", "Currency", "amount", "Box", "Lugar",
     "payer", "receiver", "Flujo", "Tipo", "Detalle", "semantic_bucket", "semantic_subbucket", "direction",
-    "direction_source", "direction_confidence", "actor", "counterparty", "channel", "cash_path", "rule_id", "rule_version", "classification_confidence", "classification_status",
+    "direction_source", "direction_confidence", "actor", "counterparty", "funding_actor",
+    "funding_channel", "source_box", "target_box", "beneficiary_box", "obligation_box",
+    "payment_channel", "cash_effect", "debt_effect", "linked_debt_id", "channel", "cash_path",
+    "rule_id", "rule_version", "classification_confidence", "classification_status",
     "review_required", "warning", "notes",
 ]
 SUMMARY_COLUMNS = [
@@ -45,7 +48,9 @@ SUMMARY_COLUMNS = [
 ]
 MONTHLY_COLUMNS = [
     "period", "period_end", "Currency", "Box", "Lugar", "actor", "counterparty", "payer",
-    "receiver", "channel", "cash_path", "semantic_bucket", "semantic_subbucket",
+    "receiver", "funding_actor", "funding_channel", "source_box", "target_box",
+    "beneficiary_box", "obligation_box", "payment_channel", "cash_effect", "debt_effect",
+    "linked_debt_id", "channel", "cash_path", "semantic_bucket", "semantic_subbucket",
     "amount_in", "amount_out", "net_amount", "amount_abs", "n_tx", "classification_status",
     "classification_confidence", "review_required", "source_table", "source_tx_ids_sample",
     "rule_ids", "notes",
@@ -77,6 +82,135 @@ def _infer_box_party(box: Any) -> str:
     if b.casefold() == "household":
         return "HH"
     return "".join(part[0].upper() for part in b.split() if part and part[0].isalpha())
+
+
+def _semantic_blob(row: pd.Series) -> str:
+    fields = [
+        "payer", "receiver", "actor", "counterparty", "Box", "Lugar", "Flujo",
+        "Tipo", "Detalle", "notes", "channel", "cash_path", "semantic_bucket",
+        "semantic_subbucket", "rule_id",
+    ]
+    return " ".join(_norm(row.get(c)) for c in fields if c in row.index)
+
+
+def _actor_from_text(row: pd.Series) -> str:
+    blob = _semantic_blob(row).casefold()
+    checks = [
+        ("Matías", r"mat[ií]as|matias|\bmi\b"),
+        ("Alejandro", r"alejandro|\balen\b|\bale\b"),
+        ("Primos", r"primos"),
+        ("Héctor", r"h[eé]ctor|hector"),
+        ("Inquilino", r"inquil|\binq\b"),
+        ("Household", r"household|\bhh\b"),
+    ]
+    for actor, pattern in checks:
+        if re.search(pattern, blob, flags=re.IGNORECASE):
+            return actor
+    return ""
+
+
+def _is_funding_support_candidate(row: pd.Series) -> bool:
+    bucket = _norm(row.get("semantic_bucket"))
+    subbucket = _norm(row.get("semantic_subbucket")).casefold()
+    blob = _semantic_blob(row).casefold()
+    if bucket in {"funding_contribution", "debt_movement"}:
+        return True
+    if bucket == "property_opex" and subbucket in {"taxes", "services"} and _actor_from_text(row):
+        return True
+    return bool(re.search(r"fund|aporte|contrib|support|soporte|deuda|debt", blob, flags=re.IGNORECASE))
+
+
+def _box_for_row(row: pd.Series) -> str:
+    return _norm(row.get("Box"))
+
+
+def _derive_funding_dimensions(row: pd.Series) -> dict[str, str]:
+    bucket = _norm(row.get("semantic_bucket"))
+    subbucket = _norm(row.get("semantic_subbucket")).casefold()
+    direction = _norm(row.get("direction"))
+    box = _box_for_row(row)
+    blob = _semantic_blob(row).casefold()
+    is_support = _is_funding_support_candidate(row)
+    actor = _actor_from_text(row) if is_support else ""
+
+    source_box = box if direction == "out" else ""
+    target_box = box if direction == "in" or is_support else ""
+    beneficiary_box = target_box
+    obligation_box = ""
+    payment_channel = _norm(row.get("channel"))
+    linked_debt_id = _norm(row.get("linked_debt_id"))
+    funding_channel = ""
+    cash_effect = ""
+    debt_effect = "none"
+
+    if direction == "in":
+        cash_effect = "cash_in_box"
+    elif direction == "out":
+        cash_effect = "cash_out_box"
+    elif direction == "internal":
+        cash_effect = "non_cash_support"
+
+    if bucket == "debt_movement":
+        if subbucket == "repayment" or re.search(r"repago|repayment|settle|sald", blob):
+            debt_effect = "settles_debt"
+            funding_channel = "debt_settlement"
+        elif subbucket == "principal" or re.search(r"prestamo|principal|loan|deuda|debt", blob):
+            debt_effect = "creates_debt"
+            funding_channel = "debt_creation"
+        else:
+            debt_effect = "ambiguous"
+            funding_channel = "other"
+        cash_effect = cash_effect or "non_cash_support"
+        beneficiary_box = beneficiary_box or box
+        target_box = target_box or box
+    elif bucket == "funding_contribution":
+        if actor == "Inquilino":
+            funding_channel = "tenant_to_box"
+        elif actor == "Household" and (box == "Property Management" or re.search(r"property management|\bpm\b", blob)):
+            funding_channel = "household_to_pm"
+        elif actor in {"Alejandro", "Primos"} or box == "Family Business" or re.search(r"family business|\bfb\b", blob):
+            funding_channel = "family_business_contribution"
+        elif actor:
+            funding_channel = "named_actor_support"
+        else:
+            funding_channel = "cash_to_box" if direction == "in" else "other"
+        cash_effect = cash_effect or ("cash_in_box" if direction == "in" else "non_cash_support")
+        beneficiary_box = beneficiary_box or box
+        target_box = target_box or box
+    elif bucket == "property_opex" and subbucket in {"taxes", "services"} and actor:
+        if actor == "Inquilino" and subbucket == "taxes":
+            funding_channel = "tenant_direct_tax_payment"
+        elif actor == "Inquilino" and subbucket == "services":
+            funding_channel = "tenant_direct_service_payment"
+        elif actor == "Household" and box == "Property Management":
+            funding_channel = "household_to_pm"
+        else:
+            funding_channel = "named_actor_support"
+        cash_effect = "no_cash_in_box_direct_payment"
+        obligation_box = box
+        beneficiary_box = box
+        target_box = box
+        source_box = ""
+        if debt_effect == "none" and re.search(r"deuda|debt|prestamo|repago|repayment", blob):
+            debt_effect = "ambiguous"
+    elif is_support:
+        funding_channel = "named_actor_support" if actor else "other"
+        beneficiary_box = beneficiary_box or box
+        target_box = target_box or box
+        cash_effect = cash_effect or "non_cash_support"
+
+    return {
+        "funding_actor": actor,
+        "funding_channel": funding_channel,
+        "source_box": source_box,
+        "target_box": target_box,
+        "beneficiary_box": beneficiary_box,
+        "obligation_box": obligation_box,
+        "payment_channel": payment_channel,
+        "cash_effect": cash_effect,
+        "debt_effect": debt_effect,
+        "linked_debt_id": linked_debt_id,
+    }
 
 
 def semantic_rule_registry_frame() -> pd.DataFrame:
@@ -192,6 +326,14 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     audit.loc[unknown_direction, "direction_confidence"] = audit.loc[unknown_direction, "direction_source"].map({"semantic_fallback":"medium", "rule_default":"medium", "explicit_direction":"high"}).fillna("low")
     audit["actor"] = audit["Box"].where(audit["Box"].astype(str).str.strip().ne(""), box_party)
     audit["counterparty"] = audit["receiver"].where(audit["direction"].eq("out"), audit["payer"])
+    if "linked_debt_id" not in audit.columns:
+        audit["linked_debt_id"] = ""
+    funding_dimensions = audit.apply(_derive_funding_dimensions, axis=1, result_type="expand")
+    for col in [
+        "funding_actor", "funding_channel", "source_box", "target_box", "beneficiary_box",
+        "obligation_box", "payment_channel", "cash_effect", "debt_effect", "linked_debt_id",
+    ]:
+        audit[col] = funding_dimensions[col] if col in funding_dimensions.columns else ""
 
     audit["Date"] = audit["Date"].dt.date.astype(str)
     audit["review_required"] = audit["review_required"].astype(bool)
@@ -208,7 +350,12 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     work["amount_out"] = work["amount"].where(work["direction"].eq("out"), 0.0)
     work["net_amount"] = work["amount_in"] - work["amount_out"]
     work["amount_abs"] = work["amount"].abs()
-    monthly = work.groupby(["period", "Currency", "Box", "Lugar", "actor", "counterparty", "payer", "receiver", "channel", "cash_path", "semantic_bucket", "semantic_subbucket"], dropna=False).agg(
+    monthly = work.groupby([
+        "period", "Currency", "Box", "Lugar", "actor", "counterparty", "payer", "receiver",
+        "funding_actor", "funding_channel", "source_box", "target_box", "beneficiary_box",
+        "obligation_box", "payment_channel", "cash_effect", "debt_effect", "linked_debt_id",
+        "channel", "cash_path", "semantic_bucket", "semantic_subbucket",
+    ], dropna=False).agg(
         amount_in=("amount_in", "sum"), amount_out=("amount_out", "sum"), net_amount=("net_amount", "sum"), amount_abs=("amount_abs", "sum"),
         n_tx=("tx_id", "count"), classification_status=("classification_status", lambda s: "review_required" if (s == "review_required").any() else "classified"),
         classification_confidence=("classification_confidence", lambda s: "low" if "low" in set(s) else ("medium" if "medium" in set(s) else "high")),
@@ -251,7 +398,7 @@ def build_semantic_dashboard_coverage() -> pd.DataFrame:
         ("Legal", "property_opex", "legal", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line legal."),
         ("OPEX patrimonial", "property_opex", "*", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line property_opex_true excludes funding, debt, and distributions."),
         ("Resultado operativo", "operating_result", "net_operating", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line net_operating."),
-        ("Contribuciones por actor", "funding_contribution", "family_or_tenant_contribution", "actor,counterparty", "monthly_flow_semantic_split.csv", "supported_if_present", "", "Use actor/counterparty dimensions."),
+        ("Contribuciones por actor", "funding_contribution", "family_or_tenant_contribution", "funding_actor,funding_channel,target_box,obligation_box,cash_effect,debt_effect", "monthly_flow_semantic_split.csv", "supported_if_present", "", "Use explicit funding dimensions; do not infer funding semantics from renderer labels."),
         ("Gasto personal", "family_withdrawal_candidate", "personal_expense", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line personal_expenses."),
         ("Dividendos", "family_withdrawal_candidate", "dividend", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line dividends."),
         ("Retiros/distribución", "family_withdrawal_candidate", "*", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line family_draws_or_distributions."),

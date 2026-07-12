@@ -76,6 +76,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border
 
 
 from accounting.logging_utils import configure_logging, get_logger
+from accounting.professional.table_contracts import enrich_professional_table_contracts
 LOG = get_logger("prof drilldown")
 
 
@@ -740,6 +741,30 @@ def _semantic_filter_for_statement_line(line: str) -> tuple[str, Callable[[pd.Da
     return mapping.get(line)
 
 
+def _funding_metric_semantic_mask(split: pd.DataFrame, metric_id: str) -> pd.Series:
+    if split.empty:
+        return pd.Series(False, index=split.index)
+    bucket = split.get("semantic_bucket", pd.Series("", index=split.index)).fillna("").astype(str)
+    channel = split.get("funding_channel", pd.Series("", index=split.index)).fillna("").astype(str).str.strip()
+    cash_effect = split.get("cash_effect", pd.Series("", index=split.index)).fillna("").astype(str).str.strip()
+    debt_effect = split.get("debt_effect", pd.Series("none", index=split.index)).fillna("none").astype(str).str.strip()
+    support = bucket.eq("funding_contribution") | channel.ne("") | debt_effect.ne("none")
+    if metric_id in {
+        "FUND.CONTRIB.BY_FUNDING_ACTOR",
+        "FUND.CONTRIB.BY_CHANNEL",
+        "FUND.CONTRIB.BY_CASH_EFFECT",
+        "FUND.CONTRIB.BY_TARGET_BOX",
+    }:
+        return support
+    if metric_id == "FUND.CONTRIB.DIRECT_OBLIGATION":
+        return support & cash_effect.eq("no_cash_in_box_direct_payment")
+    if metric_id == "FUND.CONTRIB.CASH_TO_BOX":
+        return support & cash_effect.eq("cash_in_box")
+    if metric_id == "FUND.CONTRIB.DEBT_LINKED":
+        return support & debt_effect.ne("none")
+    return pd.Series(False, index=split.index)
+
+
 def _statement_components(stmt: pd.DataFrame, period: str, currency: str, component_lines: list[str]) -> pd.DataFrame:
     if stmt.empty:
         return pd.DataFrame()
@@ -1221,6 +1246,79 @@ def _cash_bridge_semantic_rows(
     Callable[[pd.DataFrame], pd.Series] | None,
     bool,
 ]:
+    metric_id = _norm(row.get("metric_id"))
+    if metric_id.startswith("FUND.CONTRIB."):
+        mask = _year_mask(split, period) & _eq_col(split, "Currency", row.get("Currency"))
+        mask &= _funding_metric_semantic_mask(split, metric_id)
+
+        # Stable contract dimensions win over human bridge labels.  These
+        # filters are intentionally explicit so funding/support rows are
+        # separated by actor, channel, target/obligation box, cash effect, and
+        # debt effect instead of inferred from display text.
+        dim_name = _norm(row.get("dimension_name"))
+        dim_value = _norm(row.get("dimension_value"))
+        if dim_name and dim_value and dim_name in split.columns:
+            mask &= _eq_col(split, dim_name, dim_value)
+
+        for col in (
+            "Box",
+            "cash_path",
+            "funding_channel",
+            "funding_actor",
+            "cash_effect",
+            "target_box",
+            "beneficiary_box",
+            "obligation_box",
+            "source_box",
+            "debt_effect",
+        ):
+            if col in row.index and _norm(row.get(col)):
+                mask &= _eq_col(split, col, row.get(col))
+
+        cash_effect = _norm(row.get("cash_effect")) or (
+            dim_value if dim_name == "cash_effect" else ""
+        )
+        funding_channel = _norm(row.get("funding_channel")) or (
+            dim_value if dim_name == "funding_channel" else ""
+        )
+        if metric_id == "FUND.CONTRIB.DIRECT_OBLIGATION" or cash_effect == "no_cash_in_box_direct_payment" or funding_channel in {"tenant_direct_tax_payment", "tenant_direct_service_payment"}:
+            measure = "amount_out"
+        elif metric_id == "FUND.CONTRIB.DEBT_LINKED":
+            measure = "amount_abs"
+        else:
+            measure = "amount_in"
+
+        def contract_filter(df: pd.DataFrame) -> pd.Series:
+            out = _funding_metric_semantic_mask(df, metric_id)
+            if dim_name and dim_value and dim_name in df.columns:
+                out &= _eq_col(df, dim_name, dim_value)
+            for col in (
+                "Box",
+                "cash_path",
+                "funding_channel",
+                "funding_actor",
+                "cash_effect",
+                "target_box",
+                "beneficiary_box",
+                "obligation_box",
+                "source_box",
+                "debt_effect",
+            ):
+                if col in row.index and _norm(row.get(col)):
+                    out &= _eq_col(df, col, row.get(col))
+            return out
+
+        note_bits = [f"metric_id={metric_id}"]
+        if dim_name and dim_value:
+            note_bits.append(f"{dim_name}={dim_value}")
+        return (
+            split.loc[mask].copy(),
+            measure,
+            "year/Currency + stable funding contract (" + "; ".join(note_bits) + ")",
+            contract_filter,
+            True,
+        )
+
     line = _metric_name(row)
     line_spec = _cash_bridge_line_spec(line)
 
@@ -2356,6 +2454,8 @@ def _build_derived_cell(
                 sem_mask &= _bucket_eq(split, "property_opex")
             elif metric_id in {"FUND.CONTRIB.BY_ACTOR"}:
                 sem_mask &= _bucket_eq(split, "funding_contribution")
+            elif metric_id.startswith("FUND.CONTRIB."):
+                sem_mask &= _funding_metric_semantic_mask(split, metric_id)
             elif metric_id in {"DIST.DRAWS.BY_TYPE"}:
                 sem_mask &= _bucket_eq(split, "family_withdrawal_candidate")
             if dim_name and dim_value and dim_name in split.columns:
@@ -2364,6 +2464,13 @@ def _build_derived_cell(
             sections.append(("Semantic rows", semantic_rows))
             detail_rows, lineage = _detail_from_audit(audit, semantic_rows, lambda df, p=period: _year_mask(df, p) & _eq_col(df, "Currency", currency))
             sections.append(("Classification rows", detail_rows))
+            if metric_id == "FUND.CONTRIB.DEBT_LINKED":
+                debt_activity_rows = debt_activity.loc[_year_mask(debt_activity, period) & _eq_col(debt_activity, "Currency", currency)].copy() if not debt_activity.empty else pd.DataFrame()
+                debt_position_rows = debt_position.loc[_year_mask(debt_position, period) & _eq_col(debt_position, "Currency", currency)].copy() if not debt_position.empty else pd.DataFrame()
+                sections.append(("Debt activity rows", debt_activity_rows))
+                sections.append(("Debt position rows", debt_position_rows))
+                if not debt_activity_rows.empty or not debt_position_rows.empty:
+                    lineage = "debt_linked_support_with_debt_evidence"
         residual = matched - display_value
         status = STATUS_OK if abs(residual) <= tolerance else STATUS_RESIDUAL_WARNING
         filters = {"period": period, "Currency": currency, "source_table": source_table, "calculation_rule": calc_rule, "row_context": _row_context(table_id, row)}
@@ -2489,6 +2596,9 @@ def build_professional_flow_drilldowns(
 
     details_dir.mkdir(parents=True, exist_ok=True)
     LOG.info("[drilldown] details_dir ready: %s", details_dir)
+    enriched_tables = enrich_professional_table_contracts(tables_dir)
+    if enriched_tables:
+        LOG.info("[drilldown] enriched professional table contract columns files=%s", len(enriched_tables))
 
     LOG.info("[drilldown] locating source artifacts")
     split_path = _find_source(repo_root, pack_dir, run_root, "monthly_flow_semantic_split.csv")
