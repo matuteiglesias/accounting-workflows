@@ -774,7 +774,24 @@ def build_professional_linked_digest(
         else:
             LOG.debug("[linked-digest] optional extra table missing: %s", path)
 
-    table_paths = sorted(table_paths)
+    annual_companion_names = [
+        "annual_cash_close_by_box_wide.csv",
+        "annual_funding_by_actor_channel_wide.csv",
+        "annual_debt_stock_by_pair_wide.csv",
+        "annual_debt_activity_by_pair_wide.csv",
+    ]
+    annual_companion_paths = []
+    for name in annual_companion_names:
+        path = tables_dir / name
+        if path.exists():
+            annual_companion_paths.append(path)
+            LOG.info("[linked-digest] added annual management companion table: %s", path)
+        else:
+            LOG.debug("[linked-digest] optional annual companion table missing: %s", path)
+
+    table_paths = sorted(table_paths) + annual_companion_paths
+    annual_companion_ids = {p.stem for p in annual_companion_paths}
+    annual_companion_heading_added = False
 
     if not table_paths:
         LOG.warning(
@@ -800,6 +817,16 @@ def build_professional_linked_digest(
         )
 
         try:
+            if table_id in annual_companion_ids and not annual_companion_heading_added:
+                sections.append(
+                    "<div class='section'>"
+                    "<h1>Annual management companion tables</h1>"
+                    "<p class='note'>Annual companion tables are generated as professional dashboard contracts. "
+                    "Wide CSVs are rendered here; long CSVs remain available for drilldown and QA.</p>"
+                    "</div>"
+                )
+                annual_companion_heading_added = True
+
             file_size = path.stat().st_size
             LOG.debug(
                 "[linked-digest] table file metadata table_id=%s size_bytes=%s",
