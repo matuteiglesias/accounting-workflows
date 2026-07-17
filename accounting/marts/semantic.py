@@ -6,6 +6,12 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
+from accounting.scope import (
+    HOUSEHOLD_BOXES,
+    PROPERTY_BUSINESS_BOXES,
+    property_business_scope_mask,
+)
+
 RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
 RULE_REGISTRY_COLUMNS = [
     "rule_id", "rule_version", "priority", "rule_name", "match_fields", "match_pattern",
@@ -483,7 +489,7 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
             "semantic_category": category,
             "amount": float(amount),
             "source_table": "monthly_flow_semantic_split.csv",
-            "source_filter": source_filter,
+            "source_filter": f"property_business_scope; {source_filter}",
             "n_tx": int(n_tx),
             "classification_coverage_ratio": float(coverage),
             "unknown_amount": float(unknown),
@@ -494,7 +500,10 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
 
     for base in groups:
         gmask = (df["period"].eq(base["period"]) & df["period_end"].eq(base["period_end"]) & df["Currency"].eq(base["Currency"]))
-        g = df.loc[gmask].copy()
+        # Box is an accounting-universe boundary, not merely a presentation
+        # dimension. Explicit attribution fields allow payment-on-behalf rows
+        # into the professional universe; semantic_bucket alone does not.
+        g = df.loc[gmask & property_business_scope_mask(df)].copy()
         eligible_abs = float(g["amount_abs"].sum())
         unknown_mask = g["semantic_bucket"].eq("unknown") | g["review_required"]
         unknown_amount = float(g.loc[unknown_mask, "amount_abs"].sum())
