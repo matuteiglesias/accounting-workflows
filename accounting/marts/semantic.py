@@ -9,6 +9,7 @@ import pandas as pd
 from accounting.scope import (
     HOUSEHOLD_BOXES,
     PROPERTY_BUSINESS_BOXES,
+    box_scope_mask,
     property_business_scope_mask,
 )
 
@@ -450,7 +451,9 @@ def build_semantic_leakage_qa(audit: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=SEMANTIC_LEAKAGE_QA_COLUMNS)
 
 
-def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def build_monthly_operating_statement_from_split(
+    split: pd.DataFrame, boxes: set[str] | None = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     required = [
         "period", "period_end", "Currency", "semantic_bucket", "semantic_subbucket",
         "amount_in", "amount_out", "net_amount", "amount_abs", "n_tx", "review_required",
@@ -465,6 +468,15 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
     df["n_tx"] = pd.to_numeric(df["n_tx"], errors="coerce").fillna(0).astype(int)
     df["review_required"] = df["review_required"].astype(str).str.lower().isin({"true", "1", "yes", "y"})
 
+    # Materialization normally provides the scoped universe. The default keeps
+    # direct callers and legacy runs professional-only without creating rows
+    # for months that have Household activity only.
+    if boxes is None:
+        df = df.loc[property_business_scope_mask(df)].copy()
+        scope_label = "property_business_scope"
+    else:
+        df = df.loc[box_scope_mask(df, boxes)].copy()
+        scope_label = f"box_scope={','.join(sorted(boxes))}"
     keys = ["period", "period_end", "Currency"]
     groups = df[keys].drop_duplicates().sort_values(keys).to_dict("records")
     rows = []
@@ -489,7 +501,7 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
             "semantic_category": category,
             "amount": float(amount),
             "source_table": "monthly_flow_semantic_split.csv",
-            "source_filter": f"property_business_scope; {source_filter}",
+            "source_filter": f"{scope_label}; {source_filter}",
             "n_tx": int(n_tx),
             "classification_coverage_ratio": float(coverage),
             "unknown_amount": float(unknown),
@@ -500,10 +512,7 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
 
     for base in groups:
         gmask = (df["period"].eq(base["period"]) & df["period_end"].eq(base["period_end"]) & df["Currency"].eq(base["Currency"]))
-        # Box is an accounting-universe boundary, not merely a presentation
-        # dimension. Explicit attribution fields allow payment-on-behalf rows
-        # into the professional universe; semantic_bucket alone does not.
-        g = df.loc[gmask & property_business_scope_mask(df)].copy()
+        g = df.loc[gmask].copy()
         eligible_abs = float(g["amount_abs"].sum())
         unknown_mask = g["semantic_bucket"].eq("unknown") | g["review_required"]
         unknown_amount = float(g.loc[unknown_mask, "amount_abs"].sum())
@@ -578,7 +587,7 @@ def build_monthly_operating_statement_from_split(split: pd.DataFrame) -> Tuple[p
     return statement, qa
 
 
-def build_monthly_operating_statement(out_dir: Path) -> Dict[str, Path]:
+def build_monthly_operating_statement(out_dir: Path, boxes: set[str] | None = None) -> Dict[str, Path]:
     out_dir = Path(out_dir)
     split_path = out_dir / "monthly_flow_semantic_split.csv"
     if not split_path.exists():
@@ -586,7 +595,7 @@ def build_monthly_operating_statement(out_dir: Path) -> Dict[str, Path]:
             f"monthly_operating_statement requires {split_path}; run semantic classification first and do not fall back to legacy reports"
         )
     split = pd.read_csv(split_path)
-    statement, qa = build_monthly_operating_statement_from_split(split)
+    statement, qa = build_monthly_operating_statement_from_split(split, boxes=boxes)
     statement_path = out_dir / "monthly_operating_statement.csv"
     qa_path = out_dir / "monthly_operating_statement_qa.csv"
     statement.to_csv(statement_path, index=False)

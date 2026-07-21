@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from accounting.scope import property_business_scope_mask
+from accounting.scope import box_scope_mask, configured_box_scope
 
 ANNUAL_METRICS_COLUMNS = [
     "metric_id","period_grain","period","period_start","period_end","Currency","value","value_status",
@@ -135,7 +135,7 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
     if split is not None and not split.empty:
         s=_year(split); 
         for col in ["amount_in","amount_out","net_amount","amount_abs"]: s[col]=pd.to_numeric(s.get(col,0),errors="coerce").fillna(0.0)
-        professional_scope = property_business_scope_mask(s)
+        professional_scope = box_scope_mask(s, configured_box_scope())
         specs=[("IS.RENT.TOTAL",professional_scope&s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"amount_in","Lugar","1. Operating result","IS.RENT.BY_PROPERTY"),("IS.OPEX.BY_CATEGORY",professional_scope&s.semantic_bucket.eq("property_opex"),"amount_out","semantic_subbucket","1. Operating result","IS.OPEX.BY_CATEGORY"),("FUND.CONTRIB.BY_ACTOR",professional_scope&s.semantic_bucket.eq("funding_contribution"),"amount_in","actor","2. Funding and distributions","FUND.CONTRIB.BY_ACTOR"),("DIST.DRAWS.BY_TYPE",professional_scope&s.semantic_bucket.eq("family_withdrawal_candidate"),"amount_out","semantic_subbucket","2. Funding and distributions","DIST.DRAWS.BY_TYPE")]
         for total_mid, mask, amt, dim, dash, emit_mid in specs:
             sub=s[mask]

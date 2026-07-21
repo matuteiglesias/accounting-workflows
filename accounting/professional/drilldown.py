@@ -81,7 +81,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border
 
 from accounting.logging_utils import configure_logging, get_logger
 from accounting.professional.table_contracts import enrich_professional_table_contracts
-from accounting.scope import property_business_scope_mask
+from accounting.scope import box_scope_mask, configured_box_scope
 LOG = get_logger("prof drilldown")
 
 
@@ -757,7 +757,7 @@ def _statement_line(row: pd.Series) -> str:
 
 def _semantic_filter_for_statement_line(line: str) -> tuple[str, Callable[[pd.DataFrame], pd.Series]] | None:
     def scoped(mask: Callable[[pd.DataFrame], pd.Series]) -> Callable[[pd.DataFrame], pd.Series]:
-        return lambda df: property_business_scope_mask(df) & mask(df)
+        return lambda df: box_scope_mask(df, configured_box_scope()) & mask(df)
 
     mapping: dict[str, tuple[str, Callable[[pd.DataFrame], pd.Series]]] = {
         "operating_revenue": ("amount_in", scoped(lambda df: _bucket_eq(df, "operating_revenue"))),
@@ -1629,7 +1629,7 @@ def _build_annual_professional_fallback(
     base_mask = (
         _year_mask(split, period)
         & _eq_col(split, "Currency", currency)
-        & property_business_scope_mask(split)
+        & box_scope_mask(split, configured_box_scope())
     )
 
     sections: list[tuple[str, pd.DataFrame]] = []
@@ -1667,7 +1667,7 @@ def _build_annual_professional_fallback(
             return (
                 _year_mask(df, period)
                 & _eq_col(df, "Currency", currency)
-                & property_business_scope_mask(df)
+                & box_scope_mask(df, configured_box_scope())
                 & (revenue_filter(df) | opex_filter(df))
             )
 
@@ -2899,7 +2899,11 @@ def _build_derived_cell(
             metric_id = _norm(annual_rows.iloc[0].get("metric_id"))
             dim_name = _norm(annual_rows.iloc[0].get("dimension_name"))
             dim_value = _norm(annual_rows.iloc[0].get("dimension_value"))
-            sem_mask = _year_mask(split, period) & _eq_col(split, "Currency", currency)
+            sem_mask = (
+                _year_mask(split, period)
+                & _eq_col(split, "Currency", currency)
+                & box_scope_mask(split, configured_box_scope())
+            )
             if metric_id in {"IS.RENT.TOTAL", "IS.RENT.BY_PROPERTY"}:
                 sem_mask &= _bucket_eq(split, "operating_revenue") & _eq_col(split, "semantic_subbucket", "rent")
             elif metric_id in {"IS.OPEX.BY_CATEGORY"}:
@@ -2916,7 +2920,15 @@ def _build_derived_cell(
                 sem_mask &= _eq_col(split, dim_name, dim_value)
             semantic_rows = split.loc[sem_mask].copy()
             sections.append(("Semantic rows", semantic_rows))
-            detail_rows, lineage = _detail_from_audit(audit, semantic_rows, lambda df, p=period: _year_mask(df, p) & _eq_col(df, "Currency", currency))
+            detail_rows, lineage = _detail_from_audit(
+                audit,
+                semantic_rows,
+                lambda df, p=period: (
+                    _year_mask(df, p)
+                    & _eq_col(df, "Currency", currency)
+                    & box_scope_mask(df, configured_box_scope())
+                ),
+            )
             sections.append(("Classification rows", detail_rows))
             if metric_id == "FUND.CONTRIB.DEBT_LINKED":
                 debt_activity_rows = debt_activity.loc[_year_mask(debt_activity, period) & _eq_col(debt_activity, "Currency", currency)].copy() if not debt_activity.empty else pd.DataFrame()

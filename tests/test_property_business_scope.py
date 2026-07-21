@@ -66,3 +66,19 @@ def test_operating_statement_excludes_unattributed_household_opex():
     assert amounts["net_operating"] == 350
     assert amounts["services"] == 100
     assert amounts["taxes"] == 50
+
+
+def test_household_only_period_does_not_create_professional_zero_statement():
+    split = pd.DataFrame([_row("Household", "property_opex", amount_out=900, semantic_subbucket="services")])
+
+    statement, _ = build_monthly_operating_statement_from_split(split)
+
+    assert statement.empty
+
+
+def test_household_scope_produces_a_household_statement():
+    split = pd.DataFrame([_row("Household", "property_opex", amount_out=90, semantic_subbucket="services")])
+
+    statement, _ = build_monthly_operating_statement_from_split(split, boxes={"Household"})
+
+    assert statement.loc[statement["statement_line"].eq("property_opex_true"), "amount"].item() == 90

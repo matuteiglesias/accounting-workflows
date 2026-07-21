@@ -13,6 +13,7 @@ MAKEFLAGS += --no-print-directory
 
 PY ?= python3
 export PYTHONUNBUFFERED := 1
+export BOXES SCOPE_TAG
 
 -include .env
 export ACCOUNT_SHEET_URL ACCOUNT_SA ACCOUNT_SHEET_NAME
@@ -41,6 +42,11 @@ export PYTHONPATH := $(ROOT)
 # User-tunable parameters
 # ----------------------------------------
 OUT  ?= out
+BOXES := $(if $(strip $(BOXES)),$(BOXES),Family Business,Property Management)
+# The scope tag is derived from BOXES and becomes part of every run identifier:
+# a same-second Household run cannot overwrite a property/business run. It may
+# be overridden only to provide a more readable stable label.
+SCOPE_TAG := $(if $(strip $(SCOPE_TAG)),$(SCOPE_TAG),$(shell printf '%s' '$(BOXES)' | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '_' | sed 's/^_//;s/_$$//'))
 FREQ ?= M
 TOP  ?= 10
 METRIC_MONTHS ?= 6
@@ -85,7 +91,7 @@ RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 
 RUN_BASE := $(OUT)/run/accounting
 
-RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)
+RUN_OUT   := $(OUT)/run/accounting/$(RUN_STAMP)_$(SCOPE_TAG)
 RUN_REL   := $(notdir $(RUN_OUT))
 # Per-run out dir (you probably already have this, keep your existing one)
 # RUN_OUT := $(RUN_BASE)/$(RUN_RUN_ID)
@@ -101,7 +107,7 @@ SMOKE_VIEWS_SANITY := $(SMOKE_VIEWS_DIR)/views_sanity.json
 RUN_VIEWS_SANITY   := $(RUN_VIEWS_DIR)/views_sanity.json
 
 SMOKE_RUN_ID := smoke
-RUN_RUN_ID   := $(RUN_STAMP)
+RUN_RUN_ID   := $(RUN_REL)
 
 RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_RUN_ID)
 RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
@@ -193,7 +199,8 @@ help:
 	@echo "  make front-report       # presentation-only report factory stub"
 	@echo ""
 	@echo "Key vars:"
-	@echo "  OUT=out  RUN_STAMP=<run-id>  FREQ=W|M  TOP=6  METRIC_MONTHS=6"
+	@echo "  OUT=out RUN_STAMP=<timestamp> BOXES='Family Business,Property Management'"
+	@echo "  Household-only example: BOXES=Household  # automatically writes <timestamp>_household"
 	@echo "  FIXTURE=$(ROOT)/fixtures/ledger_fixture.csv"
 	@echo "  ACCOUNT_SA=/path/to/sa.json  ACCOUNT_SHEET_URL=...  ACCOUNT_SHEET_NAME='C. Long Ledger'"
 	@echo ""
@@ -237,49 +244,14 @@ build-front: publish-latest
 .PHONY: doctor validate clean-derived front-report
 doctor:
 	@$(PY) --version
-	@$(PY) -m py_compile \
-		accounting/config.py \
-		accounting/logging_utils.py \
-		accounting/ledger/ingest.py \
-		accounting/stage_d/materialize.py \
-		accounting/core/timeseries.py \
-		accounting/contracts/models.py \
-		accounting/viz/plots.py \
-		accounting/artifacts/manifest.py \
-		accounting/support/run_id.py \
-		accounting/support/io.py \
-		accounting/support/currency.py \
-		accounting/support/env.py \
-		accounting/support/hashing.py \
-		accounting/support/partitions.py \
-		accounting/marts/build.py \
-		accounting/marts/cash.py \
-		accounting/marts/debt.py \
-		accounting/marts/semantic.py \
-		accounting/debt/resolve.py \
-		accounting/debt/balance_views.py \
-		accounting/metrics/io.py \
-		accounting/metrics/registry.py \
-		accounting/metrics/builders.py \
-		accounting/metrics/derive.py \
-		accounting/metrics/validate.py \
-		accounting/metrics/views.py \
-		accounting/metrics/drilldown.py \
-		accounting/metrics/frontier.py \
-		accounting/metrics/build.py \
-		accounting/human/tables.py \
-		accounting/human/document.py \
-		accounting/human/front.py \
-		accounting/human/reports.py \
-		accounting/publish/latest.py \
-		accounting/publish/manifest.py \
-		accounting/publish/snapshot.py
+	@$(PY) -m compileall -q accounting scripts tests
 	@echo "accounting command modules compile ok"
 
 validate: doctor
 	@$(MAKE) help >/dev/null
 	@$(PY) scripts/check_contracts.py
-	@echo "make help and contract validation ok"
+	@$(PY) -m pytest -q
+	@echo "compile, contract, and regression validation ok"
 
 clean-derived:
 	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest"
@@ -493,7 +465,8 @@ _run_materialize_action:
 		--freq "$(FREQ)" \
 		--force 0 \
 		--mode run \
-		--run-id "$(RUN_RUN_ID)"
+		--run-id "$(RUN_RUN_ID)" \
+		--boxes "$(BOXES)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 	@test -s "$(RUN_OUT)/classification_audit.csv"
 	@test -s "$(RUN_OUT)/classification_audit_summary.csv"
