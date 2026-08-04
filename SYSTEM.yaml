@@ -1,0 +1,45 @@
+# This file declares the repository boundary and its place in the GitHub estate.
+schema_version: 1
+id: acct.workflow.pipeline
+repository:
+  id: repo.accounting-workflows
+  github: matuteiglesias/accounting-workflows
+domain: accounting
+system: acct.workflow
+role: canonical-accounting-pipeline
+lifecycle: active
+authority:
+  status: proposed
+  owns:
+  - canonical ledger transformation and reporting workflow
+  - professional pack and drilldown artifacts
+  - accounting business-rule implementation
+  does_not_own:
+  - raw document intake
+  - viewer-specific presentation
+  - public documentation authority
+interfaces:
+  consumes:
+  - artifact:acct.document-candidate@1
+  produces:
+  - artifact:acct.professional-pack@1
+  - artifact:acct.drilldowns@1
+  - artifact:acct.docs-input@1
+upstream:
+- repo.accounting-doc-triage
+downstream:
+- repo.accounting-docs
+- repo.accounting-viewer
+canonical_commands:
+- make run-all
+generated_paths:
+- out/
+verification:
+  status: partial
+  last_verified: '2026-08-04'
+  command: make run-all
+  unknowns:
+  - full execution depends on local accounting inputs
+maintenance:
+  cadence: quarterly
+  next_review: '2026-11-01'
