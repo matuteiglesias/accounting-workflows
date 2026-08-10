@@ -38,6 +38,7 @@ import pandas as pd
 
 from accounting.core.timeseries import period_bins_for_dates
 from accounting.logging_utils import configure_logging, get_logger
+from accounting.scope import box_scope_mask, canonical_box_name, parse_box_scope, scope_metadata
 
 
 LOG = get_logger("ingest")
@@ -382,6 +383,7 @@ def build_ledger_base(
     base_currency: str = "ARS",
     require_tx_id: bool = False,
     exclude_household: bool = False,
+    boxes: Optional[set[str]] = None,
     only_status: Optional[Sequence[str]] = ("pagado",),
     add_time_period: bool = False,
     time_freq: str = "W",
@@ -405,6 +407,7 @@ def build_ledger_base(
         raise ValueError("Must provide fixture_path or (sheet_url and service_account_file)")
 
     df = _normalize_columns(raw)
+    source_has_box = "Box" in df.columns
     df = _ensure_columns(df)
 
     df["source_file"] = source_file
@@ -416,6 +419,19 @@ def build_ledger_base(
     df["ingest_ts"] = _dt.datetime.utcnow().replace(microsecond=0).isoformat()
 
     df = _coerce_money_and_dates(df)
+
+    # Box is the sole ledger-partition key. Normalize canonical spelling before
+    # selecting the declared universe; counterparty/semantic fields play no role.
+    if boxes is not None:
+        if exclude_household:
+            raise ValueError("Use boxes or legacy exclude_household, not both")
+        canonical_boxes = {canonical_box_name(box) for box in boxes}
+        if not source_has_box:
+            raise ValueError("Scoped canonical ingest requires a Box column")
+        nonempty = df["Box"].notna() & df["Box"].astype(str).str.strip().ne("")
+        normalized = df.loc[nonempty, "Box"].map(canonical_box_name)
+        df.loc[nonempty, "Box"] = normalized
+        df = df.loc[box_scope_mask(df, canonical_boxes)].copy()
 
     if only_status is not None and "status" in df.columns:
         allowed = {str(s).strip().lower() for s in only_status}
@@ -504,6 +520,7 @@ def build_stable_ledger_snapshot(
     base_currency: str = "ARS",
     require_tx_id: bool = False,
     exclude_household: bool = False,
+    boxes: Optional[set[str]] = None,
     only_status: Optional[Sequence[str]] = ("pagado",),
     add_time_period: bool = False,
     time_freq: str = "W",
@@ -526,6 +543,7 @@ def build_stable_ledger_snapshot(
         base_currency=base_currency,
         require_tx_id=require_tx_id,
         exclude_household=exclude_household,
+        boxes=boxes,
         only_status=only_status,
         add_time_period=add_time_period,
         time_freq=time_freq,
@@ -560,6 +578,7 @@ def compute_ledger_fingerprint(
     base_currency: str = "ARS",
     require_tx_id: bool = False,
     exclude_household: bool = False,
+    boxes: Optional[set[str]] = None,
     only_status: Optional[Sequence[str]] = ("pagado",),
     add_time_period: bool = False,
     time_freq: str = "W",
@@ -577,6 +596,7 @@ def compute_ledger_fingerprint(
         base_currency=base_currency,
         require_tx_id=require_tx_id,
         exclude_household=exclude_household,
+        boxes=boxes,
         only_status=only_status,
         add_time_period=add_time_period,
         time_freq=time_freq,
@@ -601,7 +621,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-dir", help="Output directory", default=os.getenv("OUT_DIR", "./out"))
     p.add_argument("--probe-fingerprint", action="store_true", default=False, help="Print stable ledger fingerprint and exit")
 
-    p.add_argument("--exclude-household", action="store_true", default=False)
+    p.add_argument(
+        "--exclude-household",
+        action="store_true",
+        default=False,
+        help="Legacy unscoped-ingest compatibility flag; do not combine with --boxes.",
+    )
+    p.add_argument(
+        "--boxes",
+        default=None,
+        help="Comma-separated canonical Box universe. Supersedes legacy --exclude-household.",
+    )
     p.add_argument("--require-tx-id", action="store_true", default=False)
 
     p.add_argument(
@@ -638,6 +668,7 @@ def main() -> int:
 
     args = parse_args()
     only_status = _parse_list_arg(args.only_status)
+    boxes = parse_box_scope(args.boxes) if args.boxes is not None else None
 
     from accounting.artifacts.manifest import artifact_from_path, append_artifacts, write_stage_manifest
     from accounting.support.run_id import resolve_run_id
@@ -653,6 +684,7 @@ def main() -> int:
             base_currency=args.base_currency,
             require_tx_id=bool(args.require_tx_id),
             exclude_household=bool(args.exclude_household),
+            boxes=boxes,
             only_status=only_status if only_status is not None else None,
             add_time_period=bool(args.add_time_period),
             time_freq=str(args.time_freq),
@@ -675,6 +707,7 @@ def main() -> int:
         base_currency=args.base_currency,
         require_tx_id=bool(args.require_tx_id),
         exclude_household=bool(args.exclude_household),
+        boxes=boxes,
         only_status=only_status if only_status is not None else None,
         add_time_period=bool(args.add_time_period),
         time_freq=str(args.time_freq),
@@ -742,6 +775,7 @@ def main() -> int:
                 "require_tx_id": int(bool(args.require_tx_id)),
                 "fx_rates": bool(args.fx_rates),
                 "base_currency": args.base_currency,
+                **(scope_metadata(boxes) if boxes is not None else {}),
             },
             "outputs": out_arts,
             "warnings": [],

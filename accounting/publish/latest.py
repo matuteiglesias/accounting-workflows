@@ -10,6 +10,7 @@ from typing import Any
 
 from accounting.publish.manifest import build_frontend_snapshot_manifest
 from accounting.artifacts.manifest import artifact_contract_for_name, write_artifact_contracts_csv
+from accounting.support.latest import PRIMARY_SCOPE_TAG, update_primary_compatibility_latest
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class PublishPaths:
 
 
 REPORT_DIRNAME = "balance_human_v2"
-DEFAULT_PUBLIC_SUBDIR = Path("public") / "accounting" / "latest"
+DEFAULT_PUBLIC_SUBDIR = Path("public") / "accounting"
 
 
 # Keep this intentionally small and dumb.
@@ -89,8 +90,9 @@ def parse_args() -> argparse.Namespace:
         "--public-subdir",
         type=Path,
         default=DEFAULT_PUBLIC_SUBDIR,
-        help="Path under project root where the public bundle will be written.",
+        help="Parent path under project root for scope-qualified public bundles.",
     )
+    parser.add_argument("--scope-tag", default=PRIMARY_SCOPE_TAG)
     parser.add_argument(
         "--mode",
         choices=["copy", "symlink"],
@@ -110,12 +112,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_paths(project_root: Path, public_subdir: Path, *, strict: bool = True) -> PublishPaths:
+def resolve_paths(project_root: Path, public_subdir: Path, *, scope_tag: str = PRIMARY_SCOPE_TAG, strict: bool = True) -> PublishPaths:
     out_root = project_root / "out"
-    human_latest = (out_root / "human_reports" / "latest").resolve(strict=strict)
-    metrics_latest = (out_root / "metrics" / "latest").resolve(strict=strict)
-    debt_latest = (out_root / "debt_resolution" / "latest").resolve(strict=strict)
-    public_root = project_root / public_subdir
+    human_latest = (out_root / "human_reports" / f"latest_{scope_tag}").resolve(strict=strict)
+    metrics_latest = (out_root / "metrics" / f"latest_{scope_tag}").resolve(strict=strict)
+    debt_latest = (out_root / "debt_resolution" / f"latest_{scope_tag}").resolve(strict=strict)
+    public_root = project_root / public_subdir / f"latest_{scope_tag}"
+    identities = {path.name for path in [human_latest, metrics_latest, debt_latest]}
+    if strict and len(identities) != 1:
+        raise ValueError(f"Publish inputs mix accounting runs for {scope_tag}: {sorted(identities)}")
     return PublishPaths(
         project_root=project_root,
         out_root=out_root,
@@ -388,6 +393,7 @@ def main() -> None:
     paths = resolve_paths(
         project_root=args.project_root,
         public_subdir=args.public_subdir,
+        scope_tag=args.scope_tag,
         strict=not args.dry_run,
     )
 
@@ -408,6 +414,7 @@ def main() -> None:
     manifest = build_surface_manifest(paths, report_info, metrics_info, debt_info, presentation_info, args.mode)
     manifest["published_at_utc"] = manifest["built_at"]
     write_json(paths.public_root / "manifest.json", manifest)
+    update_primary_compatibility_latest(paths.public_root.parent, paths.public_root.name, args.scope_tag)
 
     print(f"Published accounting surface bundle to: {paths.public_root}")
     print(f"  report -> {paths.public_root / 'report'}")
