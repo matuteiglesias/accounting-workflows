@@ -144,7 +144,10 @@ def test_missing_currency_is_unsupported_to_prevent_cross_currency_sum(tmp_path:
     assert "cross-currency" in index.iloc[0]["filter_json"]
 
 
-def test_derived_statement_and_annual_drilldowns_link_supported_flows(tmp_path: Path) -> None:
+def test_derived_statement_and_annual_drilldowns_ignore_caller_box_scope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BOXES", "Household")
     repo = tmp_path
     run = repo / "out" / "run" / "accounting" / "latest"
     pack = repo / "out" / "professional_pack" / "latest"

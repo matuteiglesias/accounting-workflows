@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -19,9 +19,6 @@ RULE_VERSION = "interest_first_fifo_full_only_skip_if_insufficient_v2"
 from accounting.logging_utils import configure_logging, get_logger
 
 LOG = get_logger("debt")
-
-from dataclasses import asdict
-from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -594,10 +591,10 @@ def resolve_repayments(
             )
         )
 
-    open_items_df = pd.DataFrame([asdict(x) for x in items])
-    allocations_df = pd.DataFrame([asdict(x) for x in allocations])
-    repayment_events_df = pd.DataFrame([asdict(x) for x in repayment_events])
-    timeline_df = pd.DataFrame([asdict(x) for x in timeline]).sort_values(
+    open_items_df = pd.DataFrame([asdict(x) for x in items], columns=[f.name for f in fields(OpenItem)])
+    allocations_df = pd.DataFrame([asdict(x) for x in allocations], columns=[f.name for f in fields(Allocation)])
+    repayment_events_df = pd.DataFrame([asdict(x) for x in repayment_events], columns=[f.name for f in fields(RepaymentEvent)])
+    timeline_df = pd.DataFrame([asdict(x) for x in timeline], columns=[f.name for f in fields(TimelineEvent)]).sort_values(
         ["event_date", "event_kind", "tx_id", "debt_id"],
         ignore_index=True,
     )
@@ -632,7 +629,10 @@ def resolve_repayments(
             )
         )
 
-    reconciliation_df = pd.DataFrame([asdict(x) for x in reconciliation_rows])
+    reconciliation_df = pd.DataFrame(
+        [asdict(x) for x in reconciliation_rows],
+        columns=[f.name for f in fields(StatusReconciliation)],
+    )
 
     if not reconciliation_df.empty and "reconciliation_note" in reconciliation_df.columns:
         mismatch_mask = reconciliation_df["reconciliation_note"] != "aligned"

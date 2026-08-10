@@ -88,6 +88,16 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "source_of_truth",
             "notes": "Canonical transaction ledger; downstream reports should prefer semantic/cash/debt marts.",
         }
+    if key == "ledger_canonical_all_status.csv" or name == "ledger_canonical_all_status":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "transaction",
+            "grain": "tx",
+            "currency_policy": "explicit_currency_required",
+            "frontend_suitability": "internal_only",
+            "source_authority": "source_of_truth",
+            "notes": "Scoped normalized all-status evidence for debt resolution; not an accounting-recognition view.",
+        }
     if key == "semantic_rule_registry.csv":
         return {
             "artifact_role": "canonical_rule_contract",

@@ -81,7 +81,8 @@ pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border
 
 from accounting.logging_utils import configure_logging, get_logger
 from accounting.professional.table_contracts import enrich_professional_table_contracts
-from accounting.scope import box_scope_mask, configured_box_scope
+from accounting.scope import assert_frame_within_scope, load_run_scope_if_present
+
 LOG = get_logger("prof drilldown")
 
 
@@ -453,7 +454,7 @@ def _candidate_run_roots(repo_root: Path, pack_dir: Path, run_root: Path | None)
         yield run_root
     yield pack_dir
     yield pack_dir.parent
-    yield repo_root / "out" / "run" / "accounting" / "latest"
+    yield repo_root / "out" / "run" / "accounting" / "latest_FBPM"
 
 
 def _find_source(repo_root: Path, pack_dir: Path, run_root: Path | None, filename: str) -> Path | None:
@@ -462,10 +463,12 @@ def _find_source(repo_root: Path, pack_dir: Path, run_root: Path | None, filenam
         path = root / filename
         if path.exists():
             return path
+    run_scope = load_run_scope_if_present(run_root) if run_root is not None else None
+    scope_tag = run_scope.tag if run_scope is not None else "FBPM"
     extra = [
-        repo_root / "out" / "metrics" / "latest" / filename,
-        repo_root / "public" / "accounting" / "latest" / "canonical_dashboard" / filename,
-        repo_root / "public" / "accounting" / "latest" / filename,
+        repo_root / "out" / "metrics" / f"latest_{scope_tag}" / filename,
+        repo_root / "public" / "accounting" / f"latest_{scope_tag}" / "canonical_dashboard" / filename,
+        repo_root / "public" / "accounting" / f"latest_{scope_tag}" / filename,
         pack_dir / "source" / filename,
         pack_dir / "tables" / filename,
     ]
@@ -756,20 +759,17 @@ def _statement_line(row: pd.Series) -> str:
 
 
 def _semantic_filter_for_statement_line(line: str) -> tuple[str, Callable[[pd.DataFrame], pd.Series]] | None:
-    def scoped(mask: Callable[[pd.DataFrame], pd.Series]) -> Callable[[pd.DataFrame], pd.Series]:
-        return lambda df: box_scope_mask(df, configured_box_scope()) & mask(df)
-
     mapping: dict[str, tuple[str, Callable[[pd.DataFrame], pd.Series]]] = {
-        "operating_revenue": ("amount_in", scoped(lambda df: _bucket_eq(df, "operating_revenue"))),
-        "rent_revenue": ("amount_in", scoped(lambda df: _bucket_eq(df, "operating_revenue") & _eq_col(df, "semantic_subbucket", "rent"))),
-        "property_opex_true": ("amount_out", scoped(lambda df: _bucket_eq(df, "property_opex"))),
-        "funding_contributions": ("amount_in", scoped(lambda df: _bucket_eq(df, "funding_contribution"))),
-        "family_draws_or_distributions": ("amount_out", scoped(lambda df: _bucket_eq(df, "family_withdrawal_candidate"))),
-        "unknown_or_ambiguous_outflows": ("amount_abs", scoped(_unknown_mask)),
-        "treasury_fx_conversion_in": ("amount_in", scoped(lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_proceeds"))),
-        "treasury_fx_conversion_out": ("amount_out", scoped(lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_outflow"))),
-        "treasury_fx_cost": ("amount_out", scoped(lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_cost_or_spread"))),
-        "treasury_fx_net": ("net_amount", scoped(lambda df: _bucket_eq(df, "treasury_fx"))),
+        "operating_revenue": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue")),
+        "rent_revenue": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue") & _eq_col(df, "semantic_subbucket", "rent")),
+        "property_opex_true": ("amount_out", lambda df: _bucket_eq(df, "property_opex")),
+        "funding_contributions": ("amount_in", lambda df: _bucket_eq(df, "funding_contribution")),
+        "family_draws_or_distributions": ("amount_out", lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
+        "unknown_or_ambiguous_outflows": ("amount_abs", _unknown_mask),
+        "treasury_fx_conversion_in": ("amount_in", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_proceeds")),
+        "treasury_fx_conversion_out": ("amount_out", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_outflow")),
+        "treasury_fx_cost": ("amount_out", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_cost_or_spread")),
+        "treasury_fx_net": ("net_amount", lambda df: _bucket_eq(df, "treasury_fx")),
     }
     return mapping.get(line)
 
@@ -1629,7 +1629,6 @@ def _build_annual_professional_fallback(
     base_mask = (
         _year_mask(split, period)
         & _eq_col(split, "Currency", currency)
-        & box_scope_mask(split, configured_box_scope())
     )
 
     sections: list[tuple[str, pd.DataFrame]] = []
@@ -1667,7 +1666,6 @@ def _build_annual_professional_fallback(
             return (
                 _year_mask(df, period)
                 & _eq_col(df, "Currency", currency)
-                & box_scope_mask(df, configured_box_scope())
                 & (revenue_filter(df) | opex_filter(df))
             )
 
@@ -2902,7 +2900,6 @@ def _build_derived_cell(
             sem_mask = (
                 _year_mask(split, period)
                 & _eq_col(split, "Currency", currency)
-                & box_scope_mask(split, configured_box_scope())
             )
             if metric_id in {"IS.RENT.TOTAL", "IS.RENT.BY_PROPERTY"}:
                 sem_mask &= _bucket_eq(split, "operating_revenue") & _eq_col(split, "semantic_subbucket", "rent")
@@ -2926,7 +2923,6 @@ def _build_derived_cell(
                 lambda df, p=period: (
                     _year_mask(df, p)
                     & _eq_col(df, "Currency", currency)
-                    & box_scope_mask(df, configured_box_scope())
                 ),
             )
             sections.append(("Classification rows", detail_rows))
@@ -3092,6 +3088,9 @@ def build_professional_flow_drilldowns(
 
     read_t0 = time.perf_counter()
     split = _read_csv(split_path) if split_path else pd.DataFrame()
+    run_scope = load_run_scope_if_present(run_root) if run_root is not None else None
+    if run_scope is not None:
+        assert_frame_within_scope(split, run_scope, source="monthly_flow_semantic_split.csv")
     LOG.info(
         "[drilldown] loaded split rows=%s cols=%s path=%s elapsed=%.2fs",
         len(split),
@@ -3102,6 +3101,8 @@ def build_professional_flow_drilldowns(
 
     read_t0 = time.perf_counter()
     audit = _read_csv(audit_path) if audit_path else pd.DataFrame()
+    if run_scope is not None:
+        assert_frame_within_scope(audit, run_scope, source="classification_audit.csv")
     LOG.info(
         "[drilldown] loaded audit rows=%s cols=%s path=%s elapsed=%.2fs",
         len(audit),
