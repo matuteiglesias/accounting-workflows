@@ -135,12 +135,15 @@ def _debt_candidate_dirs(run_root: Path) -> list[Path]:
     if out_root.name != "out":
         out_root = run_root.parent
 
+    from accounting.scope import load_run_scope_if_present
+    scope = load_run_scope_if_present(run_root)
+    latest_name = f"latest_{scope.tag}" if scope is not None else "latest"
     return [
         run_root,
         run_root.parent / "debt_resolution" / run_id,
         run_root.parent.parent / "debt_resolution" / run_id,
         out_root / "debt_resolution" / run_id,
-        out_root / "debt_resolution" / "latest",
+        out_root / "debt_resolution" / latest_name,
     ]
 
 
@@ -630,7 +633,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-dir",
-        default="out/metrics/latest",
+        default="out/metrics/latest_FBPM",
         help="Output directory for metric artifacts.",
     )
     parser.add_argument(
