@@ -76,17 +76,16 @@ def _find_source(repo_root: Path, pack: Path, run_root: Path, name: str) -> Path
         pack / "drilldown" / name,
         pack / "digest" / name,
         run_root / name,
-        repo_root / "out" / "professional_pack" / "latest" / name,
-        repo_root / "out" / "professional_pack" / "latest" / "tables" / name,
-        repo_root / "out" / "professional_pack" / "latest" / "drilldown" / name,
-        repo_root / "out" / "run" / "accounting" / "latest" / name,
-        repo_root / "public" / "accounting" / "latest" / "canonical_dashboard" / name,
+        repo_root / "out" / "professional_pack" / "latest_FBPM" / name,
+        repo_root / "out" / "professional_pack" / "latest_FBPM" / "tables" / name,
+        repo_root / "out" / "professional_pack" / "latest_FBPM" / "drilldown" / name,
+        repo_root / "out" / "run" / "accounting" / "latest_FBPM" / name,
+        repo_root / "public" / "accounting" / "latest_FBPM" / "canonical_dashboard" / name,
     ]
     for path in candidates:
         if path.exists():
             return path
-    matches = sorted((repo_root / "out").rglob(name)) if (repo_root / "out").exists() else []
-    return matches[-1] if matches else None
+    return None
 
 
 def _blob(row: pd.Series) -> str:
@@ -460,8 +459,8 @@ def write_outputs(audit: pd.DataFrame, summary: pd.DataFrame, pack: Path, docs_d
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build funding/support lineage diagnostics for professional accounting reports.")
     parser.add_argument("--repo-root", type=Path, default=Path("."))
-    parser.add_argument("--pack", type=Path, default=Path("out/professional_pack/latest"))
-    parser.add_argument("--run-root", type=Path, default=Path("out/run/accounting/latest"))
+    parser.add_argument("--pack", type=Path, default=Path("out/professional_pack/latest_FBPM"))
+    parser.add_argument("--run-root", type=Path, default=Path("out/run/accounting/latest_FBPM"))
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     pack = (repo_root / args.pack).resolve() if not args.pack.is_absolute() else args.pack.resolve()

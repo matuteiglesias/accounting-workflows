@@ -1,0 +1,8 @@
+tx_id,Date,amount,Currency,payer,receiver,Flujo,Tipo,status,Box
+fb-native,2026-01-15,100,ARS,Alice,Services,Fixture flow,Fixture type,pagado,Family Business
+pm-native,2026-01-15,200,ARS,Bob,Taxes,Fixture flow,Fixture type,pagado,Property Management
+hh-native,2026-01-15,30,USD,Carol,Costs,Fixture flow,Fixture type,pagado,Household
+fb-pm-fb,2026-01-15,-50,ARS,Family Business,Property Management,Fixture flow,Fixture type,pagado,Family Business
+fb-pm-pm,2026-01-15,50,ARS,Family Business,Property Management,Fixture flow,Fixture type,pagado,Property Management
+hh-pm-hh,2026-01-15,-10,USD,Household,Property Management,Fixture flow,Fixture type,pagado,Household
+hh-pm-pm,2026-01-15,10,USD,Household,Property Management,Fixture flow,Fixture type,pagado,Property Management

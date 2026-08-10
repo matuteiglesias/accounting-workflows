@@ -44,9 +44,9 @@ export PYTHONPATH := $(ROOT)
 OUT  ?= out
 BOXES := $(if $(strip $(BOXES)),$(BOXES),Family Business,Property Management)
 # The scope tag is derived from BOXES and becomes part of every run identifier:
-# a same-second Household run cannot overwrite a property/business run. It may
-# be overridden only to provide a more readable stable label.
-SCOPE_TAG := $(if $(strip $(SCOPE_TAG)),$(SCOPE_TAG),$(shell printf '%s' '$(BOXES)' | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '_' | sed 's/^_//;s/_$$//'))
+# a same-second Household run cannot overwrite a property/business run. The
+# canonical code order prevents equivalent scopes from acquiring aliases.
+SCOPE_TAG := $(shell PYTHONPATH='$(ROOT)' $(PY) -c 'from accounting.scope import canonical_scope_tag, parse_box_scope; print(canonical_scope_tag(parse_box_scope("$(BOXES)")))')
 FREQ ?= M
 TOP  ?= 10
 METRIC_MONTHS ?= 6
@@ -112,18 +112,17 @@ RUN_RUN_ID   := $(RUN_REL)
 RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_RUN_ID)
 RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
 
-METRICS_LATEST := $(OUT)/metrics/latest
-HUMAN_LATEST   := $(OUT)/human_reports/latest
+METRICS_LATEST := $(OUT)/metrics/latest_$(SCOPE_TAG)
+HUMAN_LATEST   := $(OUT)/human_reports/latest_$(SCOPE_TAG)
 
 RUN_DEBT_DIR          := $(OUT)/debt_resolution/$(RUN_RUN_ID)
 RUN_DEBT_BALANCE_DIR  := $(OUT)/debt_resolution/$(RUN_RUN_ID)
 
-DEBT_LATEST := $(OUT)/debt_resolution/latest
+DEBT_LATEST := $(OUT)/debt_resolution/latest_$(SCOPE_TAG)
 
 DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
 DEBT_FULL_ONLY ?= 1
-DEBT_EXCLUDE_HOUSEHOLD ?= 1
 DRY_RUN ?= 0
 
 
@@ -136,29 +135,9 @@ RUN_REL := $(notdir $(RUN_OUT))
 .PHONY: _update_latest
 _update_latest:
 	@echo "[RUN][LATEST] run=$(RUN_REL)"
-	@bash -eu -o pipefail -c '\
-		link_swap () { \
-			base="$$1"; \
-			target="$$2"; \
-			latest="$$base/latest"; \
-			mkdir -p "$$base"; \
-			if [ -d "$$latest" ] && [ ! -L "$$latest" ]; then \
-				echo "[LATEST] WARN: $$latest is a directory. Moving aside."; \
-				rm -rf "$$latest.bak"; \
-				mv "$$latest" "$$latest.bak"; \
-			fi; \
-			tmp="$$base/.latest_tmp"; \
-			ln -sfn "$$target" "$$tmp"; \
-			rm -f "$$latest"; \
-			mv -f "$$tmp" "$$latest"; \
-			ls -lah "$$latest"; \
-		}; \
-		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
-		link_swap "$(OUT)/debt_resolution" "$(RUN_REL)"; \
-		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
-		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
-		echo "[LATEST] updated run,debt,metrics,human latest links"; \
-	'
+	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
+		--base "$(RUN_BASE)" --base "$(OUT)/debt_resolution" \
+		--base "$(OUT)/metrics" --base "$(OUT)/human_reports"
 
 # ----------------------------------------
 # Help
@@ -188,7 +167,7 @@ help:
 	@echo ""
 	@echo "Publish / release:"
 	@echo "  make publish-latest     # package latest artifacts only"
-	@echo "  make release-check      # validate public/accounting/latest readiness"
+	@echo "  make release-check      # validate the scope-qualified public bundle"
 	@echo ""
 	@echo "Legacy compatibility aliases:"
 	@echo "  make ledger | materialize | debt | debt-views | metrics | human-report | publish | build-all"
@@ -224,7 +203,7 @@ human-report: run-human-report
 
 publish-latest:
 	@bash -eu -o pipefail -c '\
-		args=( --project-root "$(ROOT)" --clean ); \
+		args=( --project-root "$(ROOT)" --scope-tag "$(SCOPE_TAG)" --clean ); \
 		if [ "$(DRY_RUN)" = "1" ]; then args+=( --dry-run ); fi; \
 		$(PY) -m accounting.publish.latest "$${args[@]}"; \
 	'
@@ -254,7 +233,7 @@ validate: doctor
 	@echo "compile, contract, and regression validation ok"
 
 clean-derived:
-	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest"
+	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest" "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
 
 front-report:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -315,28 +294,8 @@ run-downstream-from-ledger:
 
 update-latest-light:
 	@echo "[RUN][LATEST-LIGHT] run=$(RUN_REL)"
-	@bash -eu -o pipefail -c '\
-		link_swap () { \
-			base="$$1"; \
-			target="$$2"; \
-			latest="$$base/latest"; \
-			mkdir -p "$$base"; \
-			if [ -d "$$latest" ] && [ ! -L "$$latest" ]; then \
-				echo "[LATEST] WARN: $$latest is a directory. Moving aside."; \
-				rm -rf "$$latest.bak"; \
-				mv "$$latest" "$$latest.bak"; \
-			fi; \
-			tmp="$$base/.latest_tmp"; \
-			ln -sfn "$$target" "$$tmp"; \
-			rm -f "$$latest"; \
-			mv -f "$$tmp" "$$latest"; \
-			ls -lah "$$latest"; \
-		}; \
-		link_swap "$(RUN_BASE)" "$(RUN_REL)"; \
-		link_swap "$(OUT)/metrics" "$(RUN_REL)"; \
-		link_swap "$(OUT)/human_reports" "$(RUN_REL)"; \
-		echo "[LATEST-LIGHT] updated run,metrics,human latest links; debt untouched"; \
-	'
+	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
+		--base "$(RUN_BASE)" --base "$(OUT)/metrics" --base "$(OUT)/human_reports"
 .PHONY: run-live-light
 
 run-live-light:
@@ -451,7 +410,8 @@ run-ingest:
 		--run-id "$(RUN_RUN_ID)" \
 		--service-account "$(ACCOUNT_SA)" \
 		--sheet-url "$(ACCOUNT_SHEET_URL)" \
-		--sheet-name "$(ACCOUNT_SHEET_NAME)"
+		--sheet-name "$(ACCOUNT_SHEET_NAME)" \
+		--boxes "$(BOXES)"
 	@$(MAKE) _check_ingest OUT_DIR="$(RUN_OUT)" MODE="run"
 
 .PHONY: run-materialize _run_materialize_action
@@ -465,8 +425,7 @@ _run_materialize_action:
 		--freq "$(FREQ)" \
 		--force 0 \
 		--mode run \
-		--run-id "$(RUN_RUN_ID)" \
-		--boxes "$(BOXES)"
+		--run-id "$(RUN_RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 	@test -s "$(RUN_OUT)/classification_audit.csv"
 	@test -s "$(RUN_OUT)/classification_audit_summary.csv"
@@ -508,21 +467,15 @@ run-debt: run-marts _run_debt_action
 
 _run_debt_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@$(call require_var,ACCOUNT_SHEET_URL)
-	@$(call require_var,ACCOUNT_SA)
+	@test -s "$(RUN_OUT)/ledger_canonical_all_status.csv" || (echo "ERROR: missing scoped all-status debt evidence at $(RUN_OUT)"; exit 2)
 	@mkdir -p "$(RUN_DEBT_DIR)"
 	@bash -eu -o pipefail -c '\
 		args=( \
-			--sheet-url "$(ACCOUNT_SHEET_URL)" \
-			--service-account "$(ACCOUNT_SA)" \
-			--sheet-name "$(ACCOUNT_SHEET_NAME)" \
+			--ledger-csv "$(RUN_OUT)/ledger_canonical_all_status.csv" \
 			--write-dir "$(RUN_DEBT_DIR)" \
 			--currencies "$(DEBT_CURRENCIES)" \
 			--repayment-statuses "$(DEBT_REPAYMENT_STATUSES)" \
 		); \
-		if [ "$(DEBT_EXCLUDE_HOUSEHOLD)" = "1" ]; then \
-			args+=( --exclude-household ); \
-		fi; \
 		if [ "$(DEBT_FULL_ONLY)" = "1" ]; then \
 			args+=( --full-only ); \
 		fi; \
@@ -669,7 +622,7 @@ _check_views:
 
 .PHONY: release-check smoke run-all run
 release-check:
-	@$(PY) scripts/check_release.py --public-root "$(ROOT)/public/accounting/latest"
+	@$(PY) scripts/check_release.py --public-root "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
 
 smoke: smoke-core
 run: run-accounting
@@ -680,10 +633,10 @@ run-all: run-accounting
 professional-drilldowns:
 	@$(PY) -m accounting.professional.drilldown \
 		--repo-root "$(ROOT)" \
-		--pack "$(ROOT)/out/professional_pack/latest" \
-		--run-root "$(ROOT)/out/run/accounting/latest"
+		--pack "$(ROOT)/out/professional_pack/latest_FBPM" \
+		--run-root "$(ROOT)/out/run/accounting/latest_FBPM"
 
 professional-linked-digest:
 	@$(PY) -m accounting.professional.render_linked_digest \
 		--repo-root "$(ROOT)" \
-		--pack "$(ROOT)/out/professional_pack/latest"
+		--pack "$(ROOT)/out/professional_pack/latest_FBPM"

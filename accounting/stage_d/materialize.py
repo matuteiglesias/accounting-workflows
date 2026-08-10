@@ -26,7 +26,7 @@ import pandas as pd
 
 from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.semantic import build_monthly_operating_statement, build_semantic_outputs
-from accounting.scope import box_scope_mask, parse_box_scope
+from accounting.scope import assert_frame_within_scope, load_run_scope, load_run_scope_if_present
 from accounting.core.timeseries import (
     aggregate_per_flow,
     aggregate_per_party,
@@ -507,7 +507,6 @@ def materialize_all(
     freq: str = "W",
     loan_register_df: Optional[pd.DataFrame] = None,
     force: bool = False,
-    boxes: set[str] | None = None,
 ) -> Dict[str, Any]:
     """
     Orchestrate materialization:
@@ -530,8 +529,11 @@ def materialize_all(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ledger_df = _ensure_amount_float(ledger_df)
-    if boxes is not None:
-        ledger_df = ledger_df.loc[box_scope_mask(ledger_df, boxes)].copy()
+    run_scope = load_run_scope_if_present(out_dir)
+    if run_scope is not None:
+        assert_frame_within_scope(
+            ledger_df, run_scope, source="ledger_canonical.csv", require_box=True
+        )
 
     aggregates: Dict[str, Any] = {}
 
@@ -624,7 +626,7 @@ def materialize_all(
     # 4.5) conservative semantic classification mart and monthly operating statement
     try:
         semantic_paths = build_semantic_outputs(ledger_df, out_dir=out_dir, freq="M")
-        operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir, boxes=boxes)
+        operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir)
         for name, path in {**semantic_paths, **operating_statement_paths}.items():
             aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _sha256_file(path)}
     except Exception:
@@ -678,7 +680,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--force", default=os.getenv("FORCE", "0"))
     p.add_argument("--mode", default=os.getenv("MODE", "run"), choices=["smoke", "run"])
     p.add_argument("--run-id", default=os.getenv("RUN_ID", ""))
-    p.add_argument("--boxes", default=None, help="Comma-separated owning Box universe for this run.")
     return p.parse_args()
 
 
@@ -716,6 +717,11 @@ def main() -> int:
     freq = args.freq or os.getenv("FREQ", "W")
     force_flag = bool(int(str(args.force)))
 
+    # Consequential runs must carry the immutable Stage A contract. Legacy
+    # smoke fixtures without Box metadata remain supported as unscoped checks.
+    if args.mode == "run":
+        load_run_scope(out_dir)
+
     from accounting.support.run_id import resolve_run_id
 
     # run_id = _resolve_run_id(args)
@@ -727,7 +733,6 @@ def main() -> int:
         out_dir=out_dir,
         freq=freq,
         force=force_flag,
-        boxes=parse_box_scope(args.boxes) if args.boxes else None,
     )
     aggregate_rows = {k: v.get("rows") for k, v in result.get("aggregates", {}).items() if isinstance(v, dict) and "rows" in v}
 
