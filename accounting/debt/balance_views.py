@@ -17,6 +17,12 @@ REQUIRED_COLS = [
     "original_amount",
 ]
 
+BALANCE_COLUMNS = [
+    "as_of_date", "period_grain", "period", "debtor", "creditor",
+    "currency", "item_type", "open_amount", "open_principal",
+    "open_interest", "open_total",
+]
+
 
 def _normalize_open_items(df: pd.DataFrame) -> pd.DataFrame:
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
@@ -81,6 +87,8 @@ def build_debt_balance_daily(
     end_date: str | None = None,
 ) -> pd.DataFrame:
     df = _normalize_open_items(open_items)
+    if df.empty:
+        return pd.DataFrame(columns=BALANCE_COLUMNS)
     days = _date_span(df, start_date, end_date)
 
     rows: list[dict] = []
@@ -120,21 +128,7 @@ def build_debt_balance_daily(
 
     daily = pd.DataFrame(rows)
     if daily.empty:
-        return pd.DataFrame(
-            columns=[
-                "as_of_date",
-                "period_grain",
-                "period",
-                "debtor",
-                "creditor",
-                "currency",
-                "item_type",
-                "open_amount",
-                "open_principal",
-                "open_interest",
-                "open_total",
-            ]
-        )
+        return pd.DataFrame(columns=BALANCE_COLUMNS)
 
     pivot = (
         daily.pivot_table(

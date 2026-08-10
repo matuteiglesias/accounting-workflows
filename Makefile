@@ -467,11 +467,11 @@ run-debt: run-marts _run_debt_action
 
 _run_debt_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing scoped canonical ledger at $(RUN_OUT)"; exit 2)
+	@test -s "$(RUN_OUT)/ledger_canonical_all_status.csv" || (echo "ERROR: missing scoped all-status debt evidence at $(RUN_OUT)"; exit 2)
 	@mkdir -p "$(RUN_DEBT_DIR)"
 	@bash -eu -o pipefail -c '\
 		args=( \
-			--ledger-csv "$(RUN_OUT)/ledger_canonical.csv" \
+			--ledger-csv "$(RUN_OUT)/ledger_canonical_all_status.csv" \
 			--write-dir "$(RUN_DEBT_DIR)" \
 			--currencies "$(DEBT_CURRENCIES)" \
 			--repayment-statuses "$(DEBT_REPAYMENT_STATUSES)" \

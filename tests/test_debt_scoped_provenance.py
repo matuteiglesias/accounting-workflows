@@ -51,7 +51,7 @@ def test_debt_reads_only_scoped_canonical_ledger_and_ignores_environment(tmp_pat
 def test_canonical_make_debt_path_has_one_source_and_no_household_policy():
     text = Path("Makefile").read_text()
     action = text.split("_run_debt_action:", 1)[1].split(".PHONY: run-debt-views", 1)[0]
-    assert '--ledger-csv "$(RUN_OUT)/ledger_canonical.csv"' in action
+    assert '--ledger-csv "$(RUN_OUT)/ledger_canonical_all_status.csv"' in action
     assert "--sheet-url" not in action
     assert "--service-account" not in action
     assert "exclude-household" not in action

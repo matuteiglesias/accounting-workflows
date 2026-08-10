@@ -1,0 +1,7 @@
+tx_id,Date,amount,Currency,payer,receiver,Flujo,Tipo,status,Box
+pm-loan-open,2026-01-01,100,USD,Property Management,Owner,Debt,Prestamo,abierto,Property Management
+pm-interest-open,2026-01-15,10,USD,Property Management,Owner,Debt,Interes,pendiente,Property Management
+pm-repayment,2026-02-01,60,USD,Property Management,Owner,Debt,Repago,pagado,Property Management
+pm-operating-paid,2026-02-02,20,USD,Tenant,Property Management,Rent,Ingreso,pagado,Property Management
+pm-operating-pending,2026-02-03,30,USD,Tenant,Property Management,Rent,Ingreso,pendiente,Property Management
+hh-loan-open,2026-01-01,70,USD,Household,Owner,Debt,Prestamo,abierto,Household

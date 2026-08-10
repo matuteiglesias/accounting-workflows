@@ -208,6 +208,18 @@ def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def filter_ledger_statuses(df: pd.DataFrame, statuses: Optional[Sequence[str]]) -> pd.DataFrame:
+    """Return the accounting-recognition subset without altering scoped evidence."""
+    if statuses is None or "status" not in df.columns:
+        return df.copy()
+    allowed = {str(value).strip().lower() for value in statuses}
+    mask = df["status"].astype(str).str.strip().str.lower().isin(allowed)
+    out = df.loc[mask].copy()
+    if "anomalies" in df.attrs:
+        out.attrs["anomalies"] = df.attrs["anomalies"]
+    return out
+
+
 def _apply_party_map(df: pd.DataFrame, party_map: Optional[Dict[str, str]]) -> pd.DataFrame:
     if not party_map:
         return df
@@ -697,7 +709,7 @@ def main() -> int:
 
     LOG.info("Stage start mode=%s out_dir=%s", args.mode, out_dir)
 
-    ledger = build_ledger_base(
+    ledger_all_status = build_ledger_base(
         fixture_path=args.fixture or None,
         sheet_url=args.sheet_url or None,
         service_account_file=args.service_account or None,
@@ -708,12 +720,19 @@ def main() -> int:
         require_tx_id=bool(args.require_tx_id),
         exclude_household=bool(args.exclude_household),
         boxes=boxes,
-        only_status=only_status if only_status is not None else None,
+        only_status=None,
         add_time_period=bool(args.add_time_period),
         time_freq=str(args.time_freq),
     )
+    ledger = filter_ledger_statuses(ledger_all_status, only_status)
 
     ledger_path = out_dir / "ledger_canonical.csv"
+    all_status_path = out_dir / "ledger_canonical_all_status.csv"
+    all_status_df = ledger_all_status.copy()
+    if "Date" in all_status_df.columns:
+        all_status_df["Date"] = pd.to_datetime(all_status_df["Date"], errors="coerce").dt.date.astype(str)
+    all_status_df.to_csv(all_status_path, index=False)
+    LOG.info("Wrote scoped all-status evidence rows=%d -> %s", len(all_status_df), all_status_path)
     ldf = ledger.copy()
     if "Date" in ldf.columns:
         ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce").dt.date.astype(str)
@@ -748,7 +767,18 @@ def main() -> int:
             content_type="text/csv",
         )
 
-        out_arts = [out_art]
+        all_status_art = artifact_from_path(
+            name="ledger_canonical_all_status",
+            path=all_status_path,
+            stage="A.ingest",
+            mode=args.mode,
+            run_id=resolved_run_id,
+            role="output",
+            root_dir=out_dir,
+            content_type="text/csv",
+        )
+
+        out_arts = [all_status_art, out_art]
         if isinstance(anoms, pd.DataFrame) and not anoms.empty:
             out_arts.append(
                 artifact_from_path(
