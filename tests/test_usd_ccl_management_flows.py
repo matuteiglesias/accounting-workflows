@@ -9,6 +9,7 @@ import pytest
 
 from accounting.artifacts.manifest import artifact_contract_for_name
 from accounting.management.usd_ccl_flows import (
+    MANAGEMENT_IMPLEMENTATION_ID,
     ManagementProjectionContractError,
     build_usd_ccl_management_flows,
 )
@@ -222,7 +223,7 @@ def test_existing_run_orchestration_is_offline_and_content_addressed(tmp_path: P
     assert json.loads(outputs["manifest"].read_text())["mode"] == "offline"
     assert valuation_dir.parent == run_root / "valuations" / "usd_ccl"
     assert valuation_dir.name == json.loads(outputs["manifest"].read_text())["valuation_id"]
-    assert outputs["management_audit"].parent == valuation_dir / "management"
+    assert outputs["management_audit"].parent == valuation_dir / "management" / MANAGEMENT_IMPLEMENTATION_ID
     assert outputs["management_components"].is_file()
     assert ledger.read_bytes() == before
 

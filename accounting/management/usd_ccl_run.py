@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from accounting.management.usd_ccl_flows import build_usd_ccl_management_flows
+from accounting.management.usd_ccl_flows import (
+    MANAGEMENT_IMPLEMENTATION_ID,
+    build_usd_ccl_management_flows,
+)
 from accounting.valuation.usd_ccl import ValuationContractError, build_usd_ccl_valuation
 
 
@@ -42,7 +45,11 @@ def run_usd_ccl_management_flows(
         semantic_audit_path=root / "classification_audit.csv",
         valuation_sidecar_path=valuation["sidecar"],
         valuation_manifest_path=valuation["manifest"],
-        output_dir=valuation["sidecar"].parent / "management",
+        output_dir=(
+            valuation["sidecar"].parent
+            / "management"
+            / MANAGEMENT_IMPLEMENTATION_ID
+        ),
     )
     return {**valuation, **{f"management_{key}": value for key, value in management.items()}}
 
