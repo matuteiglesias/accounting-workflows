@@ -1,0 +1,6 @@
+tx_id,Date,amount,amount_cents,Currency,payer,receiver,Flujo,Tipo,status,Box,source_file,source_row,notes
+tx-ars-exact,2026-01-05,120000,12000000,ARS,INQ,PM,Cobros,Renta,pagado,Property Management,synthetic,1,exact ARS fixture
+tx-ars-missing,2026-01-06,60000,6000000,ARS,INQ,PM,Cobros,Renta,pagado,Property Management,synthetic,2,missing-rate fixture
+tx-invalid-native,2026-01-05,not-a-number,,ARS,INQ,PM,Cobros,Renta,pagado,Property Management,synthetic,3,invalid-native fixture
+tx-unsupported,2026-01-05,50,5000,EUR,INQ,PM,Cobros,Renta,pagado,Property Management,synthetic,4,unsupported-currency fixture
+tx-usd,2026-01-05,75.25,7525,USD,INQ,PM,Cobros,Renta,pagado,Property Management,synthetic,5,native USD fixture
