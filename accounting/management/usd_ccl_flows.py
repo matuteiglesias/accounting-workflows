@@ -26,7 +26,11 @@ COMPONENT_COLUMNS = [
     "review_required_rows", "missing_valuation_rows", "negative_amount_rows",
     "fx_overlap_rows",
 ]
-VALUED_STATUSES = {"identity_native_usd", "converted_exact_date"}
+VALUED_STATUSES = {
+    "identity_native_usd",
+    "converted_exact_date",
+    "converted_previous_available",
+}
 APPROVED_BUCKETS = {
     "operating_revenue",
     "property_opex",

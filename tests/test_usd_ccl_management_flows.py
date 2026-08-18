@@ -12,6 +12,7 @@ from accounting.management.usd_ccl_flows import (
     ManagementProjectionContractError,
     build_usd_ccl_management_flows,
 )
+from accounting.management.usd_ccl_run import run_usd_ccl_management_flows
 from accounting.marts.semantic import build_semantic_outputs
 from accounting.valuation.usd_ccl import build_usd_ccl_valuation
 
@@ -202,3 +203,32 @@ def test_artifact_contracts_keep_management_projection_noncanonical() -> None:
     assert components["artifact_role"] == "derived_valuation"
     assert audit["source_authority"] == "derived_valuation_evidence"
     assert components["frontend_suitability"] == "internal_only"
+
+
+def test_existing_run_orchestration_is_offline_and_content_addressed(tmp_path: Path) -> None:
+    run_root = tmp_path / "exact-run"
+    run_root.mkdir()
+    ledger = run_root / "ledger_canonical.csv"
+    ledger.write_bytes(LEDGER.read_bytes())
+    build_semantic_outputs(pd.read_csv(ledger), run_root)
+    before = ledger.read_bytes()
+
+    outputs = run_usd_ccl_management_flows(
+        run_root=run_root,
+        rates_path=RATES,
+        policy_path=ROOT / "reference" / "fx" / "ccl_txn_prev_available_v1.json",
+    )
+    valuation_dir = outputs["sidecar"].parent
+    assert json.loads(outputs["manifest"].read_text())["mode"] == "offline"
+    assert valuation_dir.parent == run_root / "valuations" / "usd_ccl"
+    assert valuation_dir.name == json.loads(outputs["manifest"].read_text())["valuation_id"]
+    assert outputs["management_audit"].parent == valuation_dir / "management"
+    assert outputs["management_components"].is_file()
+    assert ledger.read_bytes() == before
+
+    rerun = run_usd_ccl_management_flows(
+        run_root=run_root,
+        rates_path=RATES,
+        policy_path=ROOT / "reference" / "fx" / "ccl_txn_prev_available_v1.json",
+    )
+    assert rerun["sidecar"] == outputs["sidecar"]

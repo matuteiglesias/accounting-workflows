@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "fixtures" / "ledger_valuation_fixture.csv"
 RATES = ROOT / "fixtures" / "synthetic_ccl_rates.csv"
 POLICY = ROOT / "fixtures" / "valuation_policy_v1.json"
+PREVIOUS_POLICY = ROOT / "reference" / "fx" / "ccl_txn_prev_available_v1.json"
 
 
 def _sha(path: Path) -> str:
@@ -158,3 +159,122 @@ def test_artifact_contract_keeps_sidecar_outside_canonical_authority() -> None:
     assert contract["source_authority"] == "derived_valuation_evidence"
     assert contract["currency_policy"] == "converted"
     assert contract["frontend_suitability"] == "internal_only"
+    coverage = artifact_contract_for_name("valuation_coverage_by_year.csv")
+    assert coverage["artifact_role"] == "qa"
+    assert coverage["grain"] == "annual"
+
+
+def test_previous_available_policy_weekends_staleness_and_history(tmp_path: Path) -> None:
+    ledger = tmp_path / "dated_ledger.csv"
+    ledger.write_text(
+        "tx_id,Date,amount,Currency,payer,receiver,Flujo,Tipo,status,Box\n"
+        "exact,2026-01-02,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "saturday,2026-01-03,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "sunday,2026-01-04,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "holiday-gap,2026-01-05,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "five-days,2026-01-07,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "six-days,2026-01-08,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "tomorrow-only,2026-01-01,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "before-history,2025-12-31,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n"
+        "native-usd,2026-01-08,10,USD,INQ,PM,Cobros,Renta,recognized,Property Management\n",
+        encoding="utf-8",
+    )
+    rates = tmp_path / "rates.csv"
+    rates.write_text(
+        "rate_date,ars_per_usd_ccl,rate_source,rate_series,source_reference\n"
+        "2026-01-02,1200,SYNTHETIC,CCL_TEST,fixture:2026-01-02\n",
+        encoding="utf-8",
+    )
+    outputs = build_usd_ccl_valuation(
+        ledger_path=ledger,
+        rates_path=rates,
+        policy_path=PREVIOUS_POLICY,
+        output_dir=tmp_path / "valuations",
+        run_id="dated-policy",
+        source_scope_tag="synthetic",
+    )
+    rows = {row["tx_id"]: row for row in _sidecar_rows(outputs["sidecar"])}
+
+    assert rows["exact"]["fx_conversion_status"] == "converted_exact_date"
+    for tx_id, age in [("saturday", "1"), ("sunday", "2"), ("holiday-gap", "3"), ("five-days", "5")]:
+        assert rows[tx_id]["fx_conversion_status"] == "converted_previous_available"
+        assert rows[tx_id]["fx_rate_date"] == "2026-01-02"
+        assert rows[tx_id]["fx_rate_age_days"] == age
+        assert rows[tx_id]["amount_usd_ccl"] == "1.000000"
+    assert rows["six-days"]["fx_conversion_status"] == "unavailable_stale_rate"
+    assert rows["six-days"]["amount_usd_ccl"] == ""
+    assert rows["six-days"]["fx_rate_date"] == "2026-01-02"
+    assert rows["six-days"]["fx_rate_age_days"] == "6"
+    assert rows["tomorrow-only"]["fx_conversion_status"] == "unavailable_missing_history"
+    assert rows["before-history"]["fx_conversion_status"] == "unavailable_missing_history"
+    assert rows["native-usd"]["fx_conversion_status"] == "identity_native_usd"
+
+    manifest = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+    assert manifest["exact_matches"] == 1
+    assert manifest["previous_available_matches"] == 4
+    assert manifest["stale_rejections"] == 1
+    assert manifest["missing_history_rows"] == 2
+    assert manifest["native_usd_identity_rows"] == 1
+    assert manifest["max_applied_rate_age_days"] == 5
+    assert manifest["ledger_min_date"] == "2025-12-31"
+    assert manifest["ledger_max_date"] == "2026-01-08"
+    assert sum(manifest[field] for field in [
+        "native_usd_identity_rows", "exact_matches", "previous_available_matches",
+        "stale_rejections", "missing_history_rows", "missing_exact_date_rows",
+        "unsupported_currency_rows", "invalid_native_rows",
+    ]) == manifest["valuation_rows"]
+
+    coverage = list(csv.DictReader(outputs["coverage"].open(encoding="utf-8")))
+    by_year = {row["year"]: row for row in coverage}
+    assert by_year["2026"]["rows"] == "8"
+    assert by_year["2026"]["valued"] == "6"
+    assert by_year["2026"]["previous_available"] == "4"
+    assert by_year["2026"]["stale"] == "1"
+    assert by_year["2026"]["missing"] == "1"
+
+
+def test_content_addressed_identity_and_rate_order_behavior(tmp_path: Path) -> None:
+    rates_a = tmp_path / "rates_a.csv"
+    rates_a.write_text(
+        "rate_date,ars_per_usd_ccl,rate_source,rate_series,source_reference\n"
+        "2026-01-04,1210,SYNTHETIC,CCL_TEST,fixture:2026-01-04\n"
+        "2026-01-02,1200,SYNTHETIC,CCL_TEST,fixture:2026-01-02\n",
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.csv"
+    ledger.write_text(
+        "tx_id,Date,amount,Currency,payer,receiver,Flujo,Tipo,status,Box\n"
+        "weekend,2026-01-03,1200,ARS,INQ,PM,Cobros,Renta,recognized,Property Management\n",
+        encoding="utf-8",
+    )
+
+    def build(rates: Path, name: str):
+        return build_usd_ccl_valuation(
+            ledger_path=ledger,
+            rates_path=rates,
+            policy_path=PREVIOUS_POLICY,
+            output_dir=tmp_path / name,
+            run_id="content-addressed",
+            source_scope_tag="synthetic",
+            content_addressed=True,
+        )
+
+    first = build(rates_a, "first")
+    first_manifest = json.loads(first["manifest"].read_text(encoding="utf-8"))
+    assert first["sidecar"].parent.name == first_manifest["valuation_id"]
+
+    shuffled = tmp_path / "rates_shuffled.csv"
+    lines = rates_a.read_text(encoding="utf-8").splitlines()
+    shuffled.write_text("\n".join([lines[0], lines[2], lines[1]]) + "\n", encoding="utf-8")
+    second = build(shuffled, "second")
+    assert first["sidecar"].read_bytes() == second["sidecar"].read_bytes()
+    second_manifest = json.loads(second["manifest"].read_text(encoding="utf-8"))
+    assert second_manifest["valuation_id"] != first_manifest["valuation_id"]
+
+    corrected = tmp_path / "rates_corrected.csv"
+    corrected.write_text(rates_a.read_text(encoding="utf-8").replace("1200,", "1000,"), encoding="utf-8")
+    third = build(corrected, "third")
+    third_manifest = json.loads(third["manifest"].read_text(encoding="utf-8"))
+    assert third_manifest["source_ledger_sha256"] == first_manifest["source_ledger_sha256"]
+    assert third_manifest["valuation_id"] != first_manifest["valuation_id"]
+    assert third["sidecar"].parent != first["sidecar"].parent

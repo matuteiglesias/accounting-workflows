@@ -1,14 +1,15 @@
 """Build a deterministic, fixture-safe USD/CCL valuation sidecar.
 
-This stage is deliberately separate from canonical ingest.  It accepts only
-local files, reads the canonical ledger without modifying it, and implements the
-minimal v1 policy: native USD identity, exact-date ARS conversion, and no
-fallback for missing dates.
+This stage is deliberately separate from canonical ingest. It accepts only
+local files, reads the canonical ledger without modifying it, and supports
+policy-explicit native USD identity plus exact-date or bounded
+previous-available ARS conversion.
 """
 
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import csv
 import hashlib
 import json
@@ -23,8 +24,8 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 
-SCHEMA_VERSION = 1
-IMPLEMENTATION_ID = "usd_ccl_exact_date_sidecar_v1"
+SCHEMA_VERSION = 2
+IMPLEMENTATION_ID = "usd_ccl_offline_flow_sidecar_v2"
 SIDECAR_COLUMNS = [
     "tx_id",
     "valuation_basis",
@@ -38,12 +39,16 @@ SIDECAR_COLUMNS = [
     "fx_rate_age_days",
     "fx_rate_source_reference",
 ]
+COVERAGE_COLUMNS = [
+    "year", "rows", "valued", "exact", "previous_available", "stale",
+    "missing", "unsupported_currency", "invalid_native", "coverage",
+]
 RATE_COLUMNS = [
     "rate_date",
     "ars_per_usd_ccl",
     "rate_source",
     "rate_series",
-    "fx_rate_source_reference",
+    "source_reference",
 ]
 NATIVE_FINGERPRINT_COLUMNS = [
     "tx_id",
@@ -61,10 +66,13 @@ NATIVE_FINGERPRINT_COLUMNS = [
     "source_row",
     "notes",
 ]
-COUNTER_FIELDS = [
+STATUS_COUNTER_FIELDS = [
     "native_usd_identity_rows",
     "exact_matches",
-    "missing_rates",
+    "previous_available_matches",
+    "stale_rejections",
+    "missing_history_rows",
+    "missing_exact_date_rows",
     "unsupported_currency_rows",
     "invalid_native_rows",
 ]
@@ -153,7 +161,6 @@ def _load_policy(path: Path) -> tuple[dict[str, Any], str]:
     expected = {
         "valuation_basis": "usd_ccl",
         "valuation_currency": "USD",
-        "matching_policy": "exact_date_only",
         "ars_quote_convention": "ars_per_usd_ccl",
     }
     for field, expected_value in expected.items():
@@ -161,6 +168,15 @@ def _load_policy(path: Path) -> tuple[dict[str, Any], str]:
             raise ValuationContractError(
                 f"unsupported policy {field}={policy[field]!r}; expected {expected_value!r}"
             )
+    if policy["matching_policy"] not in {"exact_date_only", "previous_available_max_age"}:
+        raise ValuationContractError(
+            f"unsupported matching_policy={policy['matching_policy']!r}"
+        )
+    if policy["matching_policy"] == "previous_available_max_age":
+        if not isinstance(policy.get("max_rate_age_days"), int):
+            raise ValuationContractError("policy field 'max_rate_age_days' must be int")
+        if not 0 <= policy["max_rate_age_days"] <= 31:
+            raise ValuationContractError("policy field 'max_rate_age_days' must be between 0 and 31")
     for field in ["amount_decimal_places", "rate_decimal_places"]:
         if not 0 <= policy[field] <= 18:
             raise ValuationContractError(f"policy field {field!r} must be between 0 and 18")
@@ -189,7 +205,7 @@ def _load_rates(path: Path) -> tuple[dict[str, RateObservation], dict[str, Any]]
             )
         source = row["rate_source"].strip()
         rate_series = row["rate_series"].strip()
-        reference = row["fx_rate_source_reference"].strip()
+        reference = row["source_reference"].strip()
         if not source or not rate_series or not reference:
             raise ValuationContractError(f"blank rate provenance at row {row_number}")
         if rate_date in observations:
@@ -262,10 +278,14 @@ def _sidecar_rows(
     rates: dict[str, RateObservation],
     policy: dict[str, Any],
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
-    counters = {field: 0 for field in COUNTER_FIELDS}
+    counters = {field: 0 for field in STATUS_COUNTER_FIELDS}
     output: list[dict[str, str]] = []
     amount_places = int(policy["amount_decimal_places"])
     rate_places = int(policy["rate_decimal_places"])
+
+    ordered_rate_dates = sorted(rates)
+    matching_policy = policy["matching_policy"]
+    max_age_days = int(policy.get("max_rate_age_days", 0))
 
     for row in sorted(ledger_rows, key=lambda item: item["tx_id"]):
         tx_id = row["tx_id"].strip()
@@ -316,9 +336,31 @@ def _sidecar_rows(
             counters["native_usd_identity_rows"] += 1
         elif currency == "ARS":
             observation = rates.get(tx_date)
+            rate_age_days = 0
+            if observation is None and matching_policy == "previous_available_max_age":
+                previous_index = bisect_right(ordered_rate_dates, tx_date) - 1
+                if previous_index < 0:
+                    base["fx_conversion_status"] = "unavailable_missing_history"
+                    counters["missing_history_rows"] += 1
+                    output.append(base)
+                    continue
+                observation = rates[ordered_rate_dates[previous_index]]
+                rate_age_days = (
+                    date.fromisoformat(tx_date) - date.fromisoformat(observation.rate_date)
+                ).days
+                if rate_age_days > max_age_days:
+                    base["fx_rate_date"] = observation.rate_date
+                    base["fx_rate_source"] = observation.rate_source
+                    base["fx_rate_policy"] = policy["valuation_policy_id"]
+                    base["fx_rate_age_days"] = str(rate_age_days)
+                    base["fx_rate_source_reference"] = observation.source_reference
+                    base["fx_conversion_status"] = "unavailable_stale_rate"
+                    counters["stale_rejections"] += 1
+                    output.append(base)
+                    continue
             if observation is None:
                 base["fx_conversion_status"] = "unavailable_missing_rate"
-                counters["missing_rates"] += 1
+                counters["missing_exact_date_rows"] += 1
             else:
                 with localcontext() as context:
                     context.prec = max(36, amount_places + rate_places + 12)
@@ -330,12 +372,19 @@ def _sidecar_rows(
                         "fx_rate_to_usd_ccl": _format_decimal(rate_to_usd, rate_places),
                         "fx_rate_date": observation.rate_date,
                         "fx_rate_source": observation.rate_source,
-                        "fx_conversion_status": "converted_exact_date",
-                        "fx_rate_age_days": "0",
+                        "fx_conversion_status": (
+                            "converted_exact_date"
+                            if rate_age_days == 0
+                            else "converted_previous_available"
+                        ),
+                        "fx_rate_age_days": str(rate_age_days),
                         "fx_rate_source_reference": observation.source_reference,
                     }
                 )
-                counters["exact_matches"] += 1
+                if rate_age_days == 0:
+                    counters["exact_matches"] += 1
+                else:
+                    counters["previous_available_matches"] += 1
         else:
             base["fx_conversion_status"] = "unsupported_currency"
             counters["unsupported_currency_rows"] += 1
@@ -375,6 +424,57 @@ def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def _coverage_rows(
+    ledger_rows: list[dict[str, str]], sidecar_rows: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    ledger_by_id = {row["tx_id"].strip(): row for row in ledger_rows}
+    years: dict[str, dict[str, int]] = {}
+    for valued in sidecar_rows:
+        native = ledger_by_id[valued["tx_id"]]
+        tx_date = native.get("Date", "").strip()
+        year = tx_date[:4] if len(tx_date) >= 4 else "invalid"
+        bucket = years.setdefault(year, {column: 0 for column in COVERAGE_COLUMNS[1:-1]})
+        bucket["rows"] += 1
+        status = valued["fx_conversion_status"]
+        if status in {
+            "identity_native_usd",
+            "converted_exact_date",
+            "converted_previous_available",
+        }:
+            bucket["valued"] += 1
+        if status == "converted_exact_date":
+            bucket["exact"] += 1
+        elif status == "converted_previous_available":
+            bucket["previous_available"] += 1
+        elif status == "unavailable_stale_rate":
+            bucket["stale"] += 1
+        elif status in {"unavailable_missing_history", "unavailable_missing_rate"}:
+            bucket["missing"] += 1
+        elif status == "unsupported_currency":
+            bucket["unsupported_currency"] += 1
+        elif status == "invalid_native_amount":
+            bucket["invalid_native"] += 1
+    output = []
+    for year in sorted(years):
+        counts = years[year]
+        output.append({
+            "year": year,
+            **counts,
+            "coverage": format(Decimal(counts["valued"]) / Decimal(counts["rows"]), ".6f"),
+        })
+    return output
+
+
+def _ledger_date_bounds(rows: list[dict[str, str]]) -> tuple[str, str]:
+    valid = []
+    for row in rows:
+        try:
+            valid.append(date.fromisoformat(row.get("Date", "").strip()).isoformat())
+        except ValueError:
+            continue
+    return (min(valid), max(valid)) if valid else ("", "")
+
+
 def _git_identity(repo_root: Path) -> tuple[str, bool]:
     try:
         revision = subprocess.run(
@@ -407,13 +507,14 @@ def build_usd_ccl_valuation(
     run_id: str,
     source_scope_tag: str,
     expected_rate_sha256: str | None = None,
+    content_addressed: bool = False,
+    mode: str = "smoke",
 ) -> dict[str, Path]:
+    if mode not in {"smoke", "offline"}:
+        raise ValuationContractError(f"unsupported valuation mode: {mode!r}")
     ledger = _require_local_file(ledger_path, name="ledger")
     rates_file = _require_local_file(rates_path, name="rates")
     policy_file = _require_local_file(policy_path, name="policy")
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     ledger_sha = _sha256(ledger)
     rate_sha = _sha256(rates_file)
     if expected_rate_sha256 and rate_sha != expected_rate_sha256:
@@ -425,6 +526,13 @@ def build_usd_ccl_valuation(
     policy, policy_sha = _load_policy(policy_file)
     rates, rate_metadata = _load_rates(rates_file)
     sidecar_rows, counters = _sidecar_rows(ledger_rows, rates, policy)
+
+    identity_payload = "|".join(
+        [ledger_sha, rate_sha, policy_sha, str(SCHEMA_VERSION), IMPLEMENTATION_ID]
+    )
+    valuation_id = _sha256_text(identity_payload)
+    out_dir = Path(output_dir) / valuation_id if content_addressed else Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if len(sidecar_rows) != len(ledger_rows):
         raise AssertionError("valuation row count does not match canonical ledger")
@@ -438,9 +546,18 @@ def build_usd_ccl_valuation(
     sidecar_path = out_dir / "ledger_valuation_usd_ccl.csv"
     validation_path = out_dir / "valuation_validation.json"
     manifest_path = out_dir / "valuation_manifest.json"
+    coverage_path = out_dir / "valuation_coverage_by_year.csv"
 
     _write_csv_immutable(sidecar_path, SIDECAR_COLUMNS, sidecar_rows)
+    coverage = _coverage_rows(ledger_rows, sidecar_rows)
+    _write_csv_immutable(coverage_path, COVERAGE_COLUMNS, coverage)
     sidecar_sha = _sha256(sidecar_path)
+    ledger_min_date, ledger_max_date = _ledger_date_bounds(ledger_rows)
+    applied_ages = [
+        int(row["fx_rate_age_days"])
+        for row in sidecar_rows
+        if row["fx_conversion_status"] in {"converted_exact_date", "converted_previous_available"}
+    ]
     validation = {
         "schema_version": SCHEMA_VERSION,
         "ok": True,
@@ -454,19 +571,26 @@ def build_usd_ccl_valuation(
             {"name": "network_lookup_disabled", "status": "pass"},
         ],
         "valuation_rows": len(sidecar_rows),
+        "valued_rows": sum(
+            row["fx_conversion_status"]
+            in {"identity_native_usd", "converted_exact_date", "converted_previous_available"}
+            for row in sidecar_rows
+        ),
+        "ledger_min_date": ledger_min_date,
+        "ledger_max_date": ledger_max_date,
+        "rate_min_date": rate_metadata["rate_min_date"],
+        "rate_max_date": rate_metadata["rate_max_date"],
+        "max_applied_rate_age_days": max(applied_ages, default=0),
+        "missing_rates": counters["missing_history_rows"] + counters["missing_exact_date_rows"],
         **counters,
     }
     _write_json_atomic(validation_path, validation)
 
     repo_root = Path(__file__).resolve().parents[2]
     code_revision, code_dirty = _git_identity(repo_root)
-    identity_payload = "|".join(
-        [ledger_sha, rate_sha, policy_sha, str(SCHEMA_VERSION), IMPLEMENTATION_ID]
-    )
-    valuation_id = _sha256_text(identity_payload)
     manifest = {
         "stage": "V.usd_ccl_valuation",
-        "mode": "smoke",
+        "mode": mode,
         "run_id": run_id,
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "valuation_schema_version": SCHEMA_VERSION,
@@ -484,22 +608,43 @@ def build_usd_ccl_valuation(
         "rate_artifact_sha256": rate_sha,
         **rate_metadata,
         "valuation_rows": len(sidecar_rows),
+        "valued_rows": validation["valued_rows"],
+        "ledger_min_date": ledger_min_date,
+        "ledger_max_date": ledger_max_date,
+        "max_applied_rate_age_days": validation["max_applied_rate_age_days"],
+        "missing_rates": validation["missing_rates"],
         **counters,
         "valuation_artifact": str(sidecar_path),
         "valuation_artifact_sha256": sidecar_sha,
         "valuation_validation_artifact": str(validation_path),
         "valuation_validation_sha256": _sha256(validation_path),
+        "valuation_coverage_artifact": str(coverage_path),
+        "valuation_coverage_sha256": _sha256(coverage_path),
         "valuation_id": valuation_id,
         "code_revision": code_revision,
         "code_dirty": code_dirty,
         "implementation_id": IMPLEMENTATION_ID,
         "generated_by_network_access": False,
     }
-    _write_json_atomic(manifest_path, manifest)
+    if content_addressed and manifest_path.exists():
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for field in [
+            "valuation_id",
+            "source_ledger_sha256",
+            "rate_artifact_sha256",
+            "valuation_policy_sha256",
+        ]:
+            if existing.get(field) != manifest.get(field):
+                raise ValuationContractError(
+                    f"existing content-addressed manifest disagrees on {field}: {manifest_path}"
+                )
+    else:
+        _write_json_atomic(manifest_path, manifest)
     return {
         "sidecar": sidecar_path,
         "manifest": manifest_path,
         "validation": validation_path,
+        "coverage": coverage_path,
     }
 
 
@@ -514,6 +659,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default="smoke-usd-ccl-valuation")
     parser.add_argument("--source-scope-tag", default="FBPM")
     parser.add_argument("--expected-rate-sha256", default="")
+    parser.add_argument("--content-addressed", action="store_true")
+    parser.add_argument("--mode", choices=["smoke", "offline"], default="smoke")
     return parser.parse_args()
 
 
@@ -527,6 +674,8 @@ def main() -> int:
         run_id=args.run_id,
         source_scope_tag=args.source_scope_tag,
         expected_rate_sha256=args.expected_rate_sha256 or None,
+        content_addressed=args.content_addressed,
+        mode=args.mode,
     )
     for name, path in outputs.items():
         print(f"{name}={path}")

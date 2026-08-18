@@ -110,11 +110,11 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "derived_valuation_evidence",
             "notes": "Derived USD/CCL valuation sidecar; never canonical transaction truth.",
         }
-    if key in {"valuation_manifest.json", "valuation_validation.json"}:
+    if key in {"valuation_manifest.json", "valuation_validation.json", "valuation_coverage_by_year.csv"}:
         return {
             "artifact_role": "meta" if key == "valuation_manifest.json" else "qa",
             "accounting_nature": "quality",
-            "grain": "tx",
+            "grain": "annual" if key == "valuation_coverage_by_year.csv" else "tx",
             "currency_policy": "not_money",
             "frontend_suitability": "internal_only",
             "source_authority": "derived_valuation_evidence",
