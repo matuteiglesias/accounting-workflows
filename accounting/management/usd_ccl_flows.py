@@ -14,17 +14,17 @@ from typing import Any, Iterable
 
 AUDIT_COLUMNS = [
     "tx_id", "Date", "period", "Box", "Currency", "amount", "direction",
-    "semantic_bucket", "semantic_subbucket", "amount_usd_ccl",
-    "fx_conversion_status", "valuation_basis", "valuation_currency",
+    "semantic_bucket", "semantic_subbucket", "measure_direction", "measure_inclusion",
+    "amount_usd_ccl", "fx_conversion_status", "valuation_basis", "valuation_currency",
     "valuation_policy_id", "management_eligibility", "eligibility_reason",
 ]
 COMPONENT_COLUMNS = [
-    "period", "Box", "semantic_bucket", "semantic_subbucket",
+    "period", "Box", "semantic_bucket", "semantic_subbucket", "measure_direction",
     "valuation_basis", "valuation_currency", "valuation_policy_id",
     "value_usd_ccl", "reportable_value_usd_ccl", "available_value_usd_ccl",
-    "projection_status", "contributing_rows", "eligible_rows",
+    "projection_status", "source_rows", "contributing_rows", "eligible_rows",
     "review_required_rows", "missing_valuation_rows", "negative_amount_rows",
-    "fx_overlap_rows",
+    "fx_overlap_rows", "measure_direction_excluded_rows", "excluded_not_approved_rows",
 ]
 VALUED_STATUSES = {
     "identity_native_usd",
@@ -46,6 +46,18 @@ FX_OVERLAP_BUCKETS = {
     "family_withdrawal_candidate",
     "family_withdrawal",
     "debt_movement",
+}
+MEASURE_DIRECTIONS = {
+    "operating_revenue": "in",
+    "property_opex": "out",
+    "funding_contribution": "in",
+    "family_withdrawal_candidate": "out",
+    "family_withdrawal": "out",
+}
+TREASURY_MEASURE_DIRECTIONS = {
+    "fx_conversion_proceeds": "in",
+    "fx_conversion_outflow": "out",
+    "fx_cost_or_spread": "out",
 }
 
 
@@ -141,6 +153,24 @@ def _has_fx_evidence(row: dict[str, str]) -> bool:
     return payer == "fx" or receiver == "fx" or "cambio:fx" in blob
 
 
+def _measure_direction(semantic: dict[str, str]) -> str:
+    bucket = semantic.get("semantic_bucket", "").strip()
+    if bucket == "treasury_fx":
+        return TREASURY_MEASURE_DIRECTIONS.get(
+            semantic.get("semantic_subbucket", "").strip(), ""
+        )
+    return MEASURE_DIRECTIONS.get(bucket, "")
+
+
+def _measure_inclusion(semantic: dict[str, str]) -> tuple[str, str]:
+    expected = _measure_direction(semantic)
+    if not expected:
+        return "", "excluded_not_approved_v1"
+    if semantic.get("direction", "").strip() != expected:
+        return expected, "excluded_direction"
+    return expected, "selected"
+
+
 def _eligibility(
     ledger: dict[str, str], semantic: dict[str, str], valuation: dict[str, str]
 ) -> tuple[str, str]:
@@ -162,6 +192,8 @@ def _eligibility(
         return "review_required", "ambiguous_native_semantics"
     if bucket not in APPROVED_BUCKETS:
         return "excluded_not_approved_v1", "semantic_bucket_not_approved_v1"
+    if bucket == "treasury_fx" and not _measure_direction(semantic):
+        return "excluded_not_approved_v1", "treasury_subbucket_not_approved_v1"
     return "eligible", "eligible"
 
 
@@ -222,6 +254,7 @@ def build_usd_ccl_management_flows(
         classified = semantic[tx_id]
         valued = valuation[tx_id]
         eligibility, reason = _eligibility(native, classified, valued)
+        measure_direction, measure_inclusion = _measure_inclusion(classified)
         audit_rows.append({
             "tx_id": tx_id,
             "Date": native["Date"],
@@ -232,6 +265,8 @@ def build_usd_ccl_management_flows(
             "direction": classified["direction"],
             "semantic_bucket": classified["semantic_bucket"],
             "semantic_subbucket": classified["semantic_subbucket"],
+            "measure_direction": measure_direction,
+            "measure_inclusion": measure_inclusion,
             "amount_usd_ccl": valued["amount_usd_ccl"],
             "fx_conversion_status": valued["fx_conversion_status"],
             "valuation_basis": valued["valuation_basis"],
@@ -253,25 +288,51 @@ def build_usd_ccl_management_flows(
     component_rows: list[dict[str, Any]] = []
     for key in sorted(grouped):
         rows = grouped[key]
-        eligible = [row for row in rows if row["management_eligibility"] == "eligible"]
+        selected = [row for row in rows if row["measure_inclusion"] == "selected"]
+        eligible = [row for row in selected if row["management_eligibility"] == "eligible"]
+        review_required = [
+            row for row in selected if row["management_eligibility"] == "review_required"
+        ]
+        missing_valuation = [
+            row for row in selected if row["management_eligibility"] == "unavailable_valuation"
+        ]
+        excluded_not_approved = [
+            row for row in rows
+            if row["management_eligibility"] == "excluded_not_approved_v1"
+            or row["measure_inclusion"] == "excluded_not_approved_v1"
+        ]
         available = sum(
             (_decimal(row["amount_usd_ccl"], "amount_usd_ccl", row["tx_id"]) for row in eligible),
             Decimal(0),
         )
-        complete = len(eligible) == len(rows)
-        reportable = format(available, "f") if complete else ""
+        if len(excluded_not_approved) == len(rows):
+            projection_status = "excluded_not_approved_v1"
+            reportable = ""
+        elif review_required:
+            projection_status = "incomplete_review_required"
+            reportable = ""
+        elif missing_valuation:
+            projection_status = "incomplete_unavailable_valuation"
+            reportable = ""
+        else:
+            projection_status = "complete"
+            reportable = format(available, "f")
         component_rows.append({
             **dict(zip(group_fields, key)),
+            "measure_direction": rows[0]["measure_direction"],
             "value_usd_ccl": reportable,
             "reportable_value_usd_ccl": reportable,
             "available_value_usd_ccl": format(available, "f"),
-            "projection_status": "complete" if complete else "incomplete_review_required",
-            "contributing_rows": len(rows),
+            "projection_status": projection_status,
+            "source_rows": len(rows),
+            "contributing_rows": len(selected),
             "eligible_rows": len(eligible),
-            "review_required_rows": sum(row["management_eligibility"] == "review_required" for row in rows),
-            "missing_valuation_rows": sum(row["management_eligibility"] == "unavailable_valuation" for row in rows),
-            "negative_amount_rows": sum(row["eligibility_reason"] == "negative_native_amount" for row in rows),
-            "fx_overlap_rows": sum(row["eligibility_reason"] == "fx_semantic_overlap" for row in rows),
+            "review_required_rows": len(review_required),
+            "missing_valuation_rows": len(missing_valuation),
+            "negative_amount_rows": sum(row["eligibility_reason"] == "negative_native_amount" for row in selected),
+            "fx_overlap_rows": sum(row["eligibility_reason"] == "fx_semantic_overlap" for row in selected),
+            "measure_direction_excluded_rows": sum(row["measure_inclusion"] == "excluded_direction" for row in rows),
+            "excluded_not_approved_rows": len(excluded_not_approved),
         })
 
     out_dir = Path(output_dir)
