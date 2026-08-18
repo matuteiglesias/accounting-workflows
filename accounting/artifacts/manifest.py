@@ -27,6 +27,7 @@ ARTIFACT_ROLES = [
     "unsafe_for_frontend",
     "qa",
     "meta",
+    "derived_valuation",
 ]
 ACCOUNTING_NATURES = ["transaction", "flow", "stock", "ratio", "quality", "rules", "mixed", "unknown"]
 GRAINS = ["tx", "daily", "monthly", "quarterly", "annual", "period_close", "rule", "dashboard_line", "mixed"]
@@ -60,6 +61,7 @@ SOURCE_AUTHORITIES = [
     "source_of_truth_for_semantic_rules",
     "diagnostic_evidence",
     "semantic_coverage_contract",
+    "derived_valuation_evidence",
 ]
 
 CONTRACT_COLUMNS = [
@@ -97,6 +99,46 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "internal_only",
             "source_authority": "source_of_truth",
             "notes": "Scoped normalized all-status evidence for debt resolution; not an accounting-recognition view.",
+        }
+    if key == "ledger_valuation_usd_ccl.csv" or name == "ledger_valuation_usd_ccl":
+        return {
+            "artifact_role": "derived_valuation",
+            "accounting_nature": "transaction",
+            "grain": "tx",
+            "currency_policy": "converted",
+            "frontend_suitability": "internal_only",
+            "source_authority": "derived_valuation_evidence",
+            "notes": "Derived USD/CCL valuation sidecar; never canonical transaction truth.",
+        }
+    if key in {"valuation_manifest.json", "valuation_validation.json"}:
+        return {
+            "artifact_role": "meta" if key == "valuation_manifest.json" else "qa",
+            "accounting_nature": "quality",
+            "grain": "tx",
+            "currency_policy": "not_money",
+            "frontend_suitability": "internal_only",
+            "source_authority": "derived_valuation_evidence",
+            "notes": "Provenance or validation evidence for the derived USD/CCL valuation sidecar.",
+        }
+    if key == "management_usd_ccl_flow_audit.csv":
+        return {
+            "artifact_role": "diagnostic",
+            "accounting_nature": "flow",
+            "grain": "tx",
+            "currency_policy": "converted",
+            "frontend_suitability": "internal_only",
+            "source_authority": "derived_valuation_evidence",
+            "notes": "Row-level eligibility and exclusion evidence; native semantics remain unchanged.",
+        }
+    if key == "monthly_management_usd_ccl_components.csv":
+        return {
+            "artifact_role": "derived_valuation",
+            "accounting_nature": "flow",
+            "grain": "monthly",
+            "currency_policy": "converted",
+            "frontend_suitability": "internal_only",
+            "source_authority": "derived_valuation_evidence",
+            "notes": "Fixture-only management components; incomplete cells fail closed to NA.",
         }
     if key == "semantic_rule_registry.csv":
         return {

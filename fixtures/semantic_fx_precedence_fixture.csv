@@ -1,0 +1,12 @@
+case_id,tx_id,Date,amount,Currency,Box,Lugar,payer,receiver,Flujo,Tipo,Detalle,status,notes,channel,cash_path
+fx_plus_rent,fx-01,2026-02-01,100,ARS,Property Management,CABA,FX,PM,Cobros,Renta,FX rent overlap,recognized,,,Cambio:FX
+fx_plus_taxes,fx-02,2026-02-02,100,ARS,Property Management,CABA,PM,FX,Cambio,Impuestos,FX tax overlap,recognized,,,Cambio:FX
+fx_plus_maintenance,fx-03,2026-02-03,100,ARS,Property Management,CABA,PM,FX,Cambio,Mantenimiento,FX maintenance overlap,recognized,,,Cambio:FX
+fx_plus_funding,fx-04,2026-02-04,100,ARS,Property Management,CABA,FX,PM,Contribucion,Aporte,FX funding overlap,recognized,,,Cambio:FX
+fx_plus_withdrawal,fx-05,2026-02-05,100,ARS,Property Management,CABA,PM,FX,Transfer,Gasto,FX withdrawal overlap,recognized,Gastos Personales,,Cambio:FX
+fx_plus_loan,fx-06,2026-02-06,100,ARS,Property Management,CABA,FX,PM,Cambio,Prestamo,FX loan overlap,recognized,,,Cambio:FX
+fx_plus_repayment,fx-07,2026-02-07,100,ARS,Property Management,CABA,PM,FX,Cambio,Repago,FX repayment overlap,recognized,,,Cambio:FX
+fx_plus_interest,fx-08,2026-02-08,100,ARS,Property Management,CABA,PM,FX,Cambio,Interes,FX interest overlap,recognized,,,Cambio:FX
+clean_fx_proceeds,fx-09,2026-02-09,100,ARS,Property Management,CABA,FX,PM,Cambio,Moneda,Clean FX proceeds,recognized,,,Cambio:FX
+clean_fx_outflow,fx-10,2026-02-10,100,USD,Property Management,CABA,PM,FX,Cambio,Moneda,Clean FX outflow,recognized,,,Cambio:FX
+explicit_fx_cost,fx-11,2026-02-11,5,ARS,Property Management,CABA,PM,Costos,Costo Operativo,FX,Commission,recognized,commission,,Costo Operativo:FX

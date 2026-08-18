@@ -1,0 +1,10 @@
+{
+  "amount_decimal_places": 6,
+  "ars_quote_convention": "ars_per_usd_ccl",
+  "matching_policy": "exact_date_only",
+  "rate_decimal_places": 18,
+  "rounding": "ROUND_HALF_EVEN",
+  "valuation_basis": "usd_ccl",
+  "valuation_currency": "USD",
+  "valuation_policy_id": "synthetic_exact_date_v1"
+}
