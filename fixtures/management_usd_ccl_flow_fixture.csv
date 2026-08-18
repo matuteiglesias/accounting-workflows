@@ -1,0 +1,11 @@
+tx_id,Date,amount,amount_cents,Currency,payer,receiver,Flujo,Tipo,status,Box,Lugar,Detalle,source_file,source_row,notes,channel,cash_path
+mgmt-rent,2026-01-05,120000,12000000,ARS,Tenant,PM,Cobros,Renta,recognized,Property Management,CABA,Rent,synthetic,1,,,Cobros:Renta
+mgmt-zero-rent,2026-01-05,0,0,ARS,Tenant,PM,Cobros,Renta,recognized,Property Management,CABA,Zero rent,synthetic,2,,,Cobros:Renta
+mgmt-opex,2026-01-05,1200,120000,ARS,PM,Tax Authority,Gastos,Impuestos,recognized,Property Management,CABA,Tax,synthetic,3,,,Gastos:Impuestos
+mgmt-funding,2026-01-05,2400,240000,ARS,Family,PM,Contribucion,Contribucion,recognized,Property Management,CABA,Funding,synthetic,4,,,Contribucion:Contribucion
+mgmt-draw,2026-01-05,1200,120000,ARS,PM,Owner,Transfer,Gasto,recognized,Property Management,CABA,Personal expense,synthetic,5,Gastos Personales,,Transfer:Gasto
+mgmt-negative-opex,2026-01-05,-1200,-120000,ARS,FB,Tax Authority,Gastos,Impuestos,recognized,Family Business,CABA,Negative tax,synthetic,6,,,Gastos:Impuestos
+mgmt-fx-overlap,2026-01-05,1200,120000,ARS,FX,FB,Cobros,Renta,recognized,Family Business,CABA,FX rent overlap,synthetic,7,,,Cambio:FX
+mgmt-clean-fx,2026-01-05,1200,120000,ARS,FX,PM,Cambio,Moneda,recognized,Property Management,CABA,Clean FX proceeds,synthetic,8,,,Cambio:FX
+mgmt-missing-rate,2026-01-06,1200,120000,ARS,Family,FB,Contribucion,Contribucion,recognized,Family Business,CABA,Missing valuation,synthetic,9,,,Contribucion:Contribucion
+mgmt-native-usd,2026-01-05,10,1000,USD,Tenant,PM,Cobros,Renta,recognized,Property Management,CABA,USD rent,synthetic,10,,,Cobros:Renta

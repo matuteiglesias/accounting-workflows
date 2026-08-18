@@ -1,0 +1,11 @@
+{
+  "amount_decimal_places": 6,
+  "ars_quote_convention": "ars_per_usd_ccl",
+  "matching_policy": "previous_available_max_age",
+  "max_rate_age_days": 5,
+  "rate_decimal_places": 18,
+  "rounding": "ROUND_HALF_EVEN",
+  "valuation_basis": "usd_ccl",
+  "valuation_currency": "USD",
+  "valuation_policy_id": "ccl_txn_prev_available_v1"
+}

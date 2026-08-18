@@ -1,0 +1,8 @@
+case_id,tx_id,Date,amount,Currency,Box,Lugar,payer,receiver,Flujo,Tipo,Detalle,status,notes,channel,cash_path
+box_receives_positive,amount-01,2026-01-01,100,ARS,Property Management,CABA,Tenant,PM,Cobros,Renta,Rent received,recognized,,,Cobros:Renta
+box_receives_negative,amount-02,2026-01-02,-100,ARS,Property Management,CABA,Tenant,PM,Cobros,Renta,Negative rent,recognized,,,Cobros:Renta
+box_pays_positive,amount-03,2026-01-03,100,ARS,Property Management,CABA,PM,Tax Authority,Gastos,Impuestos,Tax paid,recognized,,,Gastos:Impuestos
+box_pays_negative,amount-04,2026-01-04,-100,ARS,Property Management,CABA,PM,Tax Authority,Gastos,Impuestos,Negative tax,recognized,,,Gastos:Impuestos
+internal_box_transfer,amount-05,2026-01-05,100,ARS,Property Management,CABA,PM,PM,Transfer,Movimiento,Internal transfer,recognized,,,Transfer:Movimiento
+neither_semantic_fallback,amount-06,2026-01-06,100,ARS,Property Management,CABA,Tenant,Owner,Cobros,Renta,Fallback rent,recognized,,,Cobros:Renta
+zero_box_payment,amount-07,2026-01-07,0,ARS,Property Management,CABA,PM,Tax Authority,Gastos,Impuestos,Zero tax,recognized,,,Gastos:Impuestos

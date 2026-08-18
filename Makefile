@@ -46,7 +46,11 @@ BOXES := $(if $(strip $(BOXES)),$(BOXES),Family Business,Property Management)
 # The scope tag is derived from BOXES and becomes part of every run identifier:
 # a same-second Household run cannot overwrite a property/business run. The
 # canonical code order prevents equivalent scopes from acquiring aliases.
+ifneq (,$(filter smoke-usd-ccl-valuation smoke-usd-ccl-management-flows,$(MAKECMDGOALS)))
+SCOPE_TAG ?= FBPM
+else
 SCOPE_TAG := $(shell PYTHONPATH='$(ROOT)' $(PY) -c 'from accounting.scope import canonical_scope_tag, parse_box_scope; print(canonical_scope_tag(parse_box_scope("$(BOXES)")))')
+endif
 FREQ ?= M
 TOP  ?= 10
 METRIC_MONTHS ?= 6
@@ -58,6 +62,14 @@ NOISE_FLOOR ?= ARS:5000,USD:10
 
 # Smoke fixture (override if your fixture lives elsewhere)
 FIXTURE ?= $(ROOT)/fixtures/ledger_fixture.csv
+USD_CCL_LEDGER_FIXTURE ?= $(ROOT)/fixtures/ledger_valuation_fixture.csv
+USD_CCL_RATE_FIXTURE ?= $(ROOT)/fixtures/synthetic_ccl_rates.csv
+USD_CCL_POLICY_FIXTURE ?= $(ROOT)/fixtures/valuation_policy_v1.json
+USD_CCL_SMOKE_OUT ?= $(SMOKE_OUT)/usd_ccl_valuation
+USD_CCL_MANAGEMENT_LEDGER_FIXTURE ?= $(ROOT)/fixtures/management_usd_ccl_flow_fixture.csv
+USD_CCL_MANAGEMENT_SMOKE_OUT ?= $(SMOKE_OUT)/usd_ccl_management_flows
+CCL_RATES ?=
+USD_CCL_FLOW_POLICY ?= $(ROOT)/reference/fx/ccl_txn_prev_available_v1.json
 
 # Live ingest vars (export before running, or use run-env wrapper)
 ACCOUNT_SA ?=
@@ -154,10 +166,14 @@ help:
 	@echo "Fixture / smoke:"
 	@echo "  make smoke-core         # fixture ingest -> materialize -> semantic/cash wrappers"
 	@echo "  make smoke-full         # fixture-safe smoke bundle; currently core + validation + publish dry-run"
+	@echo "  make smoke-usd-ccl-valuation # isolated fixture-only offline valuation sidecar"
+	@echo "  make smoke-usd-ccl-management-flows # isolated projected-flow eligibility and reconciliation"
 	@echo "  make smoke              # compatibility alias for smoke-core"
 	@echo ""
 	@echo "Live canonical / metrics / dashboard / human:"
 	@echo "  make run-canonical      # live ingest -> materialize -> marts -> debt wrappers"
+	@echo "  make run-usd-ccl-valuation RUN_ROOT=<exact-run> CCL_RATES=<local.csv> # offline existing-run valuation"
+	@echo "  make run-usd-ccl-management-flows RUN_ROOT=<exact-run> CCL_RATES=<local.csv> # offline valuation + flow eligibility"
 	@echo "  make metrics-from-run   # metrics from existing RUN_OUT/RUN_STAMP; no upstream live ingest"
 	@echo "  make run-metrics        # alias for metrics-from-run"
 	@echo "  make run-metrics-live   # orchestrate live upstream then metrics"
@@ -250,7 +266,70 @@ front-report:
 		--include-statuses "$(INCLUDE_STATUSES)" \
 		--noise-floor "$(NOISE_FLOOR)"
 
-.PHONY: smoke-core smoke-full run-canonical run-full run-dashboard run-human metrics-from-run run-metrics-live smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
+.PHONY: smoke-core smoke-full smoke-usd-ccl-valuation smoke-usd-ccl-management-flows run-usd-ccl-valuation run-usd-ccl-management-flows run-canonical run-full run-dashboard run-human metrics-from-run run-metrics-live smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
+
+smoke-usd-ccl-valuation:
+	@$(call _guard_out_dir,$(USD_CCL_SMOKE_OUT))
+	@mkdir -p "$(USD_CCL_SMOKE_OUT)"
+	@$(PY) -m accounting.valuation.usd_ccl \
+		--ledger "$(USD_CCL_LEDGER_FIXTURE)" \
+		--rates "$(USD_CCL_RATE_FIXTURE)" \
+		--policy "$(USD_CCL_POLICY_FIXTURE)" \
+		--output-dir "$(USD_CCL_SMOKE_OUT)" \
+		--run-id "smoke-usd-ccl-valuation" \
+		--source-scope-tag "FBPM"
+	@test -s "$(USD_CCL_SMOKE_OUT)/ledger_valuation_usd_ccl.csv"
+	@test -s "$(USD_CCL_SMOKE_OUT)/valuation_manifest.json"
+	@test -s "$(USD_CCL_SMOKE_OUT)/valuation_validation.json"
+	@test -s "$(USD_CCL_SMOKE_OUT)/valuation_coverage_by_year.csv"
+	@echo "smoke-usd-ccl-valuation passed isolated fixture-only valuation checks"
+
+smoke-usd-ccl-management-flows:
+	@$(call _guard_out_dir,$(USD_CCL_MANAGEMENT_SMOKE_OUT))
+	@mkdir -p "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/semantic" "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/valuation"
+	@$(PY) -c 'from pathlib import Path; import pandas as pd; from accounting.marts.semantic import build_semantic_outputs; build_semantic_outputs(pd.read_csv("$(USD_CCL_MANAGEMENT_LEDGER_FIXTURE)"), Path("$(USD_CCL_MANAGEMENT_SMOKE_OUT)/semantic"))'
+	@$(PY) -m accounting.valuation.usd_ccl \
+		--ledger "$(USD_CCL_MANAGEMENT_LEDGER_FIXTURE)" \
+		--rates "$(USD_CCL_RATE_FIXTURE)" \
+		--policy "$(USD_CCL_POLICY_FIXTURE)" \
+		--output-dir "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/valuation" \
+		--run-id "smoke-usd-ccl-management-flows" \
+		--source-scope-tag "synthetic"
+	@$(PY) -m accounting.management.usd_ccl_flows \
+		--ledger "$(USD_CCL_MANAGEMENT_LEDGER_FIXTURE)" \
+		--semantic-audit "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/semantic/classification_audit.csv" \
+		--valuation-sidecar "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/valuation/ledger_valuation_usd_ccl.csv" \
+		--valuation-manifest "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/valuation/valuation_manifest.json" \
+		--output-dir "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/management"
+	@test -s "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/management/management_usd_ccl_flow_audit.csv"
+	@test -s "$(USD_CCL_MANAGEMENT_SMOKE_OUT)/management/monthly_management_usd_ccl_components.csv"
+	@echo "smoke-usd-ccl-management-flows passed isolated fixture-only eligibility checks"
+
+run-usd-ccl-valuation:
+	@$(call require_var,RUN_ROOT)
+	@$(call require_var,CCL_RATES)
+	@test -s "$(RUN_ROOT)/ledger_canonical.csv" || (echo "ERROR: missing $(RUN_ROOT)/ledger_canonical.csv"; exit 2)
+	@test -s "$(CCL_RATES)" || (echo "ERROR: missing or empty CCL_RATES=$(CCL_RATES)"; exit 2)
+	@$(PY) -m accounting.valuation.usd_ccl \
+		--ledger "$(RUN_ROOT)/ledger_canonical.csv" \
+		--rates "$(CCL_RATES)" \
+		--policy "$(USD_CCL_FLOW_POLICY)" \
+		--output-dir "$(RUN_ROOT)/valuations/usd_ccl" \
+		--run-id "offline-usd-ccl-$(notdir $(RUN_ROOT))" \
+		--source-scope-tag "$(notdir $(RUN_ROOT))" \
+		--content-addressed \
+		--mode offline
+
+run-usd-ccl-management-flows:
+	@$(call require_var,RUN_ROOT)
+	@$(call require_var,CCL_RATES)
+	@test -s "$(RUN_ROOT)/ledger_canonical.csv" || (echo "ERROR: missing $(RUN_ROOT)/ledger_canonical.csv"; exit 2)
+	@test -s "$(RUN_ROOT)/classification_audit.csv" || (echo "ERROR: missing $(RUN_ROOT)/classification_audit.csv"; exit 2)
+	@test -s "$(CCL_RATES)" || (echo "ERROR: missing or empty CCL_RATES=$(CCL_RATES)"; exit 2)
+	@$(PY) -m accounting.management.usd_ccl_run \
+		--run-root "$(RUN_ROOT)" \
+		--rates "$(CCL_RATES)" \
+		--policy "$(USD_CCL_FLOW_POLICY)"
 
 smoke-core: smoke-ingest
 	@$(call _guard_out_dir,$(SMOKE_OUT))
