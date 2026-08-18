@@ -59,6 +59,7 @@ TREASURY_MEASURE_DIRECTIONS = {
     "fx_conversion_outflow": "out",
     "fx_cost_or_spread": "out",
 }
+MANAGEMENT_IMPLEMENTATION_ID = "usd_ccl_semantic_measures_v2"
 
 
 class ManagementProjectionContractError(ValueError):
