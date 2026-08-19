@@ -31,19 +31,23 @@ def test_reachability_inventory_has_expected_wave3_boundary() -> None:
     assert len(rows) == 20
     counts = pd.Series([row["routing_strategy"] for row in rows]).value_counts().to_dict()
     assert counts == {
-        "GOVERNED_ATOMIC": 6,
-        "LEGACY_ATOMIC": 6,
+        "GOVERNED_ATOMIC": 12,
         "NET_DIAGNOSTIC": 3,
         "ANNUAL_METRIC": 2,
         "DEFERRED_FUNDING_SUPPORT": 1,
         "DEFERRED_FX": 1,
         "COMPATIBILITY": 1,
     }
+    assert not any(row["routing_strategy"] == "LEGACY_ATOMIC" for row in rows)
     safe = {row["case_id"] for row in rows if row["safe_to_delete"] == "true"}
-    assert safe == {"draws_by_box_monthly", "draws_by_type_monthly"}
+    assert safe == {
+        "draws_by_box_monthly",
+        "draws_by_type_monthly",
+        "opex_by_box_category_monthly",
+    }
 
 
-def test_current_monthly_governed_rows_resolve_without_legacy_membership() -> None:
+def test_all_simple_monthly_atomic_rows_resolve_to_governed_specs() -> None:
     cases = [
         (
             "monthly_tables_operating_statement_matrix",
@@ -52,8 +56,33 @@ def test_current_monthly_governed_rows_resolve_without_legacy_membership() -> No
         ),
         (
             "monthly_tables_operating_statement_matrix",
+            {"statement_line": "rent_revenue", "Currency": "ARS", "2026-01": 10},
+            "flow.rent.total",
+        ),
+        (
+            "monthly_tables_operating_statement_matrix",
             {"statement_line": "property_opex_true", "Currency": "ARS", "2026-01": 10},
             "flow.property_opex.total",
+        ),
+        (
+            "monthly_tables_operating_statement_matrix",
+            {"statement_line": "taxes", "Currency": "ARS", "2026-01": 10},
+            "flow.property_opex.taxes",
+        ),
+        (
+            "monthly_tables_operating_statement_matrix",
+            {"statement_line": "services", "Currency": "ARS", "2026-01": 10},
+            "flow.property_opex.services",
+        ),
+        (
+            "monthly_tables_operating_statement_matrix",
+            {"statement_line": "maintenance", "Currency": "ARS", "2026-01": 10},
+            "flow.property_opex.maintenance",
+        ),
+        (
+            "monthly_tables_operating_statement_matrix",
+            {"statement_line": "legal", "Currency": "ARS", "2026-01": 10},
+            "flow.property_opex.legal",
         ),
         (
             "monthly_tables_operating_statement_matrix",
@@ -75,6 +104,16 @@ def test_current_monthly_governed_rows_resolve_without_legacy_membership() -> No
             {"Currency": "ARS", "semantic_subbucket": "personal_expense", "2026-01": 10},
             "flow.draws.by_type",
         ),
+        (
+            "monthly_tables_opex_by_type_amount_out",
+            {
+                "Currency": "ARS",
+                "Box": "Property Management",
+                "semantic_subbucket": "services",
+                "2026-01": 10,
+            },
+            "flow.property_opex.by_box_category",
+        ),
     ]
 
     for table_id, raw, expected_id in cases:
@@ -83,17 +122,8 @@ def test_current_monthly_governed_rows_resolve_without_legacy_membership() -> No
         assert _governed_flow_resolution(row) is not None
 
 
-def test_simple_atomic_gaps_are_observed_as_legacy_not_guessed() -> None:
-    statement_lines = ["rent_revenue", "taxes", "services", "maintenance", "legal"]
-    for statement_line in statement_lines:
-        row = _enrich(
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": statement_line, "Currency": "ARS", "2026-01": 10},
-        )
-        assert row.get("drilldown_cell_id", "") == ""
-        assert _governed_flow_resolution(row) is None
-
-    opex = _enrich(
+def test_opex_by_box_category_preserves_box_and_subbucket_grain() -> None:
+    row = _enrich(
         "monthly_tables_opex_by_type_amount_out",
         {
             "Currency": "ARS",
@@ -102,10 +132,39 @@ def test_simple_atomic_gaps_are_observed_as_legacy_not_guessed() -> None:
             "2026-01": 10,
         },
     )
-    assert opex.get("drilldown_cell_id", "") == ""
-    legacy_spec = _spec_for_cell("monthly_tables_opex_by_type_amount_out", opex)
-    assert legacy_spec is not None
-    assert legacy_spec.measure == "amount_out"
+    spec = _spec_for_cell("monthly_tables_opex_by_type_amount_out", row)
+    assert spec is not None
+    assert spec.measure == "amount_out"
+
+    split = pd.DataFrame(
+        [
+            {
+                "Currency": "ARS",
+                "Box": "Property Management",
+                "semantic_bucket": "property_opex",
+                "semantic_subbucket": "services",
+                "amount_out": 10,
+            },
+            {
+                "Currency": "ARS",
+                "Box": "Household",
+                "semantic_bucket": "property_opex",
+                "semantic_subbucket": "services",
+                "amount_out": 99,
+            },
+            {
+                "Currency": "ARS",
+                "Box": "Property Management",
+                "semantic_bucket": "property_opex",
+                "semantic_subbucket": "taxes",
+                "amount_out": 88,
+            },
+        ]
+    )
+    selected = split.loc[spec.filter_func(split, row)]
+    assert selected["amount_out"].sum() == 10
+    assert set(selected["Box"]) == {"Property Management"}
+    assert set(selected["semantic_subbucket"]) == {"services"}
 
 
 def test_deferred_semantics_remain_explicit_and_fail_closed_to_legacy() -> None:

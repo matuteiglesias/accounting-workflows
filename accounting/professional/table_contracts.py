@@ -81,7 +81,12 @@ EXPLICIT_METRIC_FLOW_CELL_IDS = {
 
 EXPLICIT_STATEMENT_LINE_FLOW_CELL_IDS = {
     "operating_revenue": "flow.operating_revenue",
+    "rent_revenue": "flow.rent.total",
     "property_opex_true": "flow.property_opex.total",
+    "taxes": "flow.property_opex.taxes",
+    "services": "flow.property_opex.services",
+    "maintenance": "flow.property_opex.maintenance",
+    "legal": "flow.property_opex.legal",
     "funding_contributions": "flow.funding_contribution.total",
     "family_draws_or_distributions": "flow.family_draws_or_distributions.total",
     "treasury_fx_conversion_in": "flow.fx.conversion_proceeds",
@@ -92,6 +97,7 @@ EXPLICIT_STATEMENT_LINE_FLOW_CELL_IDS = {
 EXPLICIT_TABLE_FLOW_CELL_IDS = {
     "monthly_tables_draws_by_box_amount_out": "flow.draws.by_box",
     "monthly_tables_draws_by_type_amount_out": "flow.draws.by_type",
+    "monthly_tables_opex_by_type_amount_out": "flow.property_opex.by_box_category",
 }
 
 YEAR_RE = re.compile(r"^20\d{2}$")

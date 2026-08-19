@@ -18,7 +18,7 @@ from accounting.contracts.semantic_measures import resolve_semantic_measure
 def test_v1_specs_are_typed_immutable_and_atomic_flow_only() -> None:
     assert ATOMIC_FLOW_DRILLDOWN_SPECS_VERSION == "atomic_flow_drilldown_specs_v1"
     assert isinstance(ATOMIC_FLOW_DRILLDOWN_SPECS_V1, MappingProxyType)
-    assert len(ATOMIC_FLOW_DRILLDOWN_SPECS_V1) == 22
+    assert len(ATOMIC_FLOW_DRILLDOWN_SPECS_V1) == 23
 
     for cell_id, spec in ATOMIC_FLOW_DRILLDOWN_SPECS_V1.items():
         assert isinstance(spec, FlowCellSpec)
@@ -74,6 +74,17 @@ def test_registry_contains_expected_membership_and_grain_contracts() -> None:
     assert taxes.semantic_members == (("property_opex", "taxes"),)
     assert taxes.grain == ("period", "Currency")
     assert taxes.measure_ref == ("property_opex", "taxes")
+
+    opex_box_category = resolve_flow_cell_spec("flow.property_opex.by_box_category")
+    assert opex_box_category is not None
+    assert opex_box_category.semantic_members == (("property_opex", ""),)
+    assert opex_box_category.grain == (
+        "period",
+        "Currency",
+        "Box",
+        "semantic_subbucket",
+    )
+    assert opex_box_category.measure_ref == ("property_opex", "")
 
     rent = resolve_flow_cell_spec("flow.rent.by_property")
     assert rent is not None and rent.grain == ("period", "Currency", "Lugar")
