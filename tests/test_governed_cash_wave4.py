@@ -308,15 +308,16 @@ def test_annual_metrics_and_companion_use_same_cash_selector(tmp_path: Path) -> 
 
     paths = build_annual_balance_dashboard(run_root, metrics_dir, "fixture", "2026-01-31")
     annual = pd.read_csv(paths["annual_balance_dashboard_metrics"])
+    annual_year = pd.to_numeric(annual["period"], errors="coerce")
     box = annual[
         annual["metric_id"].eq("BS.CASH.CLOSE.BOX")
-        & annual["period"].astype(str).eq("2026")
+        & annual_year.eq(2026)
         & annual["Currency"].eq("ARS")
         & annual["dimension_value"].eq("Property Management")
     ]
     total = annual[
         annual["metric_id"].eq("BS.CASH.TOTAL")
-        & annual["period"].astype(str).eq("2026")
+        & annual_year.eq(2026)
         & annual["Currency"].eq("ARS")
     ]
     assert len(box) == 1 and box.iloc[0]["value"] == 100
