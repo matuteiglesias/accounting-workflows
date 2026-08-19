@@ -1,0 +1,6 @@
+surface,period,currency,box,before_population,before_value,after_population,after_value,expected_status,notes
+monthly_professional_cash,2026-01,ARS,Property Management,inferred_box_motor + validated cash,200,validated account snapshots,100,governed,"Internal balances already excluded monthly; inferred is now excluded too"
+annual_professional_cash,2026,ARS,Property Management,internal_balance + inferred_box_motor + validated cash,250,validated account snapshots,100,governed,"Annual reuses same monthly account selector; does not sum monthly stocks"
+inferred_box_control,2026-01,ARS,Property Management,inferred_box_motor,100,inferred_box_motor,100,governed_control,"Separate control primitive; never cash headline fallback"
+internal_balance,2026-01,ARS,Property Management,internal party evidence,50,excluded evidence,50,excluded,"Preserved in monthly_cash_close but never headline cash"
+diagnostic_box_level,2026-01,ARS,Property Management,mixed-period delta,40,mixed-period delta,40,deferred_wave5,"Deliberately unchanged in PR15B"
