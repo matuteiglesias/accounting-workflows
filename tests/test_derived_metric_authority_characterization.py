@@ -213,12 +213,22 @@ def test_diagnostic_box_level_currently_uses_blank_party_fallback_and_zero_missi
     assert result[5]["previous_period"] == "2026-01"
 
 
-def test_upstream_derived_lines_are_already_authoritative_and_pr16_adds_no_contract() -> None:
+def test_upstream_derived_lines_remain_authoritative_after_pr17_contract() -> None:
     semantic = (ROOT / "accounting" / "marts" / "semantic.py").read_text(encoding="utf-8")
     assert "net_operating = float(op_rev - opex)" in semantic
     assert "coverage_after_draws = float(net_operating + funding - draws)" in semantic
     assert 'add_row(base, "net_operating"' in semantic
     assert 'add_row(base, "coverage_after_draws"' in semantic
 
-    # PR16 is characterization only. The typed contract belongs to PR17.
-    assert not (ROOT / "accounting" / "contracts" / "derived_metrics.py").exists()
+    # PR17 adds a declarative contract but no production consumer. The source
+    # statement authorities characterized by PR16 remain unchanged.
+    contract = ROOT / "accounting" / "contracts" / "derived_metrics.py"
+    assert contract.exists()
+    consumers: list[str] = []
+    for path in (ROOT / "accounting").rglob("*.py"):
+        if path == contract:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "contracts.derived_metrics" in text or "DerivedMetricSpec" in text:
+            consumers.append(str(path.relative_to(ROOT)))
+    assert consumers == []
