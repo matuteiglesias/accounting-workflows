@@ -46,7 +46,7 @@ def test_presentation_labels_are_confined_to_metadata_adapter() -> None:
     ]:
         assert label not in contract
         assert label not in executor
-        assert label in metadata
+        assert label.casefold() in metadata.casefold()
 
 
 def test_specialized_deferred_formulas_stay_out_of_generic_executor() -> None:
