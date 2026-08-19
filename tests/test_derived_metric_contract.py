@@ -135,7 +135,7 @@ def test_period_delta_cannot_be_retargeted_to_validated_cash() -> None:
         )
 
 
-def test_contract_is_not_consumed_by_production_in_pr17() -> None:
+def test_pr18_consumers_are_bounded_to_metadata_executor_and_public_facade() -> None:
     repo = Path(__file__).resolve().parents[1]
     contract_path = repo / "accounting" / "contracts" / "derived_metrics.py"
     consumers: list[str] = []
@@ -145,7 +145,11 @@ def test_contract_is_not_consumed_by_production_in_pr17() -> None:
         text = path.read_text(encoding="utf-8")
         if "contracts.derived_metrics" in text or "DerivedMetricSpec" in text:
             consumers.append(str(path.relative_to(repo)))
-    assert consumers == [], f"PR17 must remain contract-only; consumers={consumers}"
+    assert sorted(consumers) == [
+        "accounting/professional/derived_metric_executor.py",
+        "accounting/professional/derived_metric_metadata.py",
+        "accounting/professional/drilldown.py",
+    ]
 
 
 def test_contract_contains_no_human_label_or_executable_formula_dispatch() -> None:
