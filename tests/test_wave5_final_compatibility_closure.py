@@ -107,11 +107,12 @@ def test_legacy_modules_are_still_reachable_and_must_not_be_deleted_wholesale() 
     assert "annual_dashboard_tables_legacy as _legacy" in companion
 
 
-def test_governed_identity_cannot_fall_back_to_legacy(monkeypatch) -> None:
+def test_governed_identity_cannot_fall_back_to_legacy_execution(monkeypatch) -> None:
     def explode(*args, **kwargs):
-        raise AssertionError("governed identity reached legacy fallback")
+        raise AssertionError("governed identity reached legacy execution fallback")
 
-    # Atomic flow: stable producer metadata resolves before procedural CellSpec.
+    # Derived-table path metadata is allowed to retain the historical CellSpec
+    # identity. What must never fall back is the actual matched-value execution.
     atomic_row = enrich_professional_table(
         pd.DataFrame(
             [
@@ -125,13 +126,39 @@ def test_governed_identity_cannot_fall_back_to_legacy(monkeypatch) -> None:
         "monthly_tables_operating_statement_matrix",
     ).iloc[0]
     assert atomic_row["drilldown_cell_id"] == "flow.property_opex.total"
-    monkeypatch.setattr(professional._base, "_ORIGINAL_SPEC_FOR_CELL", explode)
-    atomic_spec = professional._base._spec_for_cell(
-        "monthly_tables_operating_statement_matrix", atomic_row
+    monkeypatch.setattr(professional._base, "_ORIGINAL_BUILD_DERIVED_CELL", explode)
+    atomic_result = professional._base._build_derived_cell(
+        table_id="monthly_tables_operating_statement_matrix",
+        row=atomic_row,
+        period="2026-01",
+        display_value=30.0,
+        split=pd.DataFrame(
+            [
+                {
+                    "period": "2026-01",
+                    "Currency": "ARS",
+                    "Box": "Property Management",
+                    "semantic_bucket": "property_opex",
+                    "semantic_subbucket": "services",
+                    "amount_in": 0.0,
+                    "amount_out": 30.0,
+                    "net_amount": -30.0,
+                    "amount_abs": 30.0,
+                }
+            ]
+        ),
+        audit=pd.DataFrame(),
+        stmt=pd.DataFrame(),
+        annual=pd.DataFrame(),
+        cash_close=pd.DataFrame(),
+        debt_activity=pd.DataFrame(),
+        debt_position=pd.DataFrame(),
+        tolerance=1e-6,
     )
-    assert atomic_spec.measure == "amount_out"
+    assert atomic_result[0] == "ok"
+    assert str(atomic_result[3]).startswith("governed_atomic_flow")
 
-    # Derived metric: modern schema + stable derived ID must execute governed.
+    # Derived metric: modern schema + stable derived ID must also execute governed.
     monkeypatch.setattr(professional, "_ORIGINAL_BUILD_DERIVED_CELL", explode)
     annual = pd.DataFrame(
         [
