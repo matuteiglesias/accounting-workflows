@@ -1,9 +1,9 @@
 """Typed, declarative contracts for atomic-flow drilldown membership.
 
-This module defines contracts only. No drilldown consumer is wired to this
-registry yet; migration requires separate characterization and parity evidence.
-Stock selection, formulas, quality ratios, compatibility fallbacks, and
-unsupported routing deliberately remain outside this contract.
+Professional drilldowns consume this registry for rows with explicit stable
+``drilldown_cell_id`` metadata. Stock selection, formulas, quality ratios,
+compatibility fallbacks, and unsupported routing deliberately remain outside
+this contract.
 """
 
 from __future__ import annotations
@@ -208,6 +208,11 @@ _SPECS = (
         "flow.property_opex.by_category",
         "property_opex",
         dimensions=("semantic_subbucket",),
+    ),
+    _spec(
+        "flow.property_opex.by_box_category",
+        "property_opex",
+        dimensions=("Box", "semantic_subbucket"),
     ),
     _spec("flow.funding_contribution.total", "funding_contribution"),
     _spec(
