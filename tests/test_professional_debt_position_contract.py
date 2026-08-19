@@ -288,7 +288,7 @@ def test_unknown_position_measure_keeps_legacy_compatibility_path() -> None:
     assert not str(result[3]).startswith("governed_debt_position")
 
 
-def test_pr13_migrates_position_only_and_preserves_legacy_baseline_module() -> None:
+def test_position_executor_remains_isolated_after_pr14_activity_migration() -> None:
     executor = Path("accounting/professional/debt_position_executor.py").read_text(
         encoding="utf-8"
     )
@@ -305,5 +305,5 @@ def test_pr13_migrates_position_only_and_preserves_legacy_baseline_module() -> N
     assert "execute_annual_debt_position" in facade
     assert "accounting.contracts.debt_position_activity" not in legacy_source
 
-    # PR14 owns debt activity migration.
-    assert professional._build_debt_activity_cell is legacy._build_debt_activity_cell
+    # PR14 routes activity separately; the position executor remains untouched.
+    assert professional._build_debt_activity_cell is not legacy._build_debt_activity_cell
