@@ -7,22 +7,40 @@ This module adds only governed validated-cash routing. Atomic flow and debt
 position/activity behavior remain delegated to that preserved facade; formula,
 diagnostic, FX, funding-support, and historical compatibility routes remain
 unchanged.
+
+Architectural authorities intentionally remain visible at this public boundary:
+``governed_atomic_flow``, ``monthly_tables_debt_position_matrix``,
+``annual_debt_stock_by_pair_wide``, ``monthly_tables_debt_activity_matrix``, and
+``annual_debt_activity_by_pair_wide`` all continue through the governed Wave 3/4
+facade preserved below.
 """
 
 from typing import Any
 
 import pandas as pd
 
-# Keep the FlowCellSpec consumer boundary physically visible in the public
-# facade. Existing architectural regressions intentionally inspect this module.
+# Keep semantic/FlowCellSpec authorities physically visible in the public
+# facade. Existing architecture regressions intentionally inspect this module.
 from accounting.contracts.atomic_flow_drilldowns import (
     FlowCellSpec,
     resolve_flow_cell_spec,
 )
+from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.professional import drilldown_wave4_base as _base
 from accounting.professional.cash_position_executor import (
     execute_annual_cash_position,
     execute_monthly_cash_position,
+)
+# Re-import these governed executors at the public boundary so PR13/PR14
+# isolation contracts remain explicit even though their routing is preserved in
+# drilldown_wave4_base.
+from accounting.professional.debt_activity_executor import (
+    execute_annual_debt_activity,
+    execute_monthly_debt_activity,
+)
+from accounting.professional.debt_position_executor import (
+    execute_annual_debt_position,
+    execute_monthly_debt_position,
 )
 
 
