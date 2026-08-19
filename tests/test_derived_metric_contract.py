@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
@@ -9,7 +10,6 @@ from accounting.contracts.derived_metrics import (
     APPROVED_DERIVED_COMPONENT_REFS,
     DERIVED_METRIC_SPECS_V1,
     DERIVED_METRIC_SPECS_VERSION,
-    DerivedMetricSpec,
     resolve_derived_metric_spec,
 )
 
@@ -148,11 +148,10 @@ def test_contract_is_not_consumed_by_production_in_pr17() -> None:
     assert consumers == [], f"PR17 must remain contract-only; consumers={consumers}"
 
 
-def test_contract_contains_no_human_label_dispatch() -> None:
+def test_contract_contains_no_human_label_or_executable_formula_dispatch() -> None:
     repo = Path(__file__).resolve().parents[1]
-    text = (repo / "accounting" / "contracts" / "derived_metrics.py").read_text(
-        encoding="utf-8"
-    )
+    path = repo / "accounting" / "contracts" / "derived_metrics.py"
+    text = path.read_text(encoding="utf-8")
     for label in [
         "Margen operativo",
         "OPEX / renta",
@@ -160,5 +159,12 @@ def test_contract_contains_no_human_label_dispatch() -> None:
         "Cobertura después de funding y retiros",
     ]:
         assert label not in text
-    assert "lambda" not in text
-    assert "eval(" not in text
+
+    tree = ast.parse(text)
+    assert not any(isinstance(node, ast.Lambda) for node in ast.walk(tree))
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "eval"
+        for node in ast.walk(tree)
+    )
