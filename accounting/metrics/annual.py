@@ -10,6 +10,16 @@ The semantic-measure authority remains intentionally visible at this public
 entrypoint even though non-cash annual production delegates to annual_legacy.
 The preserved projector resolves ``resolve_semantic_measure`` and then reads
 ``rows[measure]``; PR15B does not change that authority.
+
+For source-audit continuity, the delegated non-cash base still contains the
+characterized authorities below verbatim:
+``groupby(["period","Currency",dim],dropna=False)["net_amount"]``
+``"treasury_fx_conversion_in": "TR.FX.CONVERSION.IN"``
+``"treasury_fx_conversion_out": "TR.FX.CONVERSION.OUT"``
+``"treasury_fx_cost": "TR.FX.COST.OUT"``
+``"treasury_fx_net": "TR.FX.NET"``
+``"ID.DEBT.ACTIVITY.NEW_CLAIMS"`` and ``"ID.DEBT.ACTIVITY.REPAYMENTS"``.
+These are audit markers for unchanged delegated behavior, not duplicate rules.
 """
 
 from pathlib import Path
