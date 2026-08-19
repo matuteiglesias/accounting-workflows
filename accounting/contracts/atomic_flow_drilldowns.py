@@ -1,6 +1,6 @@
 """Typed, declarative contracts for atomic-flow drilldown membership.
 
-This module defines contracts only.  No drilldown consumer is wired to this
+This module defines contracts only. No drilldown consumer is wired to this
 registry yet; migration requires separate characterization and parity evidence.
 Stock selection, formulas, quality ratios, compatibility fallbacks, and
 unsupported routing deliberately remain outside this contract.
@@ -39,19 +39,43 @@ _SOURCE_CONTRACT: Final[FlowSourceContract] = "monthly_flow_semantic_split"
 _BASE_GRAIN: Final[tuple[FlowGrainDimension, ...]] = ("period", "Currency")
 
 
+def _normalize_semantic_key(
+    key: SemanticMeasureKey,
+    *,
+    field_name: str,
+) -> SemanticMeasureKey:
+    if (
+        not isinstance(key, tuple)
+        or len(key) != 2
+        or not all(isinstance(value, str) for value in key)
+    ):
+        raise TypeError(
+            f"FlowCellSpec.{field_name} entries must be "
+            "(bucket, subbucket) string tuples"
+        )
+    bucket, subbucket = key
+    if not bucket or bucket != bucket.strip():
+        raise ValueError(
+            f"FlowCellSpec.{field_name} bucket must be non-empty and normalized"
+        )
+    if subbucket != subbucket.strip():
+        raise ValueError(f"FlowCellSpec.{field_name} subbucket must be normalized")
+    return bucket, subbucket
+
+
 @dataclass(frozen=True, slots=True)
 class FlowCellSpec:
     """Declarative membership for one governed atomic-flow cell family.
 
-    ``measure_ref`` is a semantic registry key, never a physical amount column.
-    Executors must resolve it through ``semantic_measure_registry_v1`` when they
-    are migrated in a later change.
+    ``semantic_members`` contains one or more approved semantic pairs. Unions
+    are allowed only when every member resolves to the same governed measure.
+    ``measure_ref`` identifies that shared measure authority; it never stores a
+    physical amount column.
     """
 
     cell_id: str
     source_contract: FlowSourceContract
-    semantic_bucket: str
-    semantic_subbucket: str
+    semantic_members: tuple[SemanticMeasureKey, ...]
     grain: tuple[FlowGrainDimension, ...]
     measure_ref: SemanticMeasureKey
     tolerance: float = DEFAULT_FLOW_CELL_TOLERANCE
@@ -65,17 +89,59 @@ class FlowCellSpec:
             raise ValueError(
                 f"Unsupported atomic-flow source contract: {self.source_contract!r}"
             )
-        if not isinstance(self.semantic_bucket, str) or not isinstance(
-            self.semantic_subbucket, str
-        ):
-            raise TypeError("FlowCellSpec semantic membership must use strings")
-        if (
-            not self.semantic_bucket
-            or self.semantic_bucket != self.semantic_bucket.strip()
-        ):
-            raise ValueError("FlowCellSpec.semantic_bucket must be non-empty and normalized")
-        if self.semantic_subbucket != self.semantic_subbucket.strip():
-            raise ValueError("FlowCellSpec.semantic_subbucket must be normalized")
+        if not isinstance(self.semantic_members, tuple):
+            raise TypeError("FlowCellSpec.semantic_members must be a tuple")
+        if not self.semantic_members:
+            raise ValueError(
+                "FlowCellSpec.semantic_members must contain at least one semantic pair"
+            )
+
+        members = tuple(
+            _normalize_semantic_key(member, field_name="semantic_members")
+            for member in self.semantic_members
+        )
+        if len(set(members)) != len(members):
+            raise ValueError(
+                "FlowCellSpec.semantic_members must not contain duplicates"
+            )
+
+        measure_ref = _normalize_semantic_key(
+            self.measure_ref,
+            field_name="measure_ref",
+        )
+        if measure_ref not in members:
+            raise ValueError(
+                "FlowCellSpec.measure_ref must identify one of semantic_members"
+            )
+
+        reference_measure = resolve_semantic_measure(*measure_ref)
+        if reference_measure is None:
+            raise ValueError(
+                "measure_ref is not governed by semantic_measure_registry_v1: "
+                f"{measure_ref!r}"
+            )
+
+        unresolved = [
+            member for member in members if resolve_semantic_measure(*member) is None
+        ]
+        if unresolved:
+            raise ValueError(
+                "semantic_members contains ungoverned semantic pair(s): "
+                f"{unresolved!r}"
+            )
+
+        inconsistent = [
+            member
+            for member in members
+            if resolve_semantic_measure(*member) != reference_measure
+        ]
+        if inconsistent:
+            raise ValueError(
+                "semantic_members must all resolve to the same governed measure "
+                "as measure_ref: "
+                f"measure_ref={measure_ref!r}; inconsistent={inconsistent!r}"
+            )
+
         if not isinstance(self.grain, tuple) or not all(
             isinstance(dimension, str) for dimension in self.grain
         ):
@@ -86,13 +152,6 @@ class FlowCellSpec:
             )
         if self.grain[:2] != _BASE_GRAIN:
             raise ValueError("Atomic-flow grain must begin with period and Currency")
-        if self.measure_ref != (self.semantic_bucket, self.semantic_subbucket):
-            raise ValueError("measure_ref must identify the spec's semantic membership")
-        if resolve_semantic_measure(*self.measure_ref) is None:
-            raise ValueError(
-                "measure_ref is not governed by semantic_measure_registry_v1: "
-                f"{self.measure_ref!r}"
-            )
         if not math.isfinite(self.tolerance) or self.tolerance < 0:
             raise ValueError("FlowCellSpec.tolerance must be finite and non-negative")
 
@@ -104,13 +163,29 @@ def _spec(
     *,
     dimensions: tuple[FlowGrainDimension, ...] = (),
 ) -> FlowCellSpec:
+    member = (bucket, subbucket)
     return FlowCellSpec(
         cell_id=cell_id,
         source_contract=_SOURCE_CONTRACT,
-        semantic_bucket=bucket,
-        semantic_subbucket=subbucket,
+        semantic_members=(member,),
         grain=(*_BASE_GRAIN, *dimensions),
-        measure_ref=(bucket, subbucket),
+        measure_ref=member,
+    )
+
+
+def _union_spec(
+    cell_id: str,
+    semantic_members: tuple[SemanticMeasureKey, ...],
+    *,
+    measure_ref: SemanticMeasureKey,
+    dimensions: tuple[FlowGrainDimension, ...] = (),
+) -> FlowCellSpec:
+    return FlowCellSpec(
+        cell_id=cell_id,
+        source_contract=_SOURCE_CONTRACT,
+        semantic_members=semantic_members,
+        grain=(*_BASE_GRAIN, *dimensions),
+        measure_ref=measure_ref,
     )
 
 
@@ -118,7 +193,12 @@ _SPECS = (
     _spec("flow.operating_revenue", "operating_revenue"),
     _spec("flow.rent.total", "operating_revenue", "rent"),
     _spec("flow.rent.by_box", "operating_revenue", "rent", dimensions=("Box",)),
-    _spec("flow.rent.by_property", "operating_revenue", "rent", dimensions=("Lugar",)),
+    _spec(
+        "flow.rent.by_property",
+        "operating_revenue",
+        "rent",
+        dimensions=("Lugar",),
+    ),
     _spec("flow.property_opex.total", "property_opex"),
     _spec("flow.property_opex.taxes", "property_opex", "taxes"),
     _spec("flow.property_opex.services", "property_opex", "services"),
@@ -151,11 +231,23 @@ _SPECS = (
         dimensions=("target_box",),
     ),
     _spec("flow.draws.total", "family_withdrawal_candidate"),
-    _spec("flow.draws.by_box", "family_withdrawal_candidate", dimensions=("Box",)),
+    _spec(
+        "flow.draws.by_box",
+        "family_withdrawal_candidate",
+        dimensions=("Box",),
+    ),
     _spec(
         "flow.draws.by_type",
         "family_withdrawal_candidate",
         dimensions=("semantic_subbucket",),
+    ),
+    _union_spec(
+        "flow.family_draws_or_distributions.total",
+        (
+            ("family_withdrawal_candidate", ""),
+            ("family_withdrawal", ""),
+        ),
+        measure_ref=("family_withdrawal_candidate", ""),
     ),
     _spec(
         "flow.fx.conversion_proceeds",
@@ -183,7 +275,11 @@ ATOMIC_FLOW_DRILLDOWN_SPECS_V1: Final[Mapping[str, FlowCellSpec]] = MappingProxy
 
 if len(ATOMIC_FLOW_DRILLDOWN_SPECS_V1) != len(_SPECS):
     raise ValueError("Duplicate FlowCellSpec.cell_id in atomic_flow_drilldown_specs_v1")
-if any(callable(getattr(spec, field.name)) for spec in _SPECS for field in fields(spec)):
+if any(
+    callable(getattr(spec, field.name))
+    for spec in _SPECS
+    for field in fields(spec)
+):
     raise TypeError("FlowCellSpec fields must remain declarative; callables are not allowed")
 
 
