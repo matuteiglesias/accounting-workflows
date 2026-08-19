@@ -145,8 +145,8 @@ def test_source_value_is_authority_and_formula_reconciliation_can_warn() -> None
         annual,
         560.0,
     )
-    assert result[1] == 560.0  # source authority is preserved
-    assert result[0] == "residual_warning"  # 750 + 100 - 300 = 550, not 560
+    assert result[1] == 560.0
+    assert result[0] == "residual_warning"
     assert result[5]["formula_residual"] == -10.0
     assert result[3] == "governed_source_value_with_formula_reconciliation"
 
@@ -222,13 +222,13 @@ def test_diagnostic_uses_only_inferred_control_not_blank_party_validated_cash() 
         split=pd.DataFrame(), audit=pd.DataFrame(), stmt=pd.DataFrame(), annual=pd.DataFrame(),
         cash_close=cash, debt_activity=pd.DataFrame(), debt_position=pd.DataFrame(), tolerance=1e-6,
     )
-    assert legacy[1] == 520.0  # (100+1000) - (80+500)
+    assert legacy[1] == 520.0
 
 
 def test_diagnostic_missing_previous_is_unavailable_not_zero_baseline() -> None:
     result = _diagnostic(_cash_rows(include_previous=False), 100.0)
     assert result[0] == "unsupported"
-    assert "previous:unavailable:no_rows_for_period_scope" in result[5]["selection_reason"]
+    assert "previous:unavailable:no_inferred_control_candidate" in result[5]["selection_reason"]
 
 
 def test_full_orchestration_enriches_and_executes_modern_derived_rows(tmp_path: Path) -> None:
