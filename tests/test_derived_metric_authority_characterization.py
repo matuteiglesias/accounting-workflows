@@ -108,7 +108,7 @@ def test_professional_coverage_prefers_source_metric_then_recomputes_with_zero_d
         tolerance=1e-6,
     )
     assert recomputed is not None
-    assert recomputed[1] == 70.0  # missing funding silently contributes 0 today
+    assert recomputed[1] == 70.0
 
     source_first = pd.concat(
         [
@@ -207,21 +207,16 @@ def test_diagnostic_box_level_currently_uses_blank_party_fallback_and_zero_missi
     )
     assert result[0] == "ok"
     assert result[1] == 200.0
-    # There is no 2026-01 row. The current implementation therefore treats the
-    # previous position as zero, and the blank-party fallback also admits the
-    # validated cash row alongside the inferred control row.
     assert result[5]["previous_period"] == "2026-01"
 
 
-def test_upstream_derived_lines_remain_authoritative_after_pr17_contract() -> None:
+def test_upstream_derived_lines_remain_authoritative_after_pr18_migration() -> None:
     semantic = (ROOT / "accounting" / "marts" / "semantic.py").read_text(encoding="utf-8")
     assert "net_operating = float(op_rev - opex)" in semantic
     assert "coverage_after_draws = float(net_operating + funding - draws)" in semantic
     assert 'add_row(base, "net_operating"' in semantic
     assert 'add_row(base, "coverage_after_draws"' in semantic
 
-    # PR17 adds a declarative contract but no production consumer. The source
-    # statement authorities characterized by PR16 remain unchanged.
     contract = ROOT / "accounting" / "contracts" / "derived_metrics.py"
     assert contract.exists()
     consumers: list[str] = []
@@ -231,4 +226,8 @@ def test_upstream_derived_lines_remain_authoritative_after_pr17_contract() -> No
         text = path.read_text(encoding="utf-8")
         if "contracts.derived_metrics" in text or "DerivedMetricSpec" in text:
             consumers.append(str(path.relative_to(ROOT)))
-    assert consumers == []
+    assert sorted(consumers) == [
+        "accounting/professional/derived_metric_executor.py",
+        "accounting/professional/derived_metric_metadata.py",
+        "accounting/professional/drilldown.py",
+    ]
