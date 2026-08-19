@@ -4,7 +4,7 @@
 
 This migration makes `FlowCellSpec` a real production input to professional
 drilldowns without widening the contract to stocks, debt activity, formulas,
-ratios, or compatibility fallbacks.
+ratios, annual metric lineage, or compatibility fallbacks.
 
 The public module `accounting.professional.drilldown` is now a governed facade.
 The historical implementation is preserved byte-for-byte as
@@ -17,15 +17,15 @@ until dead procedural branches are deleted after parity evidence.
 
 ## Execution path
 
-For a row with a non-empty executable `drilldown_cell_id`:
+For a monthly row with a non-empty executable `drilldown_cell_id`:
 
 1. Resolve the ID through `atomic_flow_drilldown_specs_v1`.
 2. Resolve `measure_ref` through `semantic_measure_registry_v1`.
 3. Resolve every declared grain dimension from an explicit row column or the
    structured `dimension_name` / `dimension_value` pair.
 4. Fail closed if any required grain dimension is absent.
-5. Select the requested month or year, explicit Currency, declared semantic
-   member(s), and declared grain dimensions.
+5. Select the exact month, explicit Currency, declared semantic member(s), and
+   declared grain dimensions.
 6. Aggregate only the governed measure.
 7. Expand classification evidence using the same membership and source tx IDs.
 8. Reconcile to the displayed value using the existing tolerance/status rules.
@@ -34,6 +34,13 @@ For derived professional tables the facade preserves the historical row measure
 used to construct `drilldown_id` and detail paths; governed execution occurs
 inside the derived hook. The migration therefore does not rename drilldown files
 as an incidental consequence of moving measure authority.
+
+Annual professional rows remain on their existing annual-metric lineage path.
+Although their `drilldown_cell_id` metadata can identify an atomic concept, the
+professional output already has a governed annual metric artifact and established
+`Annual metric row` evidence. Recomputing annual cells directly from monthly
+semantic rows would change provenance even when values reconcile. A later annual
+membership/composition contract can migrate that path explicitly.
 
 The executor does not branch on concepts such as rent, OPEX, funding, or draws.
 Those meanings live in the contracts.
@@ -68,6 +75,7 @@ FX total-vs-by-box explicitly before these IDs enter the generic executor.
 
 The following remain explicitly outside the governed atomic-flow executor:
 
+- annual professional metric lineage;
 - all-measures diagnostics;
 - unknown/review visibility;
 - signed net-flow views;
@@ -86,7 +94,7 @@ No accounting classification or semantic-measure rule changes in this PR.
 `semantic_measure_registry_v1` remains the sole authority for atomic
 `amount_in`, `amount_out`, and `amount_abs` selection. `FlowCellSpec` governs
 membership and grain. The professional layer only executes and reconciles those
-contracts.
+contracts where lineage parity is already characterized.
 
 No live accounting inputs are read by the implementation or tests, and no
 publication path is added.

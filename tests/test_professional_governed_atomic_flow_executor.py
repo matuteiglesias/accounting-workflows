@@ -6,6 +6,7 @@ from accounting.professional.drilldown import (
     STATUS_OK,
     STATUS_UNSUPPORTED,
     _build_derived_cell,
+    _execute_governed_derived_flow,
     _governed_flow_resolution,
     _spec_for_cell,
 )
@@ -154,46 +155,42 @@ def test_governed_union_reconciles_both_withdrawal_buckets() -> None:
     assert set(detail["tx_id"]) == {"a", "b"}
 
 
-def test_governed_annual_flow_uses_year_membership_not_one_month() -> None:
+def test_annual_professional_rows_keep_existing_annual_lineage_path() -> None:
     row = enrich_professional_table(
         pd.DataFrame(
             [{"metric_id": "IS.RENT.TOTAL", "Currency": "ARS", "2026": 30}]
         ),
         "income_operating_statement",
     ).iloc[0]
-    split = pd.DataFrame(
-        [
-            {"period": "2026-01", "Currency": "ARS", "semantic_bucket": "operating_revenue", "semantic_subbucket": "rent", "amount_in": 10},
-            {"period": "2026-06", "Currency": "ARS", "semantic_bucket": "operating_revenue", "semantic_subbucket": "rent", "amount_in": 20},
-            {"period": "2025-12", "Currency": "ARS", "semantic_bucket": "operating_revenue", "semantic_subbucket": "rent", "amount_in": 999},
-        ]
-    )
+    assert row["drilldown_cell_id"] == "flow.rent.total"
 
-    status, matched, residual, lineage, *_ = _derived(
-        "income_operating_statement", row, "2026", 30, split
+    governed = _execute_governed_derived_flow(
+        table_id="income_operating_statement",
+        row=row,
+        period="2026",
+        display_value=30,
+        split=pd.DataFrame(),
+        audit=pd.DataFrame(),
+        tolerance=1e-6,
     )
-    assert status == STATUS_OK
-    assert matched == 30
-    assert residual == 0
-    assert lineage.startswith("governed_atomic_flow:")
+    assert governed is None
 
 
 def test_missing_required_grain_fails_closed_instead_of_broadening() -> None:
-    row = enrich_professional_table(
-        pd.DataFrame(
-            [{"metric_id": "IS.RENT.BY_PROPERTY", "Currency": "ARS", "2026": 30}]
-        ),
-        "income_operating_statement",
-    ).iloc[0]
-    assert row["drilldown_cell_id"] == "flow.rent.by_property"
-
+    row = pd.Series(
+        {
+            "drilldown_cell_id": "flow.rent.by_property",
+            "Currency": "ARS",
+            "statement_line": "rent_revenue",
+        }
+    )
     split = pd.DataFrame(
         [
             {"period": "2026-01", "Currency": "ARS", "Lugar": "CABA", "semantic_bucket": "operating_revenue", "semantic_subbucket": "rent", "amount_in": 30},
         ]
     )
     status, matched, residual, lineage, _, filters, *_ = _derived(
-        "income_operating_statement", row, "2026", 30, split
+        "monthly_tables_operating_statement_matrix", row, "2026-01", 30, split
     )
     assert status == STATUS_UNSUPPORTED
     assert matched == 0

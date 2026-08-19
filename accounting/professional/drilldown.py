@@ -193,6 +193,14 @@ def _execute_governed_derived_flow(
     audit: pd.DataFrame,
     tolerance: float,
 ):
+    # Annual professional rows already have a governed annual metric artifact
+    # with established lineage/detail sections. Recomputing them from monthly
+    # semantic rows would change provenance even when totals reconcile. Keep
+    # annual rows on that existing path until a dedicated annual membership
+    # contract composes the governed monthly measure without discarding lineage.
+    if _legacy.YEAR_RE.match(str(period)):
+        return None
+
     resolution = _governed_flow_resolution(row)
     if resolution is None:
         return None
