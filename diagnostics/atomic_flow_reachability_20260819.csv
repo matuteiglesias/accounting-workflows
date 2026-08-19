@@ -1,0 +1,21 @@
+case_id,table_id,row_identity,drilldown_cell_id,period_kind,routing_strategy,legacy_branch_reached,reason,safe_to_delete
+stmt_operating_revenue_monthly,monthly_tables_operating_statement_matrix,statement_line=operating_revenue,flow.operating_revenue,month,GOVERNED_ATOMIC,false,stable statement identity enters governed executor,false
+stmt_property_opex_monthly,monthly_tables_operating_statement_matrix,statement_line=property_opex_true,flow.property_opex.total,month,GOVERNED_ATOMIC,false,stable statement identity enters governed executor,false
+stmt_funding_total_monthly,monthly_tables_operating_statement_matrix,statement_line=funding_contributions,flow.funding_contribution.total,month,GOVERNED_ATOMIC,false,stable statement identity enters governed executor,false
+stmt_draws_total_monthly,monthly_tables_operating_statement_matrix,statement_line=family_draws_or_distributions,flow.family_draws_or_distributions.total,month,GOVERNED_ATOMIC,false,governed semantic union enters governed executor,false
+draws_by_box_monthly,monthly_tables_draws_by_box_amount_out,table_contract=draws_by_box,flow.draws.by_box,month,GOVERNED_ATOMIC,false,unambiguous producer table contract bypasses legacy direct branch,true
+draws_by_type_monthly,monthly_tables_draws_by_type_amount_out,table_contract=draws_by_type,flow.draws.by_type,month,GOVERNED_ATOMIC,false,unambiguous producer table contract bypasses legacy direct branch,true
+stmt_rent_detail_monthly,monthly_tables_operating_statement_matrix,statement_line=rent_revenue,,month,LEGACY_ATOMIC,true,semantic authority exists but stable cell identity is not propagated yet,false
+stmt_taxes_monthly,monthly_tables_operating_statement_matrix,statement_line=taxes,,month,LEGACY_ATOMIC,true,semantic authority exists but stable cell identity is not propagated yet,false
+stmt_services_monthly,monthly_tables_operating_statement_matrix,statement_line=services,,month,LEGACY_ATOMIC,true,semantic authority exists but stable cell identity is not propagated yet,false
+stmt_maintenance_monthly,monthly_tables_operating_statement_matrix,statement_line=maintenance,,month,LEGACY_ATOMIC,true,semantic authority exists but stable cell identity is not propagated yet,false
+stmt_legal_monthly,monthly_tables_operating_statement_matrix,statement_line=legal,,month,LEGACY_ATOMIC,true,semantic authority exists but stable cell identity is not propagated yet,false
+opex_by_box_category_monthly,monthly_tables_opex_by_type_amount_out,Box+semantic_subbucket,,month,LEGACY_ATOMIC,true,legacy branch exactly selects Currency+Box+property_opex+semantic_subbucket,false
+annual_rent_total,income_operating_statement,metric_id=IS.RENT.TOTAL,flow.rent.total,year,ANNUAL_METRIC,true,annual professional lineage remains authoritative even though atomic identity exists,false
+annual_opex_category,income_operating_statement,metric_id=IS.OPEX.BY_CATEGORY,flow.property_opex.by_category,year,ANNUAL_METRIC,true,annual professional lineage remains authoritative even though atomic identity exists,false
+deferred_funding_actor,monthly_tables_operating_statement_matrix,explicit funding actor atomic id,flow.funding_contribution.by_actor,month,DEFERRED_FUNDING_SUPPORT,true,current professional support semantics may include direct-obligation or debt-linked support,false
+deferred_fx_out,monthly_tables_operating_statement_matrix,statement_line=treasury_fx_conversion_out,flow.fx.conversion_outflow,month,DEFERRED_FX,true,current FlowCellSpec requires Box while statement producer can be total-by-Currency,false
+net_operating_monthly,monthly_tables_operating_statement_matrix,statement_line=net_operating,,month,NET_DIAGNOSTIC,true,derived formula is intentionally outside atomic-flow contract,false
+draws_net_monthly,monthly_tables_draws_by_type_net_amount,net_amount diagnostic,,month,NET_DIAGNOSTIC,true,signed net-flow diagnostic is intentionally outside atomic-flow contract,false
+unknown_review_monthly,monthly_tables_unknown_review_net_matrix,unknown/review net,,month,NET_DIAGNOSTIC,true,review visibility is intentionally outside atomic-flow contract,false
+fuzzy_funding_compatibility,overview_balance_dashboard,metric=Funding / aportes,,year,COMPATIBILITY,true,fuzzy presentation inference must never opt a row into governed atomic execution,false
