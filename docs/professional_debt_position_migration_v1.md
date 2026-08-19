@@ -55,7 +55,7 @@ No normalization to `open_amount` is introduced.
 
 ## Source record tracing
 
-The executor reads only `monthly_debt_position.csv` and filters strictly by:
+The governed executor reads only modern, component-grained `monthly_debt_position.csv` and filters strictly by:
 
 - period/year;
 - native `Currency`;
@@ -79,7 +79,7 @@ PR12 explicitly declined to canonize that behavior:
 invalid_as_of_policy = unavailable
 ```
 
-PR13 therefore changes professional consumption as follows:
+PR13 therefore changes governed professional consumption as follows:
 
 ### Before
 
@@ -100,7 +100,7 @@ This is a reporting-contract hardening change, not a change to debt resolution o
 
 ## Parity requirements
 
-For valid snapshots, PR13 must preserve:
+For valid governed snapshots, PR13 preserves:
 
 - selected period;
 - selected `as_of_date`;
@@ -109,15 +109,21 @@ For valid snapshots, PR13 must preserve:
 - component;
 - value;
 - residual;
-- candidate evidence.
+- candidate evidence;
+- historical section headings where they are part of existing HTML regression expectations.
 
 The migration adds tests with multiple snapshots inside one month and multiple months inside one year to prove latest-snapshot rather than summation behavior.
 
 ## Compatibility boundary
 
-Unknown/non-governed debt-position measures remain on the legacy compatibility helper instead of being silently mapped into a v1 spec.
+Two compatibility cases deliberately remain outside the governed v1 path:
 
-`drilldown_legacy.py` remains unchanged and continues to represent the characterized before-state. The public facade intercepts only the two governed debt-position surfaces.
+1. unknown/non-v1 debt-position measures;
+2. historical `monthly_debt_position.csv` artifacts that do **not** contain the `component` column required by the v1 grain.
+
+The second case is important: PR13 does **not** synthesize `component` from the requested measure merely to make a legacy artifact satisfy the contract. Component-less artifacts continue through the historical helper and preserve their established output. Modern component-grained mart artifacts use `DebtPositionSpec`.
+
+`drilldown_legacy.py` remains unchanged and continues to represent the characterized before-state. The public facade intercepts only the two governed debt-position surfaces when the source satisfies the v1 grain.
 
 Debt activity remains untouched and is owned by PR14.
 
@@ -125,9 +131,10 @@ Debt activity remains untouched and is owned by PR14.
 
 PR13 is complete when:
 
-1. valid monthly and annual debt-position examples reconcile exactly;
-2. invalid-as-of examples return explicit unavailable rather than a lexical/undated stock;
+1. valid monthly and annual component-grained debt-position examples reconcile exactly;
+2. invalid-as-of governed examples return explicit unavailable rather than a lexical/undated stock;
 3. annual latest-period selection never backfills from a prior period;
-4. `DebtActivitySpec` is not consumed;
-5. `drilldown_legacy.py` remains free of the new contract import;
-6. fixture-safe repository validation passes.
+4. component-less historical sources preserve legacy compatibility instead of being silently upgraded;
+5. `DebtActivitySpec` is not consumed;
+6. `drilldown_legacy.py` remains free of the new contract import;
+7. fixture-safe repository validation passes.
