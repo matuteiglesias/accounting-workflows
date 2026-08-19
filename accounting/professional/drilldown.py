@@ -8,9 +8,17 @@ metadata plus a closed DerivedMetricSpec executor. Historical/minimal artifacts
 remain on compatibility paths; modern governed sources fail closed.
 """
 
+# Architecture markers intentionally remain physically visible at this public
+# boundary for cross-wave regressions and human audits. Their implementations
+# remain delegated to the preserved Wave 3/4 facade:
+# governed_atomic_flow
+# monthly_tables_debt_position_matrix / annual_debt_stock_by_pair_wide
+# monthly_tables_debt_activity_matrix / annual_debt_activity_by_pair_wide
+# monthly_tables_cash_close_matrix / annual_cash_close_by_box_wide
+# monthly_tables_diagnostic_box_level_matrix
+
 import pandas as pd
 
-# Keep prior semantic authorities physically visible at the public boundary.
 from accounting.contracts.atomic_flow_drilldowns import (
     FlowCellSpec,
     resolve_flow_cell_spec,
@@ -34,8 +42,6 @@ from accounting.professional.derived_metric_executor import execute_derived_metr
 from accounting.professional.derived_metric_metadata import enrich_derived_metric_tables
 
 
-# Re-export the complete pre-Wave5 public/private surface. Only the derived-cell
-# routing and table metadata enrichment hooks below are changed.
 for _name in dir(_base):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_base, _name)
@@ -52,8 +58,6 @@ def _enrich_professional_table_contracts(tables_dir):
 
     written = list(_ORIGINAL_ENRICH_PROFESSIONAL_TABLE_CONTRACTS(tables_dir))
     written.extend(enrich_derived_metric_tables(tables_dir))
-    # Preserve deterministic order while de-duplicating paths rewritten by both
-    # metadata passes.
     return list(dict.fromkeys(written))
 
 
@@ -122,8 +126,6 @@ def _build_derived_cell(
     )
 
 
-# Keep the characterized FX compatibility surface physically visible so the
-# anti-shadowing regression continues to protect it.
 FX_TREASURY_TABLE_IDS = _base.FX_TREASURY_TABLE_IDS
 FX_MEASURES = _base.FX_MEASURES
 
@@ -132,8 +134,6 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
     return _base._fx_treasury_measure_for_row(table_id, row)
 
 
-# Historical orchestration lives in drilldown_legacy. Replace only the two
-# migration hooks; all unrelated compatibility code remains byte-preserved.
 _base._legacy._build_derived_cell = _build_derived_cell
 _base._legacy.enrich_professional_table_contracts = _enrich_professional_table_contracts
 
