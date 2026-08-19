@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.scope import assert_frame_within_scope, load_run_scope_if_present
 
 ANNUAL_METRICS_COLUMNS = [
@@ -68,15 +69,23 @@ def _funding_support_mask(df: pd.DataFrame) -> pd.Series:
         | debt_effect.fillna("none").astype(str).str.strip().ne("none")
     )
 
-def _funding_support_amount(df: pd.DataFrame) -> pd.Series:
-    amount_in = pd.to_numeric(df.get("amount_in", 0), errors="coerce").fillna(0.0)
-    amount_out = pd.to_numeric(df.get("amount_out", 0), errors="coerce").fillna(0.0)
-    amount_abs = pd.to_numeric(df.get("amount_abs", 0), errors="coerce").fillna(0.0)
-    cash_effect = df.get("cash_effect", pd.Series("", index=df.index)).fillna("").astype(str)
-    direct = cash_effect.eq("no_cash_in_box_direct_payment")
-    cash_in = cash_effect.eq("cash_in_box")
-    cash_out = cash_effect.eq("cash_out_box")
-    return amount_abs.where(~cash_in, amount_in).where(~direct, amount_out.where(amount_out.ne(0), amount_abs)).where(~cash_out, amount_out.where(amount_out.ne(0), amount_abs))
+def _governed_semantic_amount(df: pd.DataFrame) -> pd.Series:
+    """Project semantic rows through the canonical atomic-measure contract."""
+
+    # Keep the governed source column's numeric representation so this authority
+    # migration does not rewrite otherwise-identical annual CSV values.
+    values = pd.Series(pd.NA, index=df.index, dtype="object")
+    for (bucket, subbucket), rows in df.groupby(
+        ["semantic_bucket", "semantic_subbucket"], dropna=False
+    ):
+        measure = resolve_semantic_measure(bucket, subbucket)
+        if measure is None:
+            raise ValueError(
+                "No approved semantic measure for annual detail "
+                f"bucket={bucket!r}, subbucket={subbucket!r}"
+            )
+        values.loc[rows.index] = pd.to_numeric(rows[measure], errors="coerce").fillna(0.0)
+    return values
 
 def _contract_from_rows(metrics: pd.DataFrame) -> pd.DataFrame:
     if metrics.empty:
@@ -143,19 +152,20 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
     if split is not None and not split.empty:
         s=_year(split); 
         for col in ["amount_in","amount_out","net_amount","amount_abs"]: s[col]=pd.to_numeric(s.get(col,0),errors="coerce").fillna(0.0)
-        specs=[("IS.RENT.TOTAL",s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"amount_in","Lugar","1. Operating result","IS.RENT.BY_PROPERTY"),("IS.OPEX.BY_CATEGORY",s.semantic_bucket.eq("property_opex"),"amount_out","semantic_subbucket","1. Operating result","IS.OPEX.BY_CATEGORY"),("FUND.CONTRIB.BY_ACTOR",s.semantic_bucket.eq("funding_contribution"),"amount_in","actor","2. Funding and distributions","FUND.CONTRIB.BY_ACTOR"),("DIST.DRAWS.BY_TYPE",s.semantic_bucket.eq("family_withdrawal_candidate"),"amount_out","semantic_subbucket","2. Funding and distributions","DIST.DRAWS.BY_TYPE")]
-        for total_mid, mask, amt, dim, dash, emit_mid in specs:
-            sub=s[mask]
+        specs=[("IS.RENT.TOTAL",s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"Lugar","1. Operating result","IS.RENT.BY_PROPERTY"),("IS.OPEX.BY_CATEGORY",s.semantic_bucket.eq("property_opex"),"semantic_subbucket","1. Operating result","IS.OPEX.BY_CATEGORY"),("FUND.CONTRIB.BY_ACTOR",s.semantic_bucket.eq("funding_contribution"),"actor","2. Funding and distributions","FUND.CONTRIB.BY_ACTOR"),("DIST.DRAWS.BY_TYPE",s.semantic_bucket.eq("family_withdrawal_candidate"),"semantic_subbucket","2. Funding and distributions","DIST.DRAWS.BY_TYPE")]
+        for total_mid, mask, dim, dash, emit_mid in specs:
+            sub=s[mask].copy()
+            sub["governed_amount"] = _governed_semantic_amount(sub)
             if total_mid == "IS.RENT.TOTAL":
-                for _,r in sub.groupby(["period","Currency"],dropna=False)[amt].sum().reset_index().iterrows():
-                    rows.append(_base(total_mid,r.period,r.Currency,r[amt],"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv","semantic_bucket=operating_revenue; semantic_subbucket=rent","annual flow = sum monthly flow by year and currency",run_id,as_of_date,suit="safe"))
+                for _,r in sub.groupby(["period","Currency"],dropna=False)["governed_amount"].sum().reset_index().iterrows():
+                    rows.append(_base(total_mid,r.period,r.Currency,r.governed_amount,"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv","semantic_bucket=operating_revenue; semantic_subbucket=rent","annual flow = sum monthly flow by year and currency",run_id,as_of_date,suit="safe"))
             if dim in sub.columns:
-                for _,r in sub.groupby(["period","Currency",dim],dropna=False)[amt].sum().reset_index().iterrows():
-                    rows.append(_base(emit_mid,r.period,r.Currency,r[amt],"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv",f"semantic filter; dimension={dim}","annual flow = sum monthly flow by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat"))
+                for _,r in sub.groupby(["period","Currency",dim],dropna=False)["governed_amount"].sum().reset_index().iterrows():
+                    rows.append(_base(emit_mid,r.period,r.Currency,r.governed_amount,"available","flow","semantic_flow",dash,"monthly_flow_semantic_split.csv",f"semantic filter; dimension={dim}","annual flow = sum monthly flow by year, currency, and dimension",run_id,as_of_date,dim_name=dim,dim_value=str(r[dim]),suit="safe_with_caveat"))
 
         funding_support = s.loc[_funding_support_mask(s)].copy()
         if not funding_support.empty:
-            funding_support["funding_support_amount"] = _funding_support_amount(funding_support)
+            funding_support["funding_support_amount"] = _governed_semantic_amount(funding_support)
             funding_caveat = "Funding/support semantic metrics include cash contributions, direct obligation payments, and debt-linked support; rent is excluded."
             dim_specs = [
                 ("funding_actor", "FUND.CONTRIB.BY_FUNDING_ACTOR"),

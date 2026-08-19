@@ -88,13 +88,8 @@ def test_atomic_consumers_are_wired_to_registry() -> None:
     migrated_consumers = [
         ROOT / "accounting" / "marts" / "semantic.py",
         ROOT / "accounting" / "management" / "usd_ccl_flows.py",
+        ROOT / "accounting" / "metrics" / "annual.py",
         ROOT / "accounting" / "professional" / "drilldown.py",
     ]
     for consumer in migrated_consumers:
         assert "contracts.semantic_measures" in consumer.read_text(encoding="utf-8")
-
-    unmigrated_consumers = [
-        ROOT / "accounting" / "metrics" / "annual.py",
-    ]
-    for consumer in unmigrated_consumers:
-        assert "contracts.semantic_measures" not in consumer.read_text(encoding="utf-8")

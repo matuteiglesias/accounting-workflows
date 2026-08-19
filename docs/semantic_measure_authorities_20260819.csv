@@ -1,16 +1,16 @@
 semantic_concept,semantic_bucket,semantic_subbucket,native_statement_measure,management_measure,professional_drilldown_measure,annual_metrics_measure,agreement_or_intentional_difference,production_authority_count,semantic_edit_distance
-rent,operating_revenue,rent,amount_in,amount_in,amount_in,amount_in,agreement,2,2
-opex_taxes,property_opex,taxes,amount_out,amount_out,amount_out,amount_out,agreement,2,2
-opex_services,property_opex,services,amount_out,amount_out,amount_out,amount_out,agreement,2,2
-opex_maintenance,property_opex,maintenance,amount_out,amount_out,amount_out,amount_out,agreement,2,2
-opex_legal,property_opex,legal,amount_out,amount_out,amount_out,amount_out,agreement,2,2
-funding,funding_contribution,*,amount_in,amount_in,amount_in,amount_in,agreement,2,2
-withdrawals,family_withdrawal_candidate,*,amount_out,amount_out,amount_out,amount_out,agreement,2,2
+rent,operating_revenue,rent,amount_in,amount_in,amount_in,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+opex_taxes,property_opex,taxes,amount_out,amount_out,amount_out,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+opex_services,property_opex,services,amount_out,amount_out,amount_out,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+opex_maintenance,property_opex,maintenance,amount_out,amount_out,amount_out,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+opex_legal,property_opex,legal,amount_out,amount_out,amount_out,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+funding,funding_contribution,*,amount_in,amount_in,amount_in,governed_monthly_statement|semantic_contract_detail,agreement,1,1
+withdrawals,family_withdrawal_candidate,*,amount_out,amount_out,amount_out,governed_monthly_statement|semantic_contract_detail,agreement,1,1
 debt_principal,debt_movement,principal,amount_abs,excluded_not_approved_v1,net_amount,canonical_debt_activity:new_principal,"intentional difference: management excludes debt; cash-bridge drilldown and debt metrics use debt-specific signed activity rather than the statement visibility amount",3,3
 debt_repayment,debt_movement,repayment,amount_abs,excluded_not_approved_v1,net_amount,canonical_debt_activity:repayments,"intentional difference: management excludes debt; cash-bridge drilldown and debt metrics use debt-specific signed activity rather than the statement visibility amount",3,3
 internal_transfer,internal_transfer,transfer,amount_abs,excluded_not_approved_v1,not_supported,not_emitted,"intentional difference: management excludes internal transfers; professional semantic lineage does not support the statement line; annual metrics do not emit it",1,1
-fx_proceeds,treasury_fx,fx_conversion_proceeds,amount_in,amount_in,amount_in,statement_projection:amount_in|dimension:net_amount,"intentional dual surface: annual total projects native amount_in while FX dimensions aggregate net_amount",2,2
-fx_outflow,treasury_fx,fx_conversion_outflow,amount_out,amount_out,amount_out,statement_projection:amount_out|dimension:net_amount,"intentional dual surface: annual total projects native amount_out while FX dimensions aggregate net_amount",2,2
-fx_cost,treasury_fx,fx_cost_or_spread,amount_out,amount_out,amount_out,statement_projection:amount_out|dimension:net_amount,"intentional dual surface: annual total projects native amount_out while FX dimensions aggregate net_amount",2,2
+fx_proceeds,treasury_fx,fx_conversion_proceeds,amount_in,amount_in,amount_in,governed_monthly_statement|dimension:net_amount,"intentional dual surface: annual total projects the governed monthly measure while FX dimensions aggregate net_amount",1,1
+fx_outflow,treasury_fx,fx_conversion_outflow,amount_out,amount_out,amount_out,governed_monthly_statement|dimension:net_amount,"intentional dual surface: annual total projects the governed monthly measure while FX dimensions aggregate net_amount",1,1
+fx_cost,treasury_fx,fx_cost_or_spread,amount_out,amount_out,amount_out,governed_monthly_statement|dimension:net_amount,"intentional dual surface: annual total projects the governed monthly measure while FX dimensions aggregate net_amount",1,1
 unknown_fx,treasury_fx,*,net_amount,excluded_not_approved_v1,net_amount,net_amount,"intentional difference: management fails closed for an unapproved FX subbucket; native/professional/annual retain net visibility",3,3
 review_required,*,*,"amount_out else amount_abs",conditional:selected_direction,amount_abs,statement_projection:amount_out_else_amount_abs,"intentional difference: this is a QA state rather than one semantic measure; management only reports an approved selected direction and otherwise fails closed",3,3

@@ -7,6 +7,7 @@ import pandas as pd
 
 from accounting.management.usd_ccl_flows import _measure_direction
 from accounting.marts.semantic import build_monthly_operating_statement_from_split
+from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.professional.drilldown import (
     _cash_bridge_line_spec,
     _fx_treasury_measure_for_row,
@@ -89,7 +90,7 @@ def test_matrix_has_requested_cases_and_measured_edit_distance() -> None:
         "rent", "opex_taxes", "opex_services", "opex_maintenance",
         "opex_legal", "funding", "withdrawals", "fx_proceeds",
         "fx_outflow", "fx_cost",
-    ]} == {"2"}
+    ]} == {"1"}
 
 
 def test_native_statement_measures_and_review_fallback_are_frozen() -> None:
@@ -177,12 +178,14 @@ def test_management_and_professional_selectors_match_characterization() -> None:
         assert spec is not None and spec[0] == expected
 
 
-def test_annual_metrics_authorities_are_explicitly_characterized() -> None:
+def test_annual_metrics_delegate_atomic_measures_to_upstream_or_contract() -> None:
     source = (ROOT / "accounting" / "metrics" / "annual.py").read_text(encoding="utf-8")
-    assert '"IS.RENT.TOTAL",s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"amount_in"' in source
-    assert '"IS.OPEX.BY_CATEGORY",s.semantic_bucket.eq("property_opex"),"amount_out"' in source
-    assert '"FUND.CONTRIB.BY_ACTOR",s.semantic_bucket.eq("funding_contribution"),"amount_in"' in source
-    assert '"DIST.DRAWS.BY_TYPE",s.semantic_bucket.eq("family_withdrawal_candidate"),"amount_out"' in source
+    assert "resolve_semantic_measure" in source
+    assert 'rows[measure]' in source
+    assert '"IS.RENT.TOTAL",s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"amount_in"' not in source
+    assert '"IS.OPEX.BY_CATEGORY",s.semantic_bucket.eq("property_opex"),"amount_out"' not in source
+    assert '"FUND.CONTRIB.BY_ACTOR",s.semantic_bucket.eq("funding_contribution"),"amount_in"' not in source
+    assert '"DIST.DRAWS.BY_TYPE",s.semantic_bucket.eq("family_withdrawal_candidate"),"amount_out"' not in source
     assert 'groupby(["period","Currency",dim],dropna=False)["net_amount"]' in source
     assert '"treasury_fx_conversion_in": "TR.FX.CONVERSION.IN"' in source
     assert '"treasury_fx_conversion_out": "TR.FX.CONVERSION.OUT"' in source
@@ -190,3 +193,46 @@ def test_annual_metrics_authorities_are_explicitly_characterized() -> None:
     assert '"treasury_fx_net": "TR.FX.NET"' in source
     assert '"ID.DEBT.ACTIVITY.NEW_CLAIMS"' in source
     assert '"ID.DEBT.ACTIVITY.REPAYMENTS"' in source
+
+
+def test_annual_atomic_detail_matches_characterized_monthly_measures(
+    tmp_path: Path,
+) -> None:
+    split = _split()
+    split["Box"] = "Property Management"
+    split["Lugar"] = "CABA"
+    split["actor"] = "Matías"
+    statement, _ = build_monthly_operating_statement_from_split(split)
+    run_root = tmp_path / "run"
+    metrics_dir = tmp_path / "metrics"
+    run_root.mkdir()
+    split.to_csv(run_root / "monthly_flow_semantic_split.csv", index=False)
+    statement.to_csv(run_root / "monthly_operating_statement.csv", index=False)
+
+    paths = build_annual_balance_dashboard(
+        run_root, metrics_dir, run_id="semantic-parity", as_of_date="2026-08-19"
+    )
+    annual = pd.read_csv(paths["annual_balance_dashboard_metrics"])
+    available = annual[annual["value_status"].eq("available")]
+
+    def values(metric_id: str) -> dict[str, float]:
+        rows = available[available["metric_id"].eq(metric_id)]
+        return dict(zip(rows["dimension_value"].fillna(""), rows["value"].astype(float)))
+
+    assert values("IS.RENT.TOTAL")[""] == 11
+    assert values("IS.RENT.BY_PROPERTY")["CABA"] == 11
+    assert values("IS.OPEX.BY_CATEGORY") == {
+        "legal": 15,
+        "maintenance": 14,
+        "services": 13,
+        "taxes": 12,
+    }
+    assert values("FUND.CONTRIB.BY_ACTOR")["Matías"] == 16
+    assert values("DIST.DRAWS.BY_TYPE")["personal_expense"] == 17
+    assert values("TR.FX.BY_BOX")["Property Management"] == -48
+    assert values("TR.FX.BY_TYPE") == {
+        "fx_conversion_outflow": -22,
+        "fx_conversion_proceeds": 21,
+        "fx_cost_or_spread": -23,
+        "unapproved_future_fx": -24,
+    }
