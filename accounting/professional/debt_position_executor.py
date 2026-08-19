@@ -209,12 +209,17 @@ def execute_monthly_debt_position(
 ):
     """Execute a governed monthly debt-position cell or return ``None``.
 
-    ``None`` means the row has no recognized DebtPositionSpec and should retain
-    its legacy compatibility path.
+    ``None`` means the row or source does not satisfy the v1 component-grained
+    contract and should retain its legacy compatibility path. In particular,
+    historical component-less debt wrappers are not silently upgraded by
+    synthesizing a component from the requested measure.
     """
 
     spec = _resolve_row_spec(row)
     if spec is None:
+        return None
+
+    if not debt_position.empty and "component" not in debt_position.columns:
         return None
 
     currency = _legacy._norm(row.get("Currency"))
@@ -299,7 +304,7 @@ def execute_monthly_debt_position(
 
     selected, valid_count = _latest_valid_as_of(candidates, spec)
     sections = [
-        ("Selected governed monthly close snapshot", selected),
+        ("Selected monthly close snapshot", selected),
         ("All candidate snapshots in period", candidates),
     ]
     if selected.empty:
@@ -345,10 +350,18 @@ def execute_annual_debt_position(
     debt_position: pd.DataFrame,
     tolerance: float,
 ):
-    """Execute annual debt stock as latest period then latest valid as-of."""
+    """Execute annual debt stock as latest period then latest valid as-of.
+
+    Historical component-less source artifacts return ``None`` so the facade
+    retains the legacy companion behavior. The governed v1 path never fabricates
+    component grain merely from the requested output measure.
+    """
 
     spec = _resolve_row_spec(row)
     if spec is None:
+        return None
+
+    if not debt_position.empty and "component" not in debt_position.columns:
         return None
 
     currency = _legacy._norm(row.get("Currency"))
@@ -436,7 +449,7 @@ def execute_annual_debt_position(
     selected, valid_count = _latest_valid_as_of(month_candidates, spec)
     sections = [
         ("Annual companion row", _legacy._annual_companion_long_row(row, period, display_value)),
-        ("Selected governed annual close snapshot", selected),
+        ("Selected annual close row", selected),
         ("Candidates in selected closing period", month_candidates),
         ("Candidate debt position rows in year", year_candidates),
     ]
