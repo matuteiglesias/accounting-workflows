@@ -79,6 +79,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border
 
 
 
+from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.logging_utils import configure_logging, get_logger
 from accounting.professional.table_contracts import enrich_professional_table_contracts
 from accounting.scope import assert_frame_within_scope, load_run_scope_if_present
@@ -271,9 +272,6 @@ class CellSpec:
     caveat_func: Callable[[pd.Series], str] = lambda row: ""
     unsupported_if: Callable[[pd.Series], bool] = lambda row: False
 
-
-
-
 FX_TREASURY_TABLE_IDS = {
     "monthly_tables_fx_treasury_all_measures",
     "monthly_tables_fx_treasury_amount_in",
@@ -285,37 +283,8 @@ FX_TREASURY_TABLE_IDS = {
 FX_MEASURES = {"amount_in", "amount_out", "net_amount", "amount_abs"}
 
 
-def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
-    # Prefer explicit row grain. This is mandatory for compact/all_measures.
-    for col in ["measure", "metric"]:
-        measure = _norm(row.get(col))
-        if measure in FX_MEASURES:
-            return measure
-
-    # Only infer from table name for single-measure tables.
-    if table_id == "monthly_tables_fx_treasury_amount_in":
-        return "amount_in"
-
-    if table_id == "monthly_tables_fx_treasury_amount_out":
-        return "amount_out"
-
-    if table_id == "monthly_tables_fx_treasury_net_amount":
-        return "net_amount"
-
-    # Compact/all_measures must not default to net_amount.
-    return ""
-
-
-
-FX_TREASURY_TABLE_IDS = {
-    "monthly_tables_fx_treasury_all_measures",
-    "monthly_tables_fx_treasury_amount_in",
-    "monthly_tables_fx_treasury_amount_out",
-    "monthly_tables_fx_treasury_net_amount",
-    "monthly_tables_fx_treasury_compact",
-}
-
-FX_MEASURES = {"amount_in", "amount_out", "net_amount", "amount_abs"}
+def _contract_measure(bucket: str, subbucket: str = "") -> str:
+    return resolve_semantic_measure(bucket, subbucket) or ""
 
 
 def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
@@ -336,9 +305,15 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
     metric = _metric_name(row).casefold().strip()
 
     mapping = {
-        "fx_conversion_proceeds": "amount_in",
-        "fx_conversion_outflow": "amount_out",
-        "fx_cost_or_spread": "amount_out",
+        "fx_conversion_proceeds": _contract_measure(
+            "treasury_fx", "fx_conversion_proceeds"
+        ),
+        "fx_conversion_outflow": _contract_measure(
+            "treasury_fx", "fx_conversion_outflow"
+        ),
+        "fx_cost_or_spread": _contract_measure(
+            "treasury_fx", "fx_cost_or_spread"
+        ),
         "fx_net": "net_amount",
         "net_amount": "net_amount",
         "amount_in": "amount_in",
@@ -365,11 +340,11 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
     if table_id == "monthly_tables_flow_subbucket_all_measures":
         return CellSpec(table_id, measure, lambda df, r: base_period_currency(df, r) & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_bucket", r.get("semantic_bucket")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_draws_by_box_amount_out":
-        return CellSpec(table_id, "amount_out", lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "Box", r.get("Box")))
+        return CellSpec(table_id, _contract_measure("family_withdrawal_candidate"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "Box", r.get("Box")))
     if table_id == "monthly_tables_draws_by_type_amount_out":
-        return CellSpec(table_id, "amount_out", lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
+        return CellSpec(table_id, _contract_measure("family_withdrawal_candidate"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_opex_by_type_amount_out":
-        return CellSpec(table_id, "amount_out", lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "property_opex") & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
+        return CellSpec(table_id, _contract_measure("property_opex"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "property_opex") & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_unknown_review_net_matrix":
         return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _unknown_mask(df))
 
@@ -377,9 +352,9 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
     if table_id == "monthly_tables_fb_bridge_matrix":
         metric = _metric_name(row)
         mapping = {
-            "rent_or_revenue_in": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue")),
-            "withdrawals_out": ("amount_out", lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
-            "funding_in": ("amount_in", lambda df: _bucket_eq(df, "funding_contribution")),
+            "rent_or_revenue_in": (_contract_measure("operating_revenue"), lambda df: _bucket_eq(df, "operating_revenue")),
+            "withdrawals_out": (_contract_measure("family_withdrawal_candidate"), lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
+            "funding_in": (_contract_measure("funding_contribution"), lambda df: _bucket_eq(df, "funding_contribution")),
             "fx_or_treasury_net": ("net_amount", _fx_mask),
             "net_flow": ("net_amount", lambda df: pd.Series(True, index=df.index)),
         }
@@ -391,11 +366,11 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
         box = "Property Management" if table_id == "monthly_tables_pm_stress_matrix" else "Household"
         metric = _metric_name(row)
         mapping: dict[str, tuple[str, Callable[[pd.DataFrame], pd.Series]]] = {
-            "revenue_in": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue")),
-            "property_opex_out": ("amount_out", lambda df: _bucket_eq(df, "property_opex")),
-            "opex_out": ("amount_out", lambda df: _bucket_eq(df, "property_opex")),
-            "withdrawals_out": ("amount_out", lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
-            "funding_in": ("amount_in", lambda df: _bucket_eq(df, "funding_contribution")),
+            "revenue_in": (_contract_measure("operating_revenue"), lambda df: _bucket_eq(df, "operating_revenue")),
+            "property_opex_out": (_contract_measure("property_opex"), lambda df: _bucket_eq(df, "property_opex")),
+            "opex_out": (_contract_measure("property_opex"), lambda df: _bucket_eq(df, "property_opex")),
+            "withdrawals_out": (_contract_measure("family_withdrawal_candidate"), lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
+            "funding_in": (_contract_measure("funding_contribution"), lambda df: _bucket_eq(df, "funding_contribution")),
             "debt_net": ("net_amount", lambda df: _bucket_contains(df, "debt")),
             "unknown_net": ("net_amount", _unknown_mask),
             "fx_or_treasury_net": ("net_amount", _fx_mask),
@@ -760,15 +735,20 @@ def _statement_line(row: pd.Series) -> str:
 
 def _semantic_filter_for_statement_line(line: str) -> tuple[str, Callable[[pd.DataFrame], pd.Series]] | None:
     mapping: dict[str, tuple[str, Callable[[pd.DataFrame], pd.Series]]] = {
-        "operating_revenue": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue")),
-        "rent_revenue": ("amount_in", lambda df: _bucket_eq(df, "operating_revenue") & _eq_col(df, "semantic_subbucket", "rent")),
-        "property_opex_true": ("amount_out", lambda df: _bucket_eq(df, "property_opex")),
-        "funding_contributions": ("amount_in", lambda df: _bucket_eq(df, "funding_contribution")),
-        "family_draws_or_distributions": ("amount_out", lambda df: _bucket_eq(df, "family_withdrawal_candidate")),
+        "operating_revenue": (_contract_measure("operating_revenue"), lambda df: _bucket_eq(df, "operating_revenue")),
+        "rent_revenue": (_contract_measure("operating_revenue", "rent"), lambda df: _bucket_eq(df, "operating_revenue") & _eq_col(df, "semantic_subbucket", "rent")),
+        "property_opex_true": (_contract_measure("property_opex"), lambda df: _bucket_eq(df, "property_opex")),
+        "funding_contributions": (_contract_measure("funding_contribution"), lambda df: _bucket_eq(df, "funding_contribution")),
+        "family_draws_or_distributions": (
+            _contract_measure("family_withdrawal_candidate"),
+            lambda df: df.get(
+                "semantic_bucket", pd.Series("", index=df.index)
+            ).isin(["family_withdrawal_candidate", "family_withdrawal"]),
+        ),
         "unknown_or_ambiguous_outflows": ("amount_abs", _unknown_mask),
-        "treasury_fx_conversion_in": ("amount_in", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_proceeds")),
-        "treasury_fx_conversion_out": ("amount_out", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_outflow")),
-        "treasury_fx_cost": ("amount_out", lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_cost_or_spread")),
+        "treasury_fx_conversion_in": (_contract_measure("treasury_fx", "fx_conversion_proceeds"), lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_proceeds")),
+        "treasury_fx_conversion_out": (_contract_measure("treasury_fx", "fx_conversion_outflow"), lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_conversion_outflow")),
+        "treasury_fx_cost": (_contract_measure("treasury_fx", "fx_cost_or_spread"), lambda df: _bucket_eq(df, "treasury_fx") & _eq_col(df, "semantic_subbucket", "fx_cost_or_spread")),
         "treasury_fx_net": ("net_amount", lambda df: _bucket_eq(df, "treasury_fx")),
     }
     return mapping.get(line)

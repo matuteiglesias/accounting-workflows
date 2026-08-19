@@ -1,0 +1,5 @@
+tx_id,Date,amount,amount_cents,Currency,payer,receiver,Flujo,Tipo,status,Box,Lugar,Detalle,source_file,source_row,notes,channel,cash_path
+hh-rent,2026-01-05,1200,120000,ARS,Tenant,HH,Cobros,Renta,recognized,Household,CABA,Household rent,synthetic,1,,,Cobros:Renta
+hh-opex,2026-01-05,1200,120000,ARS,HH,Utility,Gastos,Servicios,recognized,Household,CABA,Household service,synthetic,2,,,Gastos:Servicios
+hh-funding,2026-01-05,2400,240000,ARS,Family,HH,Contribucion,Contribucion,recognized,Household,CABA,Household funding,synthetic,3,,,Contribucion:Contribucion
+hh-draw,2026-01-05,1200,120000,ARS,HH,Owner,Transfer,Gasto,recognized,Household,CABA,Household draw,synthetic,4,Gastos Personales,,Transfer:Gasto

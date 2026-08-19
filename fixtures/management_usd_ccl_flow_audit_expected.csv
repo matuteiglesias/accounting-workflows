@@ -1,0 +1,11 @@
+tx_id,Date,period,Box,Currency,amount,direction,semantic_bucket,semantic_subbucket,measure_direction,measure_inclusion,amount_usd_ccl,fx_conversion_status,valuation_basis,valuation_currency,valuation_policy_id,management_eligibility,eligibility_reason
+mgmt-clean-fx,2026-01-05,2026-01,Property Management,ARS,1200,in,treasury_fx,fx_conversion_proceeds,in,selected,1.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-draw,2026-01-05,2026-01,Property Management,ARS,1200,out,family_withdrawal_candidate,personal_expense,out,selected,1.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-funding,2026-01-05,2026-01,Property Management,ARS,2400,in,funding_contribution,family_or_tenant_contribution,in,selected,2.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-fx-overlap,2026-01-05,2026-01,Family Business,ARS,1200,in,operating_revenue,rent,in,selected,1.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,review_required,fx_semantic_overlap
+mgmt-missing-rate,2026-01-06,2026-01,Family Business,ARS,1200,in,funding_contribution,family_or_tenant_contribution,in,selected,,unavailable_missing_rate,usd_ccl,USD,synthetic_exact_date_v1,unavailable_valuation,unavailable_missing_rate
+mgmt-native-usd,2026-01-05,2026-01,Property Management,USD,10,in,operating_revenue,rent,in,selected,10.000000,identity_native_usd,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-negative-opex,2026-01-05,2026-01,Family Business,ARS,-1200,out,property_opex,taxes,out,selected,-1.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,review_required,negative_native_amount
+mgmt-opex,2026-01-05,2026-01,Property Management,ARS,1200,out,property_opex,taxes,out,selected,1.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-rent,2026-01-05,2026-01,Property Management,ARS,120000,in,operating_revenue,rent,in,selected,100.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible
+mgmt-zero-rent,2026-01-05,2026-01,Property Management,ARS,0,in,operating_revenue,rent,in,selected,0.000000,converted_exact_date,usd_ccl,USD,synthetic_exact_date_v1,eligible,eligible

@@ -11,6 +11,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable
 
+from accounting.contracts.semantic_measures import resolve_semantic_measure
+
 
 AUDIT_COLUMNS = [
     "tx_id", "Date", "period", "Box", "Currency", "amount", "direction",
@@ -46,18 +48,6 @@ FX_OVERLAP_BUCKETS = {
     "family_withdrawal_candidate",
     "family_withdrawal",
     "debt_movement",
-}
-MEASURE_DIRECTIONS = {
-    "operating_revenue": "in",
-    "property_opex": "out",
-    "funding_contribution": "in",
-    "family_withdrawal_candidate": "out",
-    "family_withdrawal": "out",
-}
-TREASURY_MEASURE_DIRECTIONS = {
-    "fx_conversion_proceeds": "in",
-    "fx_conversion_outflow": "out",
-    "fx_cost_or_spread": "out",
 }
 MANAGEMENT_IMPLEMENTATION_ID = "usd_ccl_semantic_measures_v2"
 
@@ -154,13 +144,17 @@ def _has_fx_evidence(row: dict[str, str]) -> bool:
     return payer == "fx" or receiver == "fx" or "cambio:fx" in blob
 
 
+def _measure_column(semantic: dict[str, str]) -> str:
+    return resolve_semantic_measure(
+        semantic.get("semantic_bucket", ""),
+        semantic.get("semantic_subbucket", ""),
+    ) or ""
+
+
 def _measure_direction(semantic: dict[str, str]) -> str:
-    bucket = semantic.get("semantic_bucket", "").strip()
-    if bucket == "treasury_fx":
-        return TREASURY_MEASURE_DIRECTIONS.get(
-            semantic.get("semantic_subbucket", "").strip(), ""
-        )
-    return MEASURE_DIRECTIONS.get(bucket, "")
+    return {"amount_in": "in", "amount_out": "out"}.get(
+        _measure_column(semantic), ""
+    )
 
 
 def _measure_inclusion(semantic: dict[str, str]) -> tuple[str, str]:
@@ -193,7 +187,7 @@ def _eligibility(
         return "review_required", "ambiguous_native_semantics"
     if bucket not in APPROVED_BUCKETS:
         return "excluded_not_approved_v1", "semantic_bucket_not_approved_v1"
-    if bucket == "treasury_fx" and not _measure_direction(semantic):
+    if bucket == "treasury_fx" and not _measure_column(semantic):
         return "excluded_not_approved_v1", "treasury_subbucket_not_approved_v1"
     return "eligible", "eligible"
 
