@@ -5,6 +5,9 @@ from __future__ import annotations
 All pre-PR15B annual logic is preserved in ``annual_legacy``. This module
 rewrites only BS.CASH.TOTAL and BS.CASH.CLOSE.BOX from the shared cash
 position selector, then regenerates contract and QA artifacts.
+
+The semantic-measure authority remains intentionally visible at this public
+entrypoint even though non-cash annual production delegates to annual_legacy.
 """
 
 from pathlib import Path
@@ -15,6 +18,7 @@ from accounting.cash_authority import (
     select_validated_cash_year,
     validated_cash_schema_supported,
 )
+from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.metrics import annual_legacy as _legacy
 
 
