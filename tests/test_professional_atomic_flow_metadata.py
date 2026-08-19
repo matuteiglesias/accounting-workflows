@@ -219,10 +219,12 @@ def test_debt_table_does_not_gain_atomic_flow_metadata() -> None:
     assert "drilldown_cell_id" not in out.columns
 
 
-def test_pr10b_does_not_wire_professional_executor_to_flow_registry() -> None:
+def test_pr10c_wires_professional_executor_to_flow_registry() -> None:
     root = Path(__file__).resolve().parents[1]
     drilldown = (
         root / "accounting" / "professional" / "drilldown.py"
     ).read_text(encoding="utf-8")
 
-    assert "contracts.atomic_flow_drilldowns" not in drilldown
+    assert "contracts.atomic_flow_drilldowns" in drilldown
+    assert "resolve_flow_cell_spec" in drilldown
+    assert "governed_atomic_flow" in drilldown
