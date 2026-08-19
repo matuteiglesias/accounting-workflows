@@ -228,6 +228,52 @@ def test_annual_latest_period_with_invalid_as_of_is_unavailable_and_does_not_bac
     assert "prior periods are not substituted" in governed[5]["reason"]
 
 
+def test_componentless_legacy_source_stays_on_compatibility_path() -> None:
+    source = pd.DataFrame(
+        [
+            {
+                "period": "2026-12",
+                "as_of_date": "2026-12-31",
+                "Currency": "USD",
+                "debtor": "PM",
+                "creditor": "MI",
+                "open_principal": 70.0,
+                "open_interest": 7.0,
+                "open_total": 77.0,
+            }
+        ]
+    )
+    row = pd.Series(
+        {
+            "Currency": "USD",
+            "debtor": "PM",
+            "creditor": "MI",
+            "component": "open_total",
+        }
+    )
+
+    result = professional._build_annual_debt_stock_companion_cell(
+        row=row,
+        period="2026",
+        display_value=77.0,
+        debt_position=source,
+        tolerance=1e-6,
+    )
+    legacy_result = legacy._build_annual_debt_stock_companion_cell(
+        row=row,
+        period="2026",
+        display_value=77.0,
+        debt_position=source,
+        tolerance=1e-6,
+    )
+
+    assert result[0] == "ok"
+    assert result[1] == 77.0
+    assert result[3] == legacy_result[3]
+    assert not str(result[3]).startswith("governed_debt_position")
+    assert "spec_id" not in result[5]
+
+
 def test_unknown_position_measure_keeps_legacy_compatibility_path() -> None:
     row = pd.Series(
         {"measure": "open_amount", "Currency": "USD", "pair": "PM → MI"}
