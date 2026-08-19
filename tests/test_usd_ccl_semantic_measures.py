@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from accounting.management.usd_ccl_flows import build_usd_ccl_management_flows
+from accounting.management.usd_ccl_flows import (
+    _measure_column,
+    build_usd_ccl_management_flows,
+)
 from accounting.marts.semantic import build_semantic_outputs
 from accounting.valuation.usd_ccl import build_usd_ccl_valuation
 
@@ -128,6 +131,7 @@ def test_unapproved_debt_component_is_excluded_not_review_required(tmp_path: Pat
 
     audit = {row["tx_id"]: row for row in _rows(outputs["audit"])}
     debt_audit = audit["mgmt-debt-repayment"]
+    assert _measure_column(debt_audit) == "amount_abs"
     assert debt_audit["semantic_bucket"] == "debt_movement"
     assert debt_audit["management_eligibility"] == "excluded_not_approved_v1"
     assert debt_audit["measure_inclusion"] == "excluded_not_approved_v1"

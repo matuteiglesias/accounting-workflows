@@ -6,6 +6,8 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
+from accounting.contracts.semantic_measures import resolve_semantic_measure
+
 RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
 RULE_REGISTRY_COLUMNS = [
     "rule_id", "rule_version", "priority", "rule_name", "match_fields", "match_pattern",
@@ -505,27 +507,58 @@ def build_monthly_operating_statement_from_split(
         classified_abs = float(g.loc[~unknown_mask, "amount_abs"].sum())
         coverage = classified_abs / eligible_abs if eligible_abs else 1.0
 
-        op_rev = g.loc[g["semantic_bucket"].eq("operating_revenue"), "amount_in"].sum()
-        rent = g.loc[g["semantic_bucket"].eq("operating_revenue") & g["semantic_subbucket"].eq("rent"), "amount_in"].sum()
-        opex = g.loc[g["semantic_bucket"].eq("property_opex"), "amount_out"].sum()
-        taxes = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("taxes"), "amount_out"].sum()
-        services = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("services"), "amount_out"].sum()
-        maintenance = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("maintenance"), "amount_out"].sum()
-        legal = g.loc[g["semantic_bucket"].eq("property_opex") & g["semantic_subbucket"].eq("legal"), "amount_out"].sum()
+        def atomic_sum(mask: pd.Series) -> float:
+            selected = g.loc[mask]
+            total = 0.0
+            for (row_bucket, row_subbucket), rows in selected.groupby(
+                ["semantic_bucket", "semantic_subbucket"], dropna=False
+            ):
+                measure = resolve_semantic_measure(row_bucket, row_subbucket)
+                if measure is None:
+                    raise ValueError(
+                        "No approved semantic measure for "
+                        f"bucket={row_bucket!r}, subbucket={row_subbucket!r}"
+                    )
+                total += float(rows[measure].sum())
+            return total
+
+        op_rev_mask = g["semantic_bucket"].eq("operating_revenue")
+        opex_mask = g["semantic_bucket"].eq("property_opex")
+        op_rev = atomic_sum(op_rev_mask)
+        rent = atomic_sum(op_rev_mask & g["semantic_subbucket"].eq("rent"))
+        opex = atomic_sum(opex_mask)
+        taxes = atomic_sum(opex_mask & g["semantic_subbucket"].eq("taxes"))
+        services = atomic_sum(opex_mask & g["semantic_subbucket"].eq("services"))
+        maintenance = atomic_sum(
+            opex_mask & g["semantic_subbucket"].eq("maintenance")
+        )
+        legal = atomic_sum(opex_mask & g["semantic_subbucket"].eq("legal"))
         explicit_opex = {"taxes", "services", "maintenance", "legal"}
-        other_opex = g.loc[g["semantic_bucket"].eq("property_opex") & ~g["semantic_subbucket"].isin(explicit_opex), "amount_out"].sum()
-        funding = g.loc[g["semantic_bucket"].eq("funding_contribution"), "amount_in"].sum()
+        other_opex = atomic_sum(
+            opex_mask & ~g["semantic_subbucket"].isin(explicit_opex)
+        )
+        funding = atomic_sum(g["semantic_bucket"].eq("funding_contribution"))
         draws_mask = g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"])
-        draws = g.loc[draws_mask, "amount_out"].sum()
-        personal_expenses = g.loc[draws_mask & g["semantic_subbucket"].eq("personal_expense"), "amount_out"].sum()
-        dividends = g.loc[draws_mask & g["semantic_subbucket"].eq("dividend"), "amount_out"].sum()
-        transfer_family_expense = g.loc[draws_mask & g["semantic_subbucket"].eq("transfer_to_family_expense"), "amount_out"].sum()
-        debt = g.loc[g["semantic_bucket"].eq("debt_movement"), "amount_abs"].sum()
-        transfers = g.loc[g["semantic_bucket"].eq("internal_transfer"), "amount_abs"].sum()
+        draws = atomic_sum(draws_mask)
+        personal_expenses = atomic_sum(
+            draws_mask & g["semantic_subbucket"].eq("personal_expense")
+        )
+        dividends = atomic_sum(draws_mask & g["semantic_subbucket"].eq("dividend"))
+        transfer_family_expense = atomic_sum(
+            draws_mask & g["semantic_subbucket"].eq("transfer_to_family_expense")
+        )
+        debt = atomic_sum(g["semantic_bucket"].eq("debt_movement"))
+        transfers = atomic_sum(g["semantic_bucket"].eq("internal_transfer"))
         fx_mask = g["semantic_bucket"].eq("treasury_fx")
-        fx_conversion_in = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_conversion_proceeds"), "amount_in"].sum()
-        fx_conversion_out = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_conversion_outflow"), "amount_out"].sum()
-        fx_cost = g.loc[fx_mask & g["semantic_subbucket"].eq("fx_cost_or_spread"), "amount_out"].sum()
+        fx_conversion_in = atomic_sum(
+            fx_mask & g["semantic_subbucket"].eq("fx_conversion_proceeds")
+        )
+        fx_conversion_out = atomic_sum(
+            fx_mask & g["semantic_subbucket"].eq("fx_conversion_outflow")
+        )
+        fx_cost = atomic_sum(
+            fx_mask & g["semantic_subbucket"].eq("fx_cost_or_spread")
+        )
         fx_other = g.loc[fx_mask & ~g["semantic_subbucket"].isin(["fx_conversion_proceeds", "fx_conversion_outflow", "fx_cost_or_spread"]), "net_amount"].sum()
         fx_net = float(fx_conversion_in - fx_conversion_out - fx_cost + fx_other)
         unknown_out = g.loc[unknown_mask, "amount_out"].sum()

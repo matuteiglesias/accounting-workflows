@@ -1,0 +1,9 @@
+period,Box,semantic_bucket,semantic_subbucket,measure_direction,valuation_basis,valuation_currency,valuation_policy_id,value_usd_ccl,reportable_value_usd_ccl,available_value_usd_ccl,projection_status,source_rows,contributing_rows,eligible_rows,review_required_rows,missing_valuation_rows,negative_amount_rows,fx_overlap_rows,measure_direction_excluded_rows,excluded_not_approved_rows
+2026-01,Family Business,funding_contribution,family_or_tenant_contribution,in,usd_ccl,USD,synthetic_exact_date_v1,,,0,incomplete_unavailable_valuation,1,1,0,0,1,0,0,0,0
+2026-01,Family Business,operating_revenue,rent,in,usd_ccl,USD,synthetic_exact_date_v1,,,0,incomplete_review_required,1,1,0,1,0,0,1,0,0
+2026-01,Family Business,property_opex,taxes,out,usd_ccl,USD,synthetic_exact_date_v1,,,0,incomplete_review_required,1,1,0,1,0,1,0,0,0
+2026-01,Property Management,family_withdrawal_candidate,personal_expense,out,usd_ccl,USD,synthetic_exact_date_v1,1.000000,1.000000,1.000000,complete,1,1,1,0,0,0,0,0,0
+2026-01,Property Management,funding_contribution,family_or_tenant_contribution,in,usd_ccl,USD,synthetic_exact_date_v1,2.000000,2.000000,2.000000,complete,1,1,1,0,0,0,0,0,0
+2026-01,Property Management,operating_revenue,rent,in,usd_ccl,USD,synthetic_exact_date_v1,110.000000,110.000000,110.000000,complete,3,3,3,0,0,0,0,0,0
+2026-01,Property Management,property_opex,taxes,out,usd_ccl,USD,synthetic_exact_date_v1,1.000000,1.000000,1.000000,complete,1,1,1,0,0,0,0,0,0
+2026-01,Property Management,treasury_fx,fx_conversion_proceeds,in,usd_ccl,USD,synthetic_exact_date_v1,1.000000,1.000000,1.000000,complete,1,1,1,0,0,0,0,0,0
