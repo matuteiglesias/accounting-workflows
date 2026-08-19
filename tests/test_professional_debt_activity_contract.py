@@ -248,16 +248,20 @@ def test_position_and_activity_executors_are_structurally_non_interchangeable() 
         "accounting/professional/debt_position_executor.py"
     ).read_text(encoding="utf-8")
 
-    # DebtActivitySpec cannot enter the snapshot executor.
+    # DebtActivitySpec cannot enter the position/snapshot executor.
     assert "DebtActivitySpec" not in position_executor
     assert "resolve_debt_activity_spec" not in position_executor
+    assert "debt_activity_executor" not in position_executor
     assert "sum_flow" not in position_executor
 
-    # DebtPositionSpec cannot enter the flow-sum executor.
+    # DebtPositionSpec cannot enter the activity/sum executor, and activity has
+    # no as-of selection machinery at all.
     assert "DebtPositionSpec" not in activity_executor
     assert "resolve_debt_position_spec" not in activity_executor
+    assert "debt_position_executor" not in activity_executor
     assert "latest_valid_as_of_date" not in activity_executor
-    assert "snapshot" not in activity_executor.lower()
+    assert "pd.to_datetime" not in activity_executor
+    assert "as_of_date" not in activity_executor
 
     assert "resolve_debt_activity_spec" in activity_executor
     assert "resolve_debt_position_spec" in position_executor
