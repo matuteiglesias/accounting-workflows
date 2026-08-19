@@ -33,15 +33,19 @@ for _name in dir(_legacy):
 _ORIGINAL_SPEC_FOR_CELL = _legacy._spec_for_cell
 _ORIGINAL_BUILD_DERIVED_CELL = _legacy._build_derived_cell
 
-# These IDs are intentionally deferred because their current annual/professional
-# meaning may include multi-semantic support rows rather than one atomic semantic
-# membership. They keep the existing compatibility path until a dedicated
-# support-membership contract exists.
-_DEFERRED_MULTI_SEMANTIC_FLOW_IDS = {
+# These IDs are intentionally deferred because their current professional
+# surfaces are broader than the corresponding atomic FlowCellSpec contract.
+# Funding dimensions can include direct-obligation/debt-linked support, and the
+# current FX specs require Box while statement rows may be total-by-currency.
+# Neither case may be simplified by silently dropping membership/grain.
+_DEFERRED_FLOW_IDS = {
     "flow.funding_contribution.by_actor",
     "flow.funding_contribution.by_channel",
     "flow.funding_contribution.by_cash_effect",
     "flow.funding_contribution.by_target_box",
+    "flow.fx.conversion_proceeds",
+    "flow.fx.conversion_outflow",
+    "flow.fx.cost_or_spread",
 }
 
 
@@ -88,7 +92,7 @@ def _governed_flow_resolution(
     row: pd.Series,
 ) -> tuple[FlowCellSpec, str, dict[str, str], tuple[str, ...]] | None:
     cell_id = _legacy._norm(row.get("drilldown_cell_id"))
-    if not cell_id or cell_id in _DEFERRED_MULTI_SEMANTIC_FLOW_IDS:
+    if not cell_id or cell_id in _DEFERRED_FLOW_IDS:
         return None
 
     spec = resolve_flow_cell_spec(cell_id)
@@ -145,6 +149,12 @@ def _unsupported_governed_spec(
 
 
 def _spec_for_cell(table_id: str, row: pd.Series):
+    # Derived tables build drilldown IDs before dispatch. Preserve their legacy
+    # row-level measure/path identity; governed execution happens inside the
+    # derived hook instead of changing filenames as an incidental side effect.
+    if table_id in _legacy.DERIVED_TABLE_IDS:
+        return _ORIGINAL_SPEC_FOR_CELL(table_id, row)
+
     resolution = _governed_flow_resolution(row)
     if resolution is None:
         return _ORIGINAL_SPEC_FOR_CELL(table_id, row)
@@ -183,6 +193,14 @@ def _execute_governed_derived_flow(
     audit: pd.DataFrame,
     tolerance: float,
 ):
+    # Annual professional rows already have a governed annual metric artifact
+    # with established lineage/detail sections. Recomputing them from monthly
+    # semantic rows would change provenance even when totals reconcile. Keep
+    # annual rows on that existing path until a dedicated annual membership
+    # contract composes the governed monthly measure without discarding lineage.
+    if _legacy.YEAR_RE.match(str(period)):
+        return None
+
     resolution = _governed_flow_resolution(row)
     if resolution is None:
         return None

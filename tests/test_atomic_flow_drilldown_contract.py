@@ -183,15 +183,19 @@ def test_semantic_members_must_be_declarative_normalized_tuples() -> None:
         )
 
 
-def test_no_consumer_is_wired_to_flow_specs_yet() -> None:
+def test_professional_is_the_only_flow_spec_consumer_after_pr10c() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    consumers = [
-        root / "accounting" / "professional" / "drilldown.py",
-        root / "accounting" / "metrics" / "annual.py",
-    ]
-    for consumer in consumers:
-        assert "contracts.atomic_flow_drilldowns" not in consumer.read_text(
-            encoding="utf-8"
-        )
+    professional = root / "accounting" / "professional" / "drilldown.py"
+    annual = root / "accounting" / "metrics" / "annual.py"
+
+    assert "contracts.atomic_flow_drilldowns" in professional.read_text(
+        encoding="utf-8"
+    )
+    assert "resolve_flow_cell_spec" in professional.read_text(encoding="utf-8")
+    # Annual metrics consume governed semantic measures, not professional
+    # FlowCellSpec membership. That boundary remains intentional.
+    assert "contracts.atomic_flow_drilldowns" not in annual.read_text(
+        encoding="utf-8"
+    )
