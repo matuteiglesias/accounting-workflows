@@ -17,7 +17,7 @@ until dead procedural branches are deleted after parity evidence.
 
 ## Execution path
 
-For a row with a non-empty `drilldown_cell_id`:
+For a row with a non-empty executable `drilldown_cell_id`:
 
 1. Resolve the ID through `atomic_flow_drilldown_specs_v1`.
 2. Resolve `measure_ref` through `semantic_measure_registry_v1`.
@@ -30,12 +30,17 @@ For a row with a non-empty `drilldown_cell_id`:
 7. Expand classification evidence using the same membership and source tx IDs.
 8. Reconcile to the displayed value using the existing tolerance/status rules.
 
+For derived professional tables the facade preserves the historical row measure
+used to construct `drilldown_id` and detail paths; governed execution occurs
+inside the derived hook. The migration therefore does not rename drilldown files
+as an incidental consequence of moving measure authority.
+
 The executor does not branch on concepts such as rent, OPEX, funding, or draws.
 Those meanings live in the contracts.
 
 ## Deliberately deferred IDs
 
-The following metadata IDs remain on the legacy path:
+The following funding metadata IDs remain on the legacy path:
 
 - `flow.funding_contribution.by_actor`
 - `flow.funding_contribution.by_channel`
@@ -48,9 +53,16 @@ obligation and debt-linked support rows in addition to
 flow would therefore be a false simplification. They require a separate
 multi-semantic support-membership contract.
 
-Likewise, an FX spec that requires `Box` is not broadened when a producer row
-omits Box. Missing contract grain fails closed or remains on its existing
-compatibility path; the executor never silently drops a required dimension.
+The three current atomic FX IDs are also deferred:
+
+- `flow.fx.conversion_proceeds`
+- `flow.fx.conversion_outflow`
+- `flow.fx.cost_or_spread`
+
+Their v1 `FlowCellSpec` grain currently requires `Box`, while native operating
+statement rows may represent a total by period/Currency without Box. The
+migration does not silently drop that grain. A later contract change must model
+FX total-vs-by-box explicitly before these IDs enter the generic executor.
 
 ## Compatibility boundary
 
@@ -59,6 +71,7 @@ The following remain explicitly outside the governed atomic-flow executor:
 - all-measures diagnostics;
 - unknown/review visibility;
 - signed net-flow views;
+- FX atomic rows whose total/by-box grain is not yet explicit;
 - FX net views;
 - debt net views;
 - multi-semantic funding/support;
