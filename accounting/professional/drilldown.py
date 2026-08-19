@@ -21,6 +21,10 @@ from accounting.contracts.atomic_flow_drilldowns import (
 )
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.professional import drilldown_legacy as _legacy
+from accounting.professional.debt_position_executor import (
+    execute_annual_debt_position,
+    execute_monthly_debt_position,
+)
 
 
 # Re-export the historical public/private surface so existing callers and
@@ -32,6 +36,10 @@ for _name in dir(_legacy):
 
 _ORIGINAL_SPEC_FOR_CELL = _legacy._spec_for_cell
 _ORIGINAL_BUILD_DERIVED_CELL = _legacy._build_derived_cell
+_ORIGINAL_BUILD_DEBT_POSITION_CELL = _legacy._build_debt_position_cell
+_ORIGINAL_BUILD_ANNUAL_DEBT_STOCK_COMPANION_CELL = (
+    _legacy._build_annual_debt_stock_companion_cell
+)
 
 # These IDs are intentionally deferred because their current professional
 # surfaces are broader than the corresponding atomic FlowCellSpec contract.
@@ -313,6 +321,58 @@ def _execute_governed_derived_flow(
     )
 
 
+def _build_debt_position_cell(
+    *,
+    row: pd.Series,
+    period: str,
+    display_value: float,
+    debt_position: pd.DataFrame,
+    tolerance: float,
+):
+    governed = execute_monthly_debt_position(
+        row=row,
+        period=period,
+        display_value=display_value,
+        debt_position=debt_position,
+        tolerance=tolerance,
+    )
+    if governed is not None:
+        return governed
+    return _ORIGINAL_BUILD_DEBT_POSITION_CELL(
+        row=row,
+        period=period,
+        display_value=display_value,
+        debt_position=debt_position,
+        tolerance=tolerance,
+    )
+
+
+def _build_annual_debt_stock_companion_cell(
+    *,
+    row: pd.Series,
+    period: str,
+    display_value: float,
+    debt_position: pd.DataFrame,
+    tolerance: float,
+):
+    governed = execute_annual_debt_position(
+        row=row,
+        period=period,
+        display_value=display_value,
+        debt_position=debt_position,
+        tolerance=tolerance,
+    )
+    if governed is not None:
+        return governed
+    return _ORIGINAL_BUILD_ANNUAL_DEBT_STOCK_COMPANION_CELL(
+        row=row,
+        period=period,
+        display_value=display_value,
+        debt_position=debt_position,
+        tolerance=tolerance,
+    )
+
+
 def _build_derived_cell(
     *,
     table_id: str,
@@ -365,11 +425,13 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
     return _legacy._fx_treasury_measure_for_row(table_id, row)
 
 
-# Patch only the two routing hooks used by the historical orchestration. The
+# Patch only the routing hooks used by the historical orchestration. The
 # orchestration itself remains unchanged, so generated index/detail/QA contracts
-# are preserved while governed rows bypass local semantic routing.
+# are preserved while governed rows bypass local semantic/snapshot routing.
 _legacy._spec_for_cell = _spec_for_cell
 _legacy._build_derived_cell = _build_derived_cell
+_legacy._build_debt_position_cell = _build_debt_position_cell
+_legacy._build_annual_debt_stock_companion_cell = _build_annual_debt_stock_companion_cell
 
 build_professional_flow_drilldowns = _legacy.build_professional_flow_drilldowns
 main = _legacy.main
