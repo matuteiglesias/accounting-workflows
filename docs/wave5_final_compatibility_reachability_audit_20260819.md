@@ -8,6 +8,8 @@ The accounting invariant is:
 
 > A modern cell with a governed identity must execute through that authority. Compatibility may adapt historical metadata or historical schemas, but it may not redefine a governed membership, measure, stock selector, activity selector, cash population, or derived formula.
 
+A historical `CellSpec` may still supply derived-table path/filename identity so existing drilldown addresses remain stable. That is metadata compatibility, not matched-value authority: when a governed ID is present, actual accounting execution must bypass the legacy derived executor.
+
 Pipeline scope remains:
 
 `ledger canonicalization → materialization → semantic marts → debt → metrics → human reports → professional pack → drilldowns`.
@@ -44,7 +46,7 @@ The final inventory contains 24 explicit surfaces:
 | `REQUIRED_COMPATIBILITY` | 16 | Still reachable for historical schema, diagnostic/presentation surface, public API, or preserved lineage. Not a production authority override. |
 | `UPSTREAM_FIX_REQUIRED` | 5 | Modern specialized surface cannot be removed safely without first defining the missing contract/grain/identity. |
 | `DEAD` | 3 | Prior reachability evidence proves the legacy branch cannot be selected after modern producer enrichment. |
-| `MODERN_REACHABLE_BUG` | 0 | No accidental modern governed identity was found falling through to a competing legacy authority. |
+| `MODERN_REACHABLE_BUG` | 0 | No accidental modern governed identity was found falling through to a competing legacy execution authority. |
 
 The machine-readable source is `diagnostics/final_compatibility_reachability_20260819.csv`.
 
@@ -102,6 +104,8 @@ DrilldownResult / professional evidence
 
 Human labels remain in metadata adapters only. `DerivedMetricSpec` and its executor are label-free. Compatibility metric inference cannot opt a row into FlowCellSpec execution unless stable producer metadata independently proves the ID.
 
+PR19 explicitly monkeypatches the legacy **execution** fallback to raise and proves governed atomic/derived cells still reconcile. Thus legacy path metadata cannot become a competing accounting authority.
+
 ## Explicit upstream-fix families
 
 Five inventory entries are not classified as bugs because the deferral is explicit and contract insufficiency is known.
@@ -139,7 +143,7 @@ The fixture contains:
 - ARS Property Management OPEX = 30;
 - ARS Household expense = 999.
 
-The modern `property_opex_true` professional cell must reconcile to **30**, with `governed_atomic_flow` lineage, and its detail must not contain Household. This is an adversarial semantic-leakage test, not merely a pipeline-success test.
+The modern `property_opex_true` professional cell reconciles to **30**, with `governed_atomic_flow` lineage, and its detail does not contain Household. This is an adversarial semantic-leakage test, not merely a pipeline-success test.
 
 ### FB/PM fixture
 
@@ -185,12 +189,14 @@ PR19 closes only if the regression suite demonstrates all of the following toget
 - native currencies remain separate;
 - Household cannot leak back into property OPEX through the professional layer;
 - missing derived inputs do not become invented zeroes;
-- a governed identity cannot call its legacy fallback;
+- a governed identity cannot call its legacy **execution** fallback;
 - professional drilldowns expose governed lineage type;
 - all remaining compatibility routes are explicitly classified;
 - only prior-evidence `DEAD` branches are candidates for immediate deletion.
 
 CI success alone is not sufficient; the representative pack and semantic-authority assertions are part of the gate.
+
+Final validation on the stacked branch: **281 passed, 1 pre-existing warning**. The warning is the previously characterized `pd.to_datetime` warning in the legacy debt-position helper.
 
 ## Physical architecture after closure
 
@@ -217,7 +223,7 @@ semantic_measure_registry
                                       professional evidence
 ```
 
-The remaining compatibility monolith still hosts orchestration and historical adapters, but it no longer has permission to override a stable governed identity.
+The remaining compatibility monolith still hosts orchestration and historical adapters, but it no longer has permission to override a stable governed execution identity.
 
 ## Recommended post-Wave-5 cleanup
 
