@@ -8,6 +8,8 @@ position selector, then regenerates contract and QA artifacts.
 
 The semantic-measure authority remains intentionally visible at this public
 entrypoint even though non-cash annual production delegates to annual_legacy.
+The preserved projector resolves ``resolve_semantic_measure`` and then reads
+``rows[measure]``; PR15B does not change that authority.
 """
 
 from pathlib import Path
@@ -110,8 +112,6 @@ def build_annual_balance_dashboard(
                 selected = select_validated_cash_year(
                     cash, year=year, currency=currency, box=box
                 )
-                # Emit an explicit unavailable row only when this Box has source
-                # rows in the year. Do not manufacture empty Box/Currency crosses.
                 has_box_source = (
                     cash["period"].fillna("").astype(str).str.startswith(f"{year}-")
                     & cash["Currency"].fillna("").astype(str).str.strip().eq(currency)
