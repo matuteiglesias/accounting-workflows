@@ -19,6 +19,10 @@ from accounting.debt.balance_views import (
     resolve_effective_end_date,
 )
 from accounting.marts.cash import build_monthly_cash_close
+from accounting.support.latest import (
+    assert_latest_target_publishable,
+    update_scoped_latest,
+)
 
 
 def _write_cutoff_manifest(run_root: Path, cutoff_date: str = "2026-07-31") -> None:
@@ -122,3 +126,29 @@ def test_validated_cash_at_cutoff_remains_frontend_safe(tmp_path):
     assert len(selected) == 1
     assert selected.iloc[0]["as_of_date"] == "2026-07-31"
     assert bool(selected.iloc[0]["is_frontend_safe"]) is True
+
+
+def test_cutoff_run_cannot_silently_replace_latest_pointers(tmp_path):
+    out_root = tmp_path / "out"
+    run_base = out_root / "run" / "accounting"
+    metrics_base = out_root / "metrics"
+    old_id = "20260820T120000Z_FBPM"
+    cutoff_id = "20260820T160000Z_FBPM"
+
+    (run_base / old_id).mkdir(parents=True)
+    cutoff_root = run_base / cutoff_id
+    _write_cutoff_manifest(cutoff_root)
+    (metrics_base / cutoff_id).mkdir(parents=True)
+
+    update_scoped_latest(run_base, old_id, "FBPM")
+    before = (run_base / "latest_FBPM").readlink()
+
+    with pytest.raises(ValueError, match="Refusing to move latest pointers"):
+        assert_latest_target_publishable([run_base, metrics_base], cutoff_id)
+
+    assert (run_base / "latest_FBPM").readlink() == before
+    assert_latest_target_publishable(
+        [run_base, metrics_base],
+        cutoff_id,
+        allow_cutoff_latest=True,
+    )
