@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
+from accounting.cutoff import load_run_cutoff_if_present
 from accounting.scope import canonical_scope_tag, parse_box_scope
 
 PRIMARY_SCOPE_TAG = "FBPM"
@@ -49,14 +50,49 @@ def update_primary_compatibility_latest(base: Path, target: str, scope_tag: str)
     return plain
 
 
+def cutoff_for_latest_target(bases: list[Path], target: str):
+    """Return a Stage A cutoff found among target surfaces, before mutating pointers."""
+    for base in bases:
+        cutoff = load_run_cutoff_if_present(Path(base) / target)
+        if cutoff is not None:
+            return cutoff
+    return None
+
+
+def assert_latest_target_publishable(
+    bases: list[Path],
+    target: str,
+    *,
+    allow_cutoff_latest: bool = False,
+) -> None:
+    """Protect ordinary latest pointers from silently becoming historical backfills."""
+    cutoff = cutoff_for_latest_target(bases, target)
+    if cutoff is not None and not allow_cutoff_latest:
+        raise ValueError(
+            "Refusing to move latest pointers to a historical cutoff run "
+            f"({target}, cutoff={cutoff.date}). Use the exact run paths, or pass "
+            "--allow-cutoff-latest only for a deliberate publication decision."
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", action="append", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--scope-tag")
     parser.add_argument("--boxes")
+    parser.add_argument(
+        "--allow-cutoff-latest",
+        action="store_true",
+        help="Explicitly permit historical cutoff runs to replace latest pointers.",
+    )
     args = parser.parse_args()
     tag = args.scope_tag or canonical_scope_tag(parse_box_scope(args.boxes))
+    assert_latest_target_publishable(
+        args.base,
+        args.target,
+        allow_cutoff_latest=bool(args.allow_cutoff_latest),
+    )
     for base in args.base:
         update_scoped_latest(base, args.target, tag)
 
