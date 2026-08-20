@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from accounting.core.timeseries import period_bins_for_dates
+from accounting.cutoff import cutoff_metadata, normalize_cutoff_date
 from accounting.logging_utils import configure_logging, get_logger
 from accounting.scope import box_scope_mask, canonical_box_name, parse_box_scope, scope_metadata
 
@@ -217,6 +218,30 @@ def filter_ledger_statuses(df: pd.DataFrame, statuses: Optional[Sequence[str]]) 
     out = df.loc[mask].copy()
     if "anomalies" in df.attrs:
         out.attrs["anomalies"] = df.attrs["anomalies"]
+    return out
+
+
+def filter_ledger_cutoff(df: pd.DataFrame, cutoff_date: str | None) -> pd.DataFrame:
+    """Bound a scoped all-status ledger once, retaining missing-date evidence."""
+    if not cutoff_date:
+        return df.copy()
+    cutoff = pd.Timestamp(normalize_cutoff_date(cutoff_date))
+    dates = pd.to_datetime(df["Date"], errors="coerce").dt.normalize()
+    keep = dates.isna() | dates.le(cutoff)
+    out = df.loc[keep].copy()
+
+    anomalies = df.attrs.get("anomalies")
+    if isinstance(anomalies, pd.DataFrame):
+        retained = out[["tx_id", "source_file", "source_row"]].copy()
+        retained["source_row"] = pd.to_numeric(retained["source_row"], errors="coerce").astype("Int64")
+        evidence = anomalies.copy()
+        evidence["source_row"] = pd.to_numeric(evidence["source_row"], errors="coerce").astype("Int64")
+        evidence = evidence.merge(
+            retained.drop_duplicates(),
+            on=["tx_id", "source_file", "source_row"],
+            how="inner",
+        )
+        out.attrs["anomalies"] = evidence
     return out
 
 
@@ -632,6 +657,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sheet-name", help="Sheet/tab name (when using Google Sheets)", default=os.getenv("SHEET_NAME", "C. Long Ledger"))
     p.add_argument("--out-dir", help="Output directory", default=os.getenv("OUT_DIR", "./out"))
     p.add_argument("--probe-fingerprint", action="store_true", default=False, help="Print stable ledger fingerprint and exit")
+    p.add_argument(
+        "--cutoff-date",
+        default=os.getenv("CUTOFF_DATE", ""),
+        help="Optional YYYY-MM-DD run horizon. Valid dated facts after this date are excluded before status recognition.",
+    )
 
     p.add_argument(
         "--exclude-household",
@@ -674,18 +704,20 @@ def _parse_list_arg(s: str) -> Optional[List[str]]:
 
 
 
-
 def main() -> int:
     configure_logging()
 
     args = parse_args()
     only_status = _parse_list_arg(args.only_status)
     boxes = parse_box_scope(args.boxes) if args.boxes is not None else None
+    cutoff_date = normalize_cutoff_date(args.cutoff_date) if str(args.cutoff_date).strip() else None
 
     from accounting.artifacts.manifest import artifact_from_path, append_artifacts, write_stage_manifest
     from accounting.support.run_id import resolve_run_id
 
     if args.probe_fingerprint:
+        if cutoff_date:
+            raise ValueError("--cutoff-date applies to materialized runs, not --probe-fingerprint")
         fp = compute_ledger_fingerprint(
             fixture_path=args.fixture or None,
             sheet_url=args.sheet_url or None,
@@ -707,7 +739,7 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    LOG.info("Stage start mode=%s out_dir=%s", args.mode, out_dir)
+    LOG.info("Stage start mode=%s out_dir=%s cutoff_date=%s", args.mode, out_dir, cutoff_date)
 
     ledger_all_status = build_ledger_base(
         fixture_path=args.fixture or None,
@@ -724,6 +756,7 @@ def main() -> int:
         add_time_period=bool(args.add_time_period),
         time_freq=str(args.time_freq),
     )
+    ledger_all_status = filter_ledger_cutoff(ledger_all_status, cutoff_date)
     ledger = filter_ledger_statuses(ledger_all_status, only_status)
 
     ledger_path = out_dir / "ledger_canonical.csv"
@@ -806,6 +839,7 @@ def main() -> int:
                 "fx_rates": bool(args.fx_rates),
                 "base_currency": args.base_currency,
                 **(scope_metadata(boxes) if boxes is not None else {}),
+                **(cutoff_metadata(cutoff_date) if cutoff_date is not None else {}),
             },
             "outputs": out_arts,
             "warnings": [],
