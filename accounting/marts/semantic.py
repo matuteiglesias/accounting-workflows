@@ -8,6 +8,7 @@ import pandas as pd
 
 from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.contracts.semantic_measures import resolve_semantic_measure
+from accounting.marts.treasury import build_monthly_box_treasury_flow
 
 RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
 RULE_REGISTRY_COLUMNS = [
@@ -332,6 +333,9 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     audit["review_required"] = audit["review_required"].astype(bool)
     period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
     audit = audit[AUDIT_COLUMNS]
+    treasury_paths = build_monthly_box_treasury_flow(
+        audit, out_dir=out_dir, freq=freq
+    )
 
     summary = audit.groupby(["period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status", "review_required", "rule_id"], dropna=False).agg(
         amount_total=("amount", "sum"), amount_abs_total=("amount", lambda s: s.abs().sum()), n_tx=("tx_id", "count"),
@@ -370,6 +374,7 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
         "semantic_leakage_qa": out_dir / "semantic_leakage_qa.csv",
         "semantic_dashboard_coverage": out_dir / "semantic_dashboard_coverage.csv",
     }
+    paths.update(treasury_paths)
     rule_registry.to_csv(paths["semantic_rule_registry"], index=False)
     audit.to_csv(paths["classification_audit"], index=False)
     summary.to_csv(paths["classification_audit_summary"], index=False)
