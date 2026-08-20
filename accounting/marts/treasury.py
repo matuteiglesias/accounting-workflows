@@ -316,3 +316,383 @@ def build_monthly_box_treasury_flow(
     }
 
 
+def _cash_component(category: str, direction: str) -> str:
+    if direction == "in":
+        return {
+            "rent": "rent_in",
+            "funding": "funding_cash_in",
+            "debt_principal": "debt_principal_in",
+            "debt_repayment": "debt_repayment_in",
+            "debt_interest": "debt_interest_in",
+            "internal_transfer": "internal_transfer_in",
+            "fx_conversion": "fx_in",
+            "unknown": "unknown_cash_in",
+        }.get(category, "other_cash_in")
+    return {
+        "taxes": "taxes_out",
+        "services": "services_out",
+        "maintenance": "maintenance_out",
+        "legal": "legal_out",
+        "personal_draws": "personal_draws_out",
+        "dividends": "dividends_out",
+        "debt_principal": "debt_principal_out",
+        "debt_repayment": "debt_repayments_out",
+        "debt_interest": "debt_interest_out",
+        "internal_transfer": "internal_transfer_out",
+        "fx_conversion": "fx_out",
+        "fx_cost": "fx_cost_out",
+        "unknown": "unknown_cash_out",
+    }.get(category, "other_cash_out")
+
+
+def _noncash_component(category: str) -> str:
+    if category == "taxes":
+        return "direct_tax_support_non_cash"
+    if category == "services":
+        return "direct_service_support_non_cash"
+    return "other_non_cash_support"
+
+
+def _load_monthly_motor(run_root: Path, name: str, *, flow: bool) -> pd.DataFrame:
+    path = run_root / f"{name}.freq=M.csv"
+    df = _motor_frame(path, flow=flow)
+    if df.empty:
+        raise FileNotFoundError(f"Missing monthly treasury motor: {path}")
+    return df
+
+
+def _period_end(period: str) -> str:
+    return pd.Period(str(period), freq="M").end_time.date().isoformat()
+
+
+def _numeric(value: Any) -> float:
+    parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return 0.0 if pd.isna(parsed) else float(parsed)
+
+
+def build_monthly_cash_accountability(
+    run_root: Path,
+    *,
+    tolerance: float = TOLERANCE,
+) -> Dict[str, Path]:
+    """Assemble report-safe monthly treasury accountability after debt resolution."""
+    run_root = Path(run_root)
+    flow_path = run_root / "monthly_box_treasury_flow.csv"
+    if not flow_path.exists():
+        raise FileNotFoundError(f"Missing canonical treasury flow: {flow_path}")
+    treasury = pd.read_csv(flow_path)
+
+    raw_balance = pd.read_csv(run_root / "box_balance_time_long.freq=M.csv")
+    raw_balance = raw_balance.rename(
+        columns={
+            "TimePeriod": "period",
+            "TimePeriod_end": "period_end",
+            "net": "box_motor_net",
+            "cum_net": "closing_control",
+        }
+    )
+    required_balance = {
+        "period", "period_end", "Box", "Currency", "box_motor_net", "closing_control"
+    }
+    missing_balance = sorted(required_balance - set(raw_balance.columns))
+    if missing_balance:
+        raise ValueError(f"box balance missing accountability columns: {missing_balance}")
+    for col in ["box_motor_net", "closing_control"]:
+        raw_balance[col] = pd.to_numeric(raw_balance[col], errors="coerce").fillna(0.0)
+    controls = raw_balance[
+        ["period", "period_end", "Box", "Currency", "box_motor_net", "closing_control"]
+    ].copy()
+    box_flow = _load_monthly_motor(
+        run_root, "box_flow_balance_time_long", flow=True
+    ).rename(columns={"net": "box_flow_net"})
+
+    records: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for _, row in controls.iterrows():
+        key = (_text(row["period"]), _text(row["Box"]), _text(row["Currency"]))
+        records[key] = {
+            "period": key[0],
+            "period_end": _text(row["period_end"]) or _period_end(key[0]),
+            "Box": key[1],
+            "Currency": key[2],
+            **{col: 0.0 for col in ACCOUNTABILITY_COMPONENT_COLUMNS},
+            "n_tx": 0,
+            "n_review_required": 0,
+        }
+
+    relevant_basis = {"actual_cash", "non_cash_support", "internal_box_transfer"}
+    for _, row in treasury.iterrows():
+        key = (_text(row["period"]), _text(row["Box"]), _text(row["Currency"]))
+        rec = records.setdefault(
+            key,
+            {
+                "period": key[0],
+                "period_end": _text(row.get("period_end")) or _period_end(key[0]),
+                "Box": key[1],
+                "Currency": key[2],
+                **{col: 0.0 for col in ACCOUNTABILITY_COMPONENT_COLUMNS},
+                "n_tx": 0,
+                "n_review_required": 0,
+            },
+        )
+        basis = _text(row["movement_basis"])
+        if basis == "actual_cash":
+            direction = _text(row["cash_direction"])
+            col = _cash_component(_text(row["cash_category"]), direction)
+            amount = row["amount_in"] if direction == "in" else row["amount_out"]
+            rec[col] += _numeric(amount)
+        elif basis == "non_cash_support":
+            col = _noncash_component(_text(row["cash_category"]))
+            rec[col] += _numeric(row["non_cash_amount"])
+        if basis in relevant_basis:
+            rec["n_tx"] += int(_numeric(row.get("n_tx", 0)))
+            rec["n_review_required"] += int(_numeric(row.get("n_review_required", 0)))
+
+    out = pd.DataFrame(records.values())
+    out = out.merge(
+        controls,
+        on=["period", "period_end", "Box", "Currency"],
+        how="left",
+    ).merge(
+        box_flow,
+        on=["period", "Box", "Currency"],
+        how="left",
+    )
+    if out[["box_motor_net", "closing_control", "box_flow_net"]].isna().any().any():
+        bad = out.loc[
+            out[["box_motor_net", "closing_control", "box_flow_net"]].isna().any(axis=1),
+            ["period", "Box", "Currency"],
+        ].to_dict("records")
+        raise ValueError(f"Treasury accountability missing motor key(s): {bad[:10]}")
+
+    cash_in_cols = [c for c in ACCOUNTABILITY_COMPONENT_COLUMNS if c.endswith("_in")]
+    cash_out_cols = [c for c in ACCOUNTABILITY_COMPONENT_COLUMNS if c.endswith("_out")]
+    out["total_cash_in"] = out[cash_in_cols].sum(axis=1)
+    out["total_cash_out"] = out[cash_out_cols].sum(axis=1)
+    out["net_cash_flow"] = out["total_cash_in"] - out["total_cash_out"]
+    out["opening_control"] = out["closing_control"] - out["box_motor_net"]
+    out["reconciliation_gap"] = out["net_cash_flow"] - out["box_motor_net"]
+    motor_gap = out["box_flow_net"] - out["box_motor_net"]
+    control_gap = out["opening_control"] + out["net_cash_flow"] - out["closing_control"]
+    hard_gap = pd.concat(
+        [out["reconciliation_gap"].abs(), motor_gap.abs(), control_gap.abs()],
+        axis=1,
+    ).max(axis=1)
+    out["reconciliation_status"] = hard_gap.le(tolerance).map(
+        {True: "reconciled", False: "fail"}
+    )
+    if out["reconciliation_status"].eq("fail").any():
+        bad = out.loc[
+            out["reconciliation_status"].eq("fail"),
+            ["period", "Box", "Currency", "reconciliation_gap"],
+        ].to_dict("records")
+        raise ValueError(f"Monthly cash accountability hard reconciliation failed: {bad[:10]}")
+
+    cutoff = load_run_cutoff_if_present(run_root)
+    out["control_as_of_date"] = out["period_end"].astype(str)
+    if cutoff is not None:
+        cutoff_period = cutoff.date[:7]
+        out.loc[out["period"].astype(str).eq(cutoff_period), "control_as_of_date"] = cutoff.date
+
+    cash_path = run_root / "monthly_cash_close.csv"
+    cash = pd.read_csv(cash_path) if cash_path.exists() else pd.DataFrame()
+    selected_meta: list[dict[str, Any]] = []
+    for _, row in out.iterrows():
+        if cash.empty:
+            selected_meta.append({
+                "validated_cash_close": pd.NA,
+                "validated_cash_status": "unavailable",
+                "validated_cash_reason": "missing_source",
+                "validated_as_of_date": "",
+                "validated_account_count": 0,
+                "validated_anchor_offset": pd.NA,
+                "anchor_reconciliation_gap": pd.NA,
+                "anchor_alignment_status": "unavailable",
+            })
+            continue
+        selection = select_validated_cash_period(
+            cash,
+            period=_text(row["period"]),
+            currency=_text(row["Currency"]),
+            box=_text(row["Box"]),
+        )
+        if not selection.available:
+            selected_meta.append({
+                "validated_cash_close": pd.NA,
+                "validated_cash_status": selection.status,
+                "validated_cash_reason": selection.reason,
+                "validated_as_of_date": "",
+                "validated_account_count": 0,
+                "validated_anchor_offset": pd.NA,
+                "anchor_reconciliation_gap": pd.NA,
+                "anchor_alignment_status": "unavailable",
+            })
+            continue
+        dates = sorted(
+            selection.selected["as_of_date"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .loc[lambda s: s.ne("")]
+            .unique()
+            .tolist()
+        )
+        coherent_date = dates[0] if len(dates) == 1 else ""
+        eligible = bool(
+            coherent_date and coherent_date == _text(row["control_as_of_date"])
+        )
+        offset = (
+            float(selection.value) - float(row["closing_control"])
+            if eligible and selection.value is not None
+            else pd.NA
+        )
+        reason = ""
+        if not eligible:
+            reason = (
+                "anchor_date_misaligned"
+                if len(dates) == 1
+                else "selected_accounts_have_mixed_as_of_dates"
+            )
+        selected_meta.append({
+            "validated_cash_close": float(selection.value) if selection.value is not None else pd.NA,
+            "validated_cash_status": "available",
+            "validated_cash_reason": reason,
+            "validated_as_of_date": ";".join(dates),
+            "validated_account_count": int(len(selection.selected)),
+            "validated_anchor_offset": offset,
+            "anchor_reconciliation_gap": pd.NA,
+            "anchor_alignment_status": "pending" if eligible else "unavailable",
+        })
+    out = pd.concat([out.reset_index(drop=True), pd.DataFrame(selected_meta)], axis=1)
+
+    out = out.sort_values(["Box", "Currency", "period"]).reset_index(drop=True)
+    for _, idx in out.groupby(["Box", "Currency"], sort=False).groups.items():
+        prior_offset: float | None = None
+        for i in idx:
+            value = pd.to_numeric(
+                pd.Series([out.at[i, "validated_anchor_offset"]]), errors="coerce"
+            ).iloc[0]
+            if pd.isna(value):
+                continue
+            value = float(value)
+            if prior_offset is None:
+                out.at[i, "anchor_alignment_status"] = "first_anchor"
+                out.at[i, "anchor_reconciliation_gap"] = pd.NA
+            else:
+                gap = value - prior_offset
+                out.at[i, "anchor_reconciliation_gap"] = gap
+                out.at[i, "anchor_alignment_status"] = (
+                    "reconciled" if abs(gap) <= tolerance else "residual"
+                )
+            prior_offset = value
+
+    debt_path = run_root / "monthly_debt_activity.csv"
+    debt = pd.read_csv(debt_path) if debt_path.exists() else pd.DataFrame()
+    if not debt.empty:
+        debt["repayments"] = pd.to_numeric(debt["repayments"], errors="coerce").fillna(0.0)
+        repayment = debt.loc[debt["activity_type"].astype(str).eq("repayment")].copy()
+        debt_repayments = (
+            repayment.groupby(["period", "debtor", "Currency"], dropna=False, as_index=False)["repayments"]
+            .sum()
+        )
+        coverage = set(zip(debt["debtor"].astype(str), debt["Currency"].astype(str)))
+    else:
+        debt_repayments = pd.DataFrame(columns=["period", "debtor", "Currency", "repayments"])
+        coverage = set()
+
+    engine_vals = []
+    for _, row in out.iterrows():
+        pair = (_text(row["Box"]), _text(row["Currency"]))
+        if pair not in coverage:
+            engine_vals.append((pd.NA, pd.NA, "unavailable"))
+            continue
+        match = debt_repayments.loc[
+            debt_repayments["period"].astype(str).eq(_text(row["period"]))
+            & debt_repayments["debtor"].astype(str).eq(_text(row["Box"]))
+            & debt_repayments["Currency"].astype(str).eq(_text(row["Currency"]))
+        ]
+        engine = float(match["repayments"].sum()) if not match.empty else 0.0
+        gap = float(row["debt_repayments_out"]) - engine
+        engine_vals.append(
+            (engine, gap, "reconciled" if abs(gap) <= tolerance else "residual")
+        )
+    out["debt_engine_repayments"] = [v[0] for v in engine_vals]
+    out["debt_repayment_gap"] = [v[1] for v in engine_vals]
+    out["debt_reconciliation_status"] = [v[2] for v in engine_vals]
+
+    qa_rows: list[dict[str, Any]] = [
+        {
+            "check": "cash_components_reconcile_to_box_motor",
+            "period": "", "Box": "", "Currency": "",
+            "amount": float(out["reconciliation_gap"].abs().max()) if not out.empty else 0.0,
+            "status": "pass", "severity": "error",
+            "detail": "total_cash_in-total_cash_out equals physical Box motor net",
+        },
+        {
+            "check": "opening_plus_net_equals_closing_control",
+            "period": "", "Box": "", "Currency": "",
+            "amount": float(control_gap.abs().max()) if not out.empty else 0.0,
+            "status": "pass", "severity": "error",
+            "detail": "zero-origin inferred control only; not validated liquidity",
+        },
+    ]
+    for _, row in out.iterrows():
+        unknown = float(row["unknown_cash_in"]) + float(row["unknown_cash_out"])
+        if abs(unknown) > tolerance:
+            qa_rows.append({
+                "check": "unknown_actual_cash_visible",
+                "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
+                "amount": unknown, "status": "warn", "severity": "warning",
+                "detail": "actual Box cash exists with unknown semantic classification",
+            })
+        if int(row["n_review_required"]) > 0:
+            qa_rows.append({
+                "check": "review_required_cash_or_support_visible",
+                "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
+                "amount": float(row["n_review_required"]),
+                "status": "warn", "severity": "warning",
+                "detail": "review-required treasury evidence remains visible",
+            })
+        if row["debt_reconciliation_status"] == "residual":
+            qa_rows.append({
+                "check": "cash_debt_repayment_matches_debt_engine",
+                "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
+                "amount": row["debt_repayment_gap"], "status": "warn", "severity": "warning",
+                "detail": "cash says money moved; debt engine says how much was allocated",
+            })
+        if row["anchor_alignment_status"] == "residual":
+            qa_rows.append({
+                "check": "validated_anchor_offsets_align",
+                "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
+                "amount": row["anchor_reconciliation_gap"], "status": "warn", "severity": "warning",
+                "detail": "validated cash anchors imply inconsistent opening offset",
+            })
+
+    out = out[ACCOUNTABILITY_COLUMNS].sort_values(
+        ["period", "Box", "Currency"]
+    ).reset_index(drop=True)
+    accountability_path = run_root / "monthly_cash_accountability.csv"
+    qa_path = run_root / "monthly_cash_accountability_qa.csv"
+    out.to_csv(accountability_path, index=False)
+    pd.DataFrame(qa_rows, columns=ACCOUNTABILITY_QA_COLUMNS).to_csv(qa_path, index=False)
+    return {
+        "monthly_cash_accountability": accountability_path,
+        "monthly_cash_accountability_qa": qa_path,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build monthly Box cash accountability after debt resolution."
+    )
+    parser.add_argument("--run-root", required=True)
+    parser.add_argument("--tolerance", type=float, default=TOLERANCE)
+    args = parser.parse_args()
+    paths = build_monthly_cash_accountability(
+        Path(args.run_root), tolerance=args.tolerance
+    )
+    for path in paths.values():
+        print(f"Wrote: {path}")
+
+
+if __name__ == "__main__":
+    main()
