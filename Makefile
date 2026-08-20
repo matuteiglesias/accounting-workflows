@@ -589,6 +589,9 @@ _run_debt_balance_action:
 		test -s "$(RUN_OUT)/monthly_debt_position_qa.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_activity.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_activity_qa.csv"; \
+		$(PY) -m accounting.marts.treasury --run-root "$(RUN_OUT)"; \
+		test -s "$(RUN_OUT)/monthly_cash_accountability.csv"; \
+		test -s "$(RUN_OUT)/monthly_cash_accountability_qa.csv"; \
 	'
 
 

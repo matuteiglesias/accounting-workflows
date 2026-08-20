@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from accounting.marts.semantic import _infer_box_party
+from accounting.box_cash import infer_box_party
 
 
 REQUIRED_COLUMNS = {"tx_id", "amount", "Currency", "Box", "payer", "receiver"}
@@ -41,7 +41,7 @@ def build_amount_direction_diagnostic(
     work.loc[work["amount_numeric"].eq(0), "amount_sign"] = "zero"
     work.loc[work["amount_numeric"].gt(0), "amount_sign"] = "positive"
 
-    box_party = work["Box"].map(_infer_box_party).str.upper()
+    box_party = work["Box"].map(infer_box_party).str.upper()
     payer_is_box = work["payer"].str.strip().str.upper().eq(box_party) & box_party.ne("")
     receiver_is_box = work["receiver"].str.strip().str.upper().eq(box_party) & box_party.ne("")
     work["party_direction"] = "neither"

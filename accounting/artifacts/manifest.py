@@ -59,6 +59,8 @@ SOURCE_AUTHORITIES = [
     "source_of_truth_for_debt_activity",
     "frontend_contract",
     "source_of_truth_for_semantic_rules",
+    "source_of_truth_for_treasury_flow",
+    "derived_treasury_accountability",
     "diagnostic_evidence",
     "semantic_coverage_contract",
     "derived_valuation_evidence",
@@ -179,6 +181,36 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "safe_with_caveat",
             "source_authority": "source_of_truth",
             "notes": "Canonical monthly semantic flow split.",
+        }
+    if key == "monthly_box_treasury_flow.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "flow",
+            "grain": "monthly",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "source_of_truth_for_treasury_flow",
+            "notes": "Canonical effective Box cash movement; actual cash requires physical Box-counterparty evidence.",
+        }
+    if key == "monthly_cash_accountability.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "mixed",
+            "grain": "monthly",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "derived_treasury_accountability",
+            "notes": "Monthly treasury accountability composed from governed treasury flow, inferred Box control, validated cash selection, and debt activity cross-checks.",
+        }
+    if key in {"monthly_box_treasury_flow_qa.csv", "monthly_cash_accountability_qa.csv"}:
+        return {
+            "artifact_role": "qa",
+            "accounting_nature": "quality",
+            "grain": "monthly",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only",
+            "source_authority": "diagnostic_evidence",
+            "notes": "Treasury reconciliation evidence; hard motor identities fail closed while debt/anchor residuals remain visible.",
         }
     if key == "monthly_operating_statement.csv":
         return {
