@@ -5,6 +5,8 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from accounting.cutoff import load_run_cutoff_if_present
+
 CASH_CLOSE_COLUMNS = [
     "period",
     "period_end",
@@ -62,6 +64,31 @@ def _explicitly_validated(validated: pd.DataFrame) -> pd.Series:
     )
 
 
+def _assert_validated_cash_within_cutoff(
+    validated: pd.DataFrame,
+    explicit_mask: pd.Series,
+    *,
+    cutoff_date: str,
+) -> None:
+    """Fail closed when independent validated cash evidence exceeds the run horizon."""
+    if not explicit_mask.any():
+        return
+    dates = pd.to_datetime(validated.loc[explicit_mask, "as_of_date"], errors="coerce")
+    if dates.isna().any():
+        rows = validated.loc[dates.index[dates.isna()], ["account_id", "as_of_date"]].to_dict("records")
+        raise ValueError(
+            "Validated cash rows in a cutoff run require parseable as_of_date: "
+            f"{rows[:5]}"
+        )
+    future = dates.gt(pd.Timestamp(cutoff_date))
+    if future.any():
+        rows = validated.loc[dates.index[future], ["account_id", "as_of_date"]].to_dict("records")
+        raise ValueError(
+            "validated_cash_close.csv contains frontend-safe evidence after immutable "
+            f"Stage A cutoff {cutoff_date}: {rows[:5]}"
+        )
+
+
 def build_monthly_cash_close(out_dir: Path, freq: str = "M") -> Dict[str, Path]:
     out_dir = Path(out_dir)
     daily_path = out_dir / "daily_cash_position.csv"
@@ -69,6 +96,7 @@ def build_monthly_cash_close(out_dir: Path, freq: str = "M") -> Dict[str, Path]:
     validated_path = out_dir / "validated_cash_close.csv"
     close_path = out_dir / "monthly_cash_close.csv"
     qa_path = out_dir / "monthly_cash_close_qa.csv"
+    run_cutoff = load_run_cutoff_if_present(out_dir)
 
     frames: list[pd.DataFrame] = []
     daily = pd.DataFrame()
@@ -182,7 +210,14 @@ def build_monthly_cash_close(out_dir: Path, freq: str = "M") -> Dict[str, Path]:
             raise ValueError(
                 f"validated_cash_close.csv missing required columns for monthly_cash_close: {missing}"
             )
-        valid = validated.loc[_explicitly_validated(validated)].copy()
+        explicit_mask = _explicitly_validated(validated)
+        if run_cutoff is not None:
+            _assert_validated_cash_within_cutoff(
+                validated,
+                explicit_mask,
+                cutoff_date=run_cutoff.date,
+            )
+        valid = validated.loc[explicit_mask].copy()
         validated_loaded = True
         if not valid.empty:
             valid["close_amount"] = pd.to_numeric(

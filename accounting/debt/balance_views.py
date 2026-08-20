@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+
+from accounting.cutoff import load_run_cutoff_if_present, normalize_cutoff_date
 
 
 REQUIRED_COLS = [
@@ -223,12 +226,36 @@ def write_outputs(
     )
 
 
+def _canonical_run_root_for_debt_dir(write_dir: Path) -> Path | None:
+    """Locate the Stage A run for the canonical out/debt_resolution/<run_id> layout."""
+    resolved = write_dir.resolve()
+    for ancestor in [resolved, *resolved.parents]:
+        if ancestor.name == "out":
+            return ancestor / "run" / "accounting" / resolved.name
+    return None
+
+
+def resolve_effective_end_date(write_dir: Path, requested: str | None) -> str | None:
+    """Use the immutable Stage A cutoff when available; explicit conflicts fail."""
+    explicit = normalize_cutoff_date(requested) if requested else None
+    run_root = _canonical_run_root_for_debt_dir(write_dir)
+    cutoff = load_run_cutoff_if_present(run_root) if run_root is not None else None
+    if cutoff is not None:
+        if explicit is not None and explicit != cutoff.date:
+            raise ValueError(
+                "Debt end-date conflicts with immutable Stage A cutoff: "
+                f"{explicit} != {cutoff.date}"
+            )
+        return cutoff.date
+    return explicit
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build canonical debt balance views from debt_open_items.csv")
     p.add_argument("--open-items", required=True, help="Path to debt_open_items.csv")
     p.add_argument("--write-dir", required=True, help="Directory where debt balance CSVs will be written")
     p.add_argument("--start-date", default=None, help="Optional YYYY-MM-DD")
-    p.add_argument("--end-date", default=None, help="Optional YYYY-MM-DD")
+    p.add_argument("--end-date", default=os.getenv("CUTOFF_DATE") or None, help="Optional YYYY-MM-DD; Stage A cutoff is authoritative when present")
     return p.parse_args()
 
 
@@ -236,19 +263,20 @@ def main() -> None:
     args = parse_args()
     open_items_path = Path(args.open_items)
     write_dir = Path(args.write_dir)
+    end_date = resolve_effective_end_date(write_dir, args.end_date)
 
     open_items = pd.read_csv(open_items_path)
     daily = build_debt_balance_daily(
         open_items,
         start_date=args.start_date,
-        end_date=args.end_date,
+        end_date=end_date,
     )
     write_outputs(
         daily,
         write_dir=write_dir,
         source_path=str(open_items_path),
         start_date=args.start_date,
-        end_date=args.end_date,
+        end_date=end_date,
     )
 
     print(f"Wrote: {write_dir / 'debt_balance_daily.csv'}")
