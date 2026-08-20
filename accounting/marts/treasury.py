@@ -399,12 +399,82 @@ def build_monthly_cash_accountability(
         raise ValueError(f"box balance missing accountability columns: {missing_balance}")
     for col in ["box_motor_net", "closing_control"]:
         raw_balance[col] = pd.to_numeric(raw_balance[col], errors="coerce").fillna(0.0)
-    controls = raw_balance[
+    observed_controls = raw_balance[
         ["period", "period_end", "Box", "Currency", "box_motor_net", "closing_control"]
-    ].copy()
-    box_flow = _load_monthly_motor(
+    ].copy().rename(columns={"closing_control": "observed_closing_control"})
+    observed_box_flow = _load_monthly_motor(
         run_root, "box_flow_balance_time_long", flow=True
     ).rename(columns={"net": "box_flow_net"})
+
+    # The physical Box motor is intentionally sparse. Accountability is monthly:
+    # preserve explicit non-cash support in zero-movement months without inventing
+    # cash, and carry the zero-origin control through those months.
+    relevant_basis = {"actual_cash", "non_cash_support", "internal_box_transfer"}
+    relevant_treasury = treasury.loc[
+        treasury["movement_basis"].astype(str).isin(relevant_basis)
+    ].copy()
+    key_rows = pd.concat(
+        [
+            observed_controls[["period", "Box", "Currency"]],
+            observed_box_flow[["period", "Box", "Currency"]],
+            relevant_treasury[["period", "Box", "Currency"]],
+        ],
+        ignore_index=True,
+    ).drop_duplicates()
+    spine_rows: list[dict[str, str]] = []
+    for (box, currency), group in key_rows.groupby(["Box", "Currency"], dropna=False):
+        periods = group["period"].astype(str).map(lambda value: pd.Period(value, freq="M"))
+        if periods.empty:
+            continue
+        for period in pd.period_range(periods.min(), periods.max(), freq="M"):
+            period_text = str(period)
+            spine_rows.append(
+                {
+                    "period": period_text,
+                    "period_end": _period_end(period_text),
+                    "Box": _text(box),
+                    "Currency": _text(currency),
+                }
+            )
+    controls = pd.DataFrame(spine_rows)
+    controls = controls.merge(
+        observed_controls.drop(columns=["period_end"]),
+        on=["period", "Box", "Currency"],
+        how="left",
+    ).merge(
+        observed_box_flow,
+        on=["period", "Box", "Currency"],
+        how="left",
+    )
+    controls["box_motor_observed"] = controls["box_motor_net"].notna()
+    controls["box_flow_observed"] = controls["box_flow_net"].notna()
+    presence_mismatch = controls.loc[
+        controls["box_motor_observed"].ne(controls["box_flow_observed"])
+    ]
+    if not presence_mismatch.empty:
+        bad = presence_mismatch[["period", "Box", "Currency"]].to_dict("records")
+        raise ValueError(f"Treasury accountability motor presence mismatch: {bad[:10]}")
+    controls["box_motor_net"] = pd.to_numeric(
+        controls["box_motor_net"], errors="coerce"
+    ).fillna(0.0)
+    controls["box_flow_net"] = pd.to_numeric(
+        controls["box_flow_net"], errors="coerce"
+    ).fillna(0.0)
+    controls = controls.sort_values(["Box", "Currency", "period"]).reset_index(drop=True)
+    controls["closing_control"] = controls.groupby(
+        ["Box", "Currency"], dropna=False
+    )["box_motor_net"].cumsum()
+    observed_gap = controls["closing_control"] - pd.to_numeric(
+        controls["observed_closing_control"], errors="coerce"
+    )
+    bad_observed = controls.loc[
+        controls["observed_closing_control"].notna() & observed_gap.abs().gt(tolerance)
+    ]
+    if not bad_observed.empty:
+        bad = bad_observed.assign(observed_gap=observed_gap.loc[bad_observed.index])[
+            ["period", "Box", "Currency", "observed_gap"]
+        ].to_dict("records")
+        raise ValueError(f"Treasury reconstructed control disagrees with Box cum_net: {bad[:10]}")
 
     records: dict[tuple[str, str, str], dict[str, Any]] = {}
     for _, row in controls.iterrows():
@@ -419,22 +489,12 @@ def build_monthly_cash_accountability(
             "n_review_required": 0,
         }
 
-    relevant_basis = {"actual_cash", "non_cash_support", "internal_box_transfer"}
-    for _, row in treasury.iterrows():
-        key = (_text(row["period"]), _text(row["Box"]), _text(row["Currency"]))
-        rec = records.setdefault(
-            key,
-            {
-                "period": key[0],
-                "period_end": _text(row.get("period_end")) or _period_end(key[0]),
-                "Box": key[1],
-                "Currency": key[2],
-                **{col: 0.0 for col in ACCOUNTABILITY_COMPONENT_COLUMNS},
-                "n_tx": 0,
-                "n_review_required": 0,
-            },
-        )
+    for _, row in relevant_treasury.iterrows():
         basis = _text(row["movement_basis"])
+        key = (_text(row["period"]), _text(row["Box"]), _text(row["Currency"]))
+        if key not in records:
+            raise ValueError(f"Treasury accountability spine omitted relevant key: {key}")
+        rec = records[key]
         if basis == "actual_cash":
             direction = _text(row["cash_direction"])
             col = _cash_component(_text(row["cash_category"]), direction)
@@ -443,18 +503,18 @@ def build_monthly_cash_accountability(
         elif basis == "non_cash_support":
             col = _noncash_component(_text(row["cash_category"]))
             rec[col] += _numeric(row["non_cash_amount"])
-        if basis in relevant_basis:
-            rec["n_tx"] += int(_numeric(row.get("n_tx", 0)))
-            rec["n_review_required"] += int(_numeric(row.get("n_review_required", 0)))
+        rec["n_tx"] += int(_numeric(row.get("n_tx", 0)))
+        rec["n_review_required"] += int(_numeric(row.get("n_review_required", 0)))
 
     out = pd.DataFrame(records.values())
     out = out.merge(
-        controls,
+        controls[
+            [
+                "period", "period_end", "Box", "Currency", "box_motor_net",
+                "closing_control", "box_flow_net",
+            ]
+        ],
         on=["period", "period_end", "Box", "Currency"],
-        how="left",
-    ).merge(
-        box_flow,
-        on=["period", "Box", "Currency"],
         how="left",
     )
     if out[["box_motor_net", "closing_control", "box_flow_net"]].isna().any().any():
@@ -462,7 +522,7 @@ def build_monthly_cash_accountability(
             out[["box_motor_net", "closing_control", "box_flow_net"]].isna().any(axis=1),
             ["period", "Box", "Currency"],
         ].to_dict("records")
-        raise ValueError(f"Treasury accountability missing motor key(s): {bad[:10]}")
+        raise ValueError(f"Treasury accountability missing completed motor key(s): {bad[:10]}")
 
     cash_in_cols = [c for c in ACCOUNTABILITY_COMPONENT_COLUMNS if c.endswith("_in")]
     cash_out_cols = [c for c in ACCOUNTABILITY_COMPONENT_COLUMNS if c.endswith("_out")]
