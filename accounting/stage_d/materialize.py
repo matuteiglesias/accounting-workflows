@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
+from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.semantic import build_monthly_operating_statement, build_semantic_outputs
 from accounting.scope import assert_frame_within_scope, load_run_scope, load_run_scope_if_present
@@ -228,27 +229,6 @@ def materialize_daily_cash(
     return out_df, target
 
 
-import re
-
-def _infer_box_party_from_box_name(box: str) -> str:
-    """
-    Heurística de fallback: sigla por iniciales del Box.
-    Recomendación: evitar depender de esto y proveer BoxParty explícito.
-    """
-    if box is None:
-        return ""
-    b = str(box).strip()
-    if not b:
-        return ""
-    # casos típicos tuyos
-    if b.lower() == "household":
-        return "HH"
-    # iniciales (Family Business -> FB, Property Management -> PM)
-    parts = [p for p in re.split(r"\s+", b) if p]
-    initials = "".join(p[0].upper() for p in parts if p[0].isalpha())
-    return initials
-
-
 
 def materialize_box_balance_time_long(
     ledger: pd.DataFrame, out_dir: Path, freq: str = "W", force: bool = False
@@ -284,14 +264,14 @@ def materialize_box_balance_time_long(
     if missing:
         raise ValueError(f"materialize_box_balance_time_long: ledger missing required columns: {missing}")
 
-    ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    ldf["BoxParty"] = ldf["Box"].map(infer_box_party)
 
     # # BoxParty is required to compute box-level motor flows correctly.
     # # We allow an explicit, opt-in fallback heuristic only for transition periods.
     # if "BoxParty" not in ldf.columns:
     #     if str(os.getenv("BOXPARTY_FALLBACK", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}:
     #         LOG.warning("BOXPARTY_FALLBACK enabled: inferring BoxParty from Box names. This is not decision-grade.")
-    #         ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    #         ldf["BoxParty"] = ldf["Box"].map(infer_box_party)
     #     else:
     #         raise ValueError(
     #             "materialize_box_balance_time_long requires column 'BoxParty' in ledger. "
@@ -306,12 +286,7 @@ def materialize_box_balance_time_long(
     ldf = ldf[~ldf["amount"].isna()].copy()
 
     # Normalizar strings para matching
-    payer = ldf["payer"].astype("string").str.strip().str.upper()
-    receiver = ldf["receiver"].astype("string").str.strip().str.upper()
-    box_party = ldf["BoxParty"].astype("string").str.strip().str.upper()
-
-    in_mask = receiver == box_party
-    out_mask = payer == box_party
+    in_mask, out_mask = box_party_match_masks(ldf)
 
     # Si ninguna coincide, esa fila no representa movimiento del Box
     unmatched = ~(in_mask | out_mask)
@@ -322,11 +297,7 @@ def materialize_box_balance_time_long(
             int(unmatched.sum()),
         )
         ldf = ldf.loc[~unmatched].copy()
-        payer = payer.loc[~unmatched]
-        receiver = receiver.loc[~unmatched]
-        box_party = box_party.loc[~unmatched]
-        in_mask = receiver == box_party
-        out_mask = payer == box_party
+        in_mask, out_mask = box_party_match_masks(ldf)
 
     # Periodización
     try:
@@ -396,13 +367,13 @@ def materialize_box_flow_balance_time_long(
     if missing:
         raise ValueError(f"materialize_box_flow_balance_time_long: ledger missing required columns: {missing}")
 
-    ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    ldf["BoxParty"] = ldf["Box"].map(infer_box_party)
 
     # # BoxParty required (opt-in heuristic fallback only)
     # if "BoxParty" not in ldf.columns:
     #     if str(os.getenv("BOXPARTY_FALLBACK", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}:
     #         LOG.warning("BOXPARTY_FALLBACK enabled: inferring BoxParty from Box names. This is not decision-grade.")
-    #         ldf["BoxParty"] = ldf["Box"].apply(_infer_box_party_from_box_name)
+    #         ldf["BoxParty"] = ldf["Box"].map(infer_box_party)
     #     else:
     #         raise ValueError(
     #             "materialize_box_flow_balance_time_long requires column 'BoxParty' in ledger. "
@@ -417,12 +388,7 @@ def materialize_box_flow_balance_time_long(
     ldf = ldf[~ldf["amount"].isna()].copy()
 
     # Normalize strings for matching
-    payer = ldf["payer"].astype("string").str.strip().str.upper()
-    receiver = ldf["receiver"].astype("string").str.strip().str.upper()
-    box_party = ldf["BoxParty"].astype("string").str.strip().str.upper()
-
-    in_mask = receiver == box_party
-    out_mask = payer == box_party
+    in_mask, out_mask = box_party_match_masks(ldf)
 
     unmatched = ~(in_mask | out_mask)
     if unmatched.any():
@@ -431,11 +397,7 @@ def materialize_box_flow_balance_time_long(
             int(unmatched.sum()),
         )
         ldf = ldf.loc[~unmatched].copy()
-        payer = payer.loc[~unmatched]
-        receiver = receiver.loc[~unmatched]
-        box_party = box_party.loc[~unmatched]
-        in_mask = receiver == box_party
-        out_mask = payer == box_party
+        in_mask, out_mask = box_party_match_masks(ldf)
 
     # Periodization
     try:

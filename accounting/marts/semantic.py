@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple
 
 import pandas as pd
 
+from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 
 RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
@@ -75,15 +76,6 @@ def _norm(value: Any) -> str:
 
 def _norm_key(value: Any) -> str:
     return _norm(value).casefold()
-
-
-def _infer_box_party(box: Any) -> str:
-    b = _norm(box)
-    if not b:
-        return ""
-    if b.casefold() == "household":
-        return "HH"
-    return "".join(part[0].upper() for part in b.split() if part and part[0].isalpha())
 
 
 def _semantic_blob(row: pd.Series) -> str:
@@ -308,14 +300,13 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     if "cash_path" not in audit.columns or audit["cash_path"].astype(str).str.strip().eq("").all():
         audit["cash_path"] = audit["Flujo"].astype(str) + ":" + audit["Tipo"].astype(str)
 
-    payer = audit["payer"].map(_norm).str.upper()
-    receiver = audit["receiver"].map(_norm).str.upper()
-    box_party = audit["Box"].map(_infer_box_party).str.upper()
+    matched_in, matched_out = box_party_match_masks(
+        audit, require_nonempty_box_party=True
+    )
+    box_party = audit["Box"].map(infer_box_party)
     audit["direction"] = "unknown"
     audit["direction_source"] = "unknown"
     audit["direction_confidence"] = "low"
-    matched_in = receiver.eq(box_party) & box_party.ne("")
-    matched_out = payer.eq(box_party) & box_party.ne("")
     audit.loc[matched_in, ["direction", "direction_source", "direction_confidence"]] = ["in", "box_party_match", "high"]
     audit.loc[matched_out, ["direction", "direction_source", "direction_confidence"]] = ["out", "box_party_match", "high"]
     audit.loc[matched_in & matched_out, ["direction", "direction_source", "direction_confidence"]] = ["internal", "box_party_match", "high"]
