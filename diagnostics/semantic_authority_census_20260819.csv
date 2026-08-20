@@ -1,0 +1,10 @@
+concept,producer_identity,contract_authority,runtime_executor,authority_count,compatibility_can_override,status,notes
+property_opex_membership,semantic_bucket=property_opex,FlowCellSpec+semantic_measure_registry_v1,governed_atomic_flow_v1,1,no,GOVERNED,"Professional consumers may explain or slice governed OPEX but cannot redefine membership"
+funding_contribution_membership,semantic_bucket=funding_contribution,FlowCellSpec+semantic_measure_registry_v1,governed_atomic_flow_v1,1,no,GOVERNED,"Core funding contribution total is governed; broader support dimensions remain explicitly deferred"
+family_draws_membership,flow.family_draws_or_distributions.total,FlowCellSpec+semantic_measure_registry_v1,governed_atomic_flow_v1,1,no,GOVERNED,"Union membership and amount_out measure are declared once in the flow contract"
+fx_atomic_measure,"treasury_fx known subbuckets",semantic_measure_registry_v1,governed_atomic_flow_v1,1,no,GOVERNED_WITH_GRAIN_DEFERRED,"Atomic measure direction is single-authority; some professional FX rows still need a dedicated grain adapter"
+debt_position,debt.position.* ,DebtPositionSpec,DebtPositionExecutor,1,no,GOVERNED,"Snapshot selection/value mapping is typed; stock is never annual-summed"
+debt_activity,debt.activity.* ,DebtActivitySpec,DebtActivityExecutor,1,no,GOVERNED,"Activity flows sum by period; opening/closing balances are excluded from activity-flow registry"
+validated_cash_position,cash.position.validated,ValidatedCashPositionSpec,CashPositionExecutor,1,no,GOVERNED,"Validated cash never falls back to inferred control or internal balances"
+inferred_box_control,cash.control.inferred_box_motor,InferredBoxControlSpec,cash_authority+DerivedMetricExecutor,1,no,GOVERNED,"Control primitive is separate from cash headline and feeds diagnostic period delta only"
+derived_formula_definition,derived.* ,DerivedMetricSpec,governed_derived_metric_v1,1,no,GOVERNED,"Missing components fail unavailable; ratio zero denominator is not_applicable; source-authority metrics reconcile rather than compete"

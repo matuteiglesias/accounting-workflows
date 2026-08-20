@@ -11,6 +11,7 @@ from accounting.contracts.debt_position_activity import (
     resolve_debt_position_spec,
 )
 from accounting.contracts.atomic_flow_drilldowns import resolve_flow_cell_spec
+from accounting.contracts.derived_metrics import resolve_derived_metric_spec
 
 
 def test_wave4_authorities_exist_and_are_type_separated() -> None:
@@ -26,12 +27,13 @@ def test_wave4_authorities_exist_and_are_type_separated() -> None:
     assert control.fallback_role == "never_cash_headline"
 
 
-def test_wave4_runtime_consumers_are_physically_distinct() -> None:
+def test_wave4_runtime_consumers_remain_distinct_after_wave5_diagnostic_migration() -> None:
     root = Path(__file__).resolve().parents[1]
     cash_authority = (root / "accounting" / "cash_authority.py").read_text(encoding="utf-8")
     cash_executor = (root / "accounting" / "professional" / "cash_position_executor.py").read_text(encoding="utf-8")
     position_executor = (root / "accounting" / "professional" / "debt_position_executor.py").read_text(encoding="utf-8")
     activity_executor = (root / "accounting" / "professional" / "debt_activity_executor.py").read_text(encoding="utf-8")
+    derived_executor = (root / "accounting" / "professional" / "derived_metric_executor.py").read_text(encoding="utf-8")
     drilldown = (root / "accounting" / "professional" / "drilldown.py").read_text(encoding="utf-8")
 
     assert "cash.position.validated" in cash_authority
@@ -41,7 +43,12 @@ def test_wave4_runtime_consumers_are_physically_distinct() -> None:
     assert "monthly_tables_cash_close_matrix" in drilldown
     assert "annual_cash_close_by_box_wide" in drilldown
     assert "monthly_tables_diagnostic_box_level_matrix" in drilldown
-    assert "not intercepted" in drilldown
+
+    diagnostic = resolve_derived_metric_spec("derived.diagnostic_box_level")
+    assert diagnostic is not None
+    assert diagnostic.component_refs == ("cash.control.inferred_box_motor",)
+    assert "select_inferred_box_control_period" in derived_executor
+    assert "validated_cash_fallback" in derived_executor
 
     assert "DebtPositionSpec" in position_executor
     assert "DebtActivitySpec" not in position_executor
