@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 import pandas as pd
 
 from accounting.artifacts.manifest import artifact_from_path, append_artifacts
+from accounting.cutoff import load_run_cutoff_if_present
 # from accounting.core.timeseries import period_bins_for_dates
 
 
@@ -49,6 +50,42 @@ def _write_json(path: Path, obj: Dict[str, Any]) -> None:
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _check_cutoff_bound(
+    frame: pd.DataFrame | None,
+    *,
+    label: str,
+    cutoff_date: str,
+    checks: List[Dict[str, Any]],
+    errors: List[str],
+) -> None:
+    if frame is None:
+        errors.append(f"cannot validate cutoff for unreadable {label}")
+        return
+    if "Date" not in frame.columns:
+        errors.append(f"cannot validate cutoff: {label} missing Date")
+        return
+    dates = pd.to_datetime(frame["Date"], errors="coerce")
+    valid = dates.notna()
+    future = valid & dates.gt(pd.Timestamp(cutoff_date))
+    if future.any():
+        examples = frame.loc[future, [c for c in ["tx_id", "Date"] if c in frame.columns]].head(5).to_dict("records")
+        errors.append(
+            f"{label} contains {int(future.sum())} valid dated rows after cutoff {cutoff_date}: {examples}"
+        )
+        return
+    checks.append(
+        {
+            "name": f"{label}_within_cutoff",
+            "ok": True,
+            "details": {
+                "cutoff_date": cutoff_date,
+                "max_valid_date": dates.loc[valid].max().date().isoformat() if valid.any() else None,
+                "missing_date_rows_retained": int((~valid).sum()),
+            },
+        }
+    )
+
+
 def main() -> int:
     out_dir = Path(os.environ["OUT_DIR"]).resolve()
     mode = (os.environ.get("MODE") or "").strip() or "unknown"
@@ -56,10 +93,13 @@ def main() -> int:
     meta_dir = out_dir / "meta"
     stage_manifest_path = meta_dir / "stage_A_ingest.json"
     ledger_path = out_dir / "ledger_canonical.csv"
+    all_status_path = out_dir / "ledger_canonical_all_status.csv"
     anomalies_path = out_dir / "anomalies.csv"
 
     checks: List[Dict[str, Any]] = []
     errors: List[str] = []
+    df = None
+    all_status_df = None
 
     # 1) ledger exists + readable + required cols
     if not ledger_path.exists():
@@ -81,6 +121,13 @@ def main() -> int:
 
             if df.shape[0] <= 0:
                 errors.append("ledger has 0 rows")
+
+    if all_status_path.exists():
+        try:
+            all_status_df = pd.read_csv(all_status_path, low_memory=False)
+            checks.append({"name": "all_status_ledger_readable", "ok": True, "details": {"rows": int(all_status_df.shape[0])}})
+        except Exception as e:
+            errors.append(f"failed reading ledger_canonical_all_status.csv: {e}")
 
     # 2) anomalies optional but if exists must be non-empty header parseable
     if anomalies_path.exists():
@@ -111,6 +158,29 @@ def main() -> int:
             errors.append("stage manifest outputs must be a list")
         if str(stage_manifest.get("mode", "")).strip() in ("", "$(MODE)"):
             errors.append("stage manifest mode must be real string, not empty or $(MODE)")
+
+        try:
+            cutoff = load_run_cutoff_if_present(out_dir)
+        except Exception as e:
+            errors.append(f"invalid Stage A cutoff contract: {e}")
+            cutoff = None
+        if cutoff is not None:
+            if not all_status_path.exists():
+                errors.append(f"cutoff run missing all-status ledger: {all_status_path}")
+            _check_cutoff_bound(
+                df,
+                label="ledger_canonical",
+                cutoff_date=cutoff.date,
+                checks=checks,
+                errors=errors,
+            )
+            _check_cutoff_bound(
+                all_status_df,
+                label="ledger_canonical_all_status",
+                cutoff_date=cutoff.date,
+                checks=checks,
+                errors=errors,
+            )
 
     ok = len(errors) == 0
 
