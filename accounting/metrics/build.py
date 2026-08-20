@@ -7,6 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
+from accounting.cutoff import resolve_run_as_of_date
 from accounting.logging_utils import configure_logging, get_logger
 from accounting.artifacts.manifest import artifact_contract_for_name, write_artifact_contract_qa, write_artifact_contracts_csv
 
@@ -643,8 +644,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--as-of-date",
-        default=pd.Timestamp.today().date().isoformat(),
-        help="as_of_date string stored in metric_values.",
+        default="",
+        help="Optional YYYY-MM-DD reporting date. A Stage A cutoff, when present, is authoritative and conflicting values fail.",
     )
     parser.add_argument("--months", type=int, default=6, help="Number of monthly periods to surface in metric_views.")
     parser.add_argument("--rent-place-col", default="Lugar", help="Column used for rent rollup by place in metric_views.")
@@ -656,13 +657,14 @@ def main() -> None:
 
     run_root = Path(args.run_root) if args.run_root else find_latest_run_root(Path(args.runs_base))
     run_id = args.run_id.strip() or run_root.name
+    as_of_date = resolve_run_as_of_date(run_root, args.as_of_date)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    LOG.info("Stage start run_root=%s out_dir=%s months=%s", run_root, out_dir, args.months)
+    LOG.info("Stage start run_root=%s out_dir=%s months=%s as_of_date=%s", run_root, out_dir, args.months, as_of_date)
 
     registry = registry_from_specs(default_metric_specs_v1())
-    ctx = load_context(run_root=run_root, run_id=run_id, as_of_date=args.as_of_date)
+    ctx = load_context(run_root=run_root, run_id=run_id, as_of_date=as_of_date)
 
     builder_keys = select_builder_keys(registry)
     leaf = run_leaf_builders(ctx, builder_keys)
@@ -675,8 +677,8 @@ def main() -> None:
     metric_values.to_csv(out_dir / METRIC_VALUES_FILENAME, index=False)
     validation.to_csv(out_dir / VALIDATION_REPORT_FILENAME, index=False)
 
-    frontier_paths = build_metrics_frontier(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=args.as_of_date)
-    annual_paths = build_annual_balance_dashboard(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=args.as_of_date)
+    frontier_paths = build_metrics_frontier(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=as_of_date)
+    annual_paths = build_annual_balance_dashboard(run_root=run_root, metrics_dir=out_dir, run_id=run_id, as_of_date=as_of_date)
 
     try:
         metric_values.to_parquet(out_dir / "metric_values.parquet", index=False)
@@ -694,7 +696,7 @@ def main() -> None:
     manifest = {
         "run_root": str(run_root),
         "run_id": run_id,
-        "as_of_date": args.as_of_date,
+        "as_of_date": as_of_date,
         "n_registry_rows": int(len(registry)),
         "n_metric_values_rows": int(len(metric_values)),
         "n_validation_rows": int(len(validation)),
