@@ -219,3 +219,35 @@ def test_two_validated_anchors_expose_offset_gap_instead_of_hiding_it(tmp_path):
     assert feb["validated_anchor_offset"] == 1050.0
     assert feb["anchor_reconciliation_gap"] == 50.0
     assert feb["anchor_alignment_status"] == "residual"
+
+
+def test_non_cash_only_month_uses_complete_control_spine(tmp_path):
+    box = "Property Management"
+    currency = "ARS"
+    balance_rows = [
+        {"TimePeriod": "2026-01", "TimePeriod_end": "2026-01-31", "Box": box, "Currency": currency, "in_amt": 100.0, "out_amt": 0.0, "net": 100.0, "cum_net": 100.0},
+        {"TimePeriod": "2026-03", "TimePeriod_end": "2026-03-31", "Box": box, "Currency": currency, "in_amt": 50.0, "out_amt": 0.0, "net": 50.0, "cum_net": 150.0},
+    ]
+    pd.DataFrame(balance_rows).to_csv(tmp_path / "box_balance_time_long.freq=M.csv", index=False)
+    pd.DataFrame([
+        {"TimePeriod": row["TimePeriod"], "TimePeriod_end": row["TimePeriod_end"], "Box": box, "Currency": currency, "Flujo": "Cobros", "Tipo": "Renta", "in_amt": row["in_amt"], "out_amt": row["out_amt"], "net": row["net"], "n_tx": 1}
+        for row in balance_rows
+    ]).to_csv(tmp_path / "box_flow_balance_time_long.freq=M.csv", index=False)
+    pd.DataFrame([
+        {"period": "2026-01", "period_end": "2026-01-31", "Box": box, "Currency": currency, "movement_basis": "actual_cash", "cash_direction": "in", "cash_category": "rent", "amount_in": 100.0, "amount_out": 0.0, "non_cash_amount": 0.0, "n_tx": 1, "n_review_required": 0},
+        {"period": "2026-02", "period_end": "2026-02-28", "Box": box, "Currency": currency, "movement_basis": "non_cash_support", "cash_direction": "non_cash", "cash_category": "taxes", "amount_in": 0.0, "amount_out": 0.0, "non_cash_amount": 25.0, "n_tx": 1, "n_review_required": 0},
+        {"period": "2026-03", "period_end": "2026-03-31", "Box": box, "Currency": currency, "movement_basis": "actual_cash", "cash_direction": "in", "cash_category": "rent", "amount_in": 50.0, "amount_out": 0.0, "non_cash_amount": 0.0, "n_tx": 1, "n_review_required": 0},
+    ]).to_csv(tmp_path / "monthly_box_treasury_flow.csv", index=False)
+
+    paths = build_monthly_cash_accountability(tmp_path)
+    out = pd.read_csv(paths["monthly_cash_accountability"]).set_index("period")
+    assert list(out.index) == ["2026-01", "2026-02", "2026-03"]
+    feb = out.loc["2026-02"]
+    assert feb["box_motor_net"] == 0.0
+    assert feb["box_flow_net"] == 0.0
+    assert feb["opening_control"] == 100.0
+    assert feb["closing_control"] == 100.0
+    assert feb["net_cash_flow"] == 0.0
+    assert feb["direct_tax_support_non_cash"] == 25.0
+    assert feb["reconciliation_status"] == "reconciled"
+
