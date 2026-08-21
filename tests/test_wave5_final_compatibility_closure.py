@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from accounting.professional.drilldown_wave4_base import _ORIGINAL_SPEC_FOR_CELL
+from accounting.professional.table_contracts import enrich_professional_table
+
 from accounting.professional import drilldown as professional
 from accounting.professional.table_contracts import enrich_professional_table
 
@@ -74,6 +77,40 @@ def test_dead_classification_is_backed_by_prior_wave3_reachability_evidence() ->
         if row["classification"] == "DEAD"
     }
     assert {dead_to_case[route] for route in final_dead} == safe
+
+
+def test_proven_dead_atomic_cellspec_routes_are_physically_pruned() -> None:
+    cases = [
+        (
+            "monthly_tables_draws_by_box_amount_out",
+            {"Currency": "ARS", "Box": "Household", "2026-01": 10},
+            "flow.draws.by_box",
+        ),
+        (
+            "monthly_tables_draws_by_type_amount_out",
+            {
+                "Currency": "ARS",
+                "semantic_subbucket": "personal_expense",
+                "2026-01": 10,
+            },
+            "flow.draws.by_type",
+        ),
+        (
+            "monthly_tables_opex_by_type_amount_out",
+            {
+                "Currency": "ARS",
+                "Box": "Property Management",
+                "semantic_subbucket": "services",
+                "2026-01": 10,
+            },
+            "flow.property_opex.by_box_category",
+        ),
+    ]
+
+    for table_id, raw, governed_id in cases:
+        row = enrich_professional_table(pd.DataFrame([raw]), table_id).iloc[0]
+        assert row["drilldown_cell_id"] == governed_id
+        assert _ORIGINAL_SPEC_FOR_CELL(table_id, row) is None
 
 
 def test_semantic_authority_census_has_one_production_authority_per_core_concept() -> None:
