@@ -339,12 +339,6 @@ def _spec_for_cell(table_id: str, row: pd.Series) -> CellSpec | None:
         return CellSpec(table_id, measure, lambda df, r: base_period_currency(df, r) & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_bucket", r.get("semantic_bucket")))
     if table_id == "monthly_tables_flow_subbucket_all_measures":
         return CellSpec(table_id, measure, lambda df, r: base_period_currency(df, r) & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_bucket", r.get("semantic_bucket")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
-    if table_id == "monthly_tables_draws_by_box_amount_out":
-        return CellSpec(table_id, _contract_measure("family_withdrawal_candidate"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "Box", r.get("Box")))
-    if table_id == "monthly_tables_draws_by_type_amount_out":
-        return CellSpec(table_id, _contract_measure("family_withdrawal_candidate"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "family_withdrawal_candidate") & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
-    if table_id == "monthly_tables_opex_by_type_amount_out":
-        return CellSpec(table_id, _contract_measure("property_opex"), lambda df, r: base_period_currency(df, r) & _bucket_eq(df, "property_opex") & _eq_col(df, "Box", r.get("Box")) & _eq_col(df, "semantic_subbucket", r.get("semantic_subbucket")))
     if table_id == "monthly_tables_unknown_review_net_matrix":
         return CellSpec(table_id, "net_amount", lambda df, r: base_period_currency(df, r) & _unknown_mask(df))
 
