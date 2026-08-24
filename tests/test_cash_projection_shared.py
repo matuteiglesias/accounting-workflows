@@ -161,7 +161,11 @@ def test_annual_frontier_and_professional_project_same_source_population(
     annual_cash = annual[
         annual["metric_id"].isin({"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX"})
     ].copy()
-    annual_cash["period"] = annual_cash["period"].astype(str)
+    annual_cash["period"] = (
+        pd.to_numeric(annual_cash["period"], errors="coerce")
+        .astype("Int64")
+        .astype(str)
+    )
     assert set(zip(annual_cash["period"], annual_cash["Currency"])) == {
         ("2025", "ARS"),
         ("2026", "USD"),
