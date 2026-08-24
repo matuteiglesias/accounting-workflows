@@ -41,3 +41,10 @@ The former `human` capabilities were either pass-through projections of governed
 ## Phase-2 ownership cleanup
 
 `funding_lineage_audit.py` and `issue_digest.py` were moved out of `accounting.professional` into `accounting.diagnostics` without changing their diagnostic algorithms. The professional package is therefore limited more clearly to production/reporting responsibilities, while diagnostic tooling remains available under explicit diagnostic module paths.
+
+
+## Phase 4 facade ownership (2026-08-24)
+
+- Modern migration facades expose only an explicit repository-caller compatibility surface; broad `dir(delegate) -> globals()` re-exports are forbidden.
+- `accounting.professional.drilldown_legacy` remains a compatibility implementation, not current semantic authority. Its remaining route families and removal blockers are tracked in `notes/accounting_simplification_phase4_drilldown_deletion_map_20260824.csv`.
+- New governed consumers must import modern contracts/executors directly rather than creating new dependencies on `*_legacy` symbols.

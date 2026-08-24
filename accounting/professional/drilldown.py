@@ -42,9 +42,48 @@ from accounting.professional.derived_metric_executor import execute_derived_metr
 from accounting.professional.derived_metric_metadata import enrich_derived_metric_tables
 
 
-for _name in dir(_base):
-    if not _name.startswith("__"):
-        globals()[_name] = getattr(_base, _name)
+# Explicit compatibility surface derived from repository caller census.
+# Do not broaden this list: every retained legacy symbol must have a caller
+# or an independently documented compatibility contract/removal condition.
+LEGACY_COMPAT_EXPORTS = (
+    'DEFAULT_TOLERANCE',
+    'INDEX_FILENAME',
+    'STATUS_OK',
+    'STATUS_UNSUPPORTED',
+    '_DEFERRED_FLOW_IDS',
+    '_annual_formula_spec',
+    '_build_annual_debt_activity_companion_cell',
+    '_build_annual_debt_stock_companion_cell',
+    '_build_annual_formula_cell',
+    '_build_debt_activity_cell',
+    '_build_debt_position_cell',
+    '_cash_bridge_line_spec',
+    '_execute_governed_derived_flow',
+    '_governed_flow_resolution',
+    '_safe_div',
+    '_semantic_filter_for_statement_line',
+    '_spec_for_cell',
+    'row_context_id',
+)
+
+DEFAULT_TOLERANCE = _base.DEFAULT_TOLERANCE
+INDEX_FILENAME = _base.INDEX_FILENAME
+STATUS_OK = _base.STATUS_OK
+STATUS_UNSUPPORTED = _base.STATUS_UNSUPPORTED
+_DEFERRED_FLOW_IDS = _base._DEFERRED_FLOW_IDS
+_annual_formula_spec = _base._annual_formula_spec
+_build_annual_debt_activity_companion_cell = _base._build_annual_debt_activity_companion_cell
+_build_annual_debt_stock_companion_cell = _base._build_annual_debt_stock_companion_cell
+_build_annual_formula_cell = _base._build_annual_formula_cell
+_build_debt_activity_cell = _base._build_debt_activity_cell
+_build_debt_position_cell = _base._build_debt_position_cell
+_cash_bridge_line_spec = _base._cash_bridge_line_spec
+_execute_governed_derived_flow = _base._execute_governed_derived_flow
+_governed_flow_resolution = _base._governed_flow_resolution
+_safe_div = _base._safe_div
+_semantic_filter_for_statement_line = _base._semantic_filter_for_statement_line
+_spec_for_cell = _base._spec_for_cell
+row_context_id = _base.row_context_id
 
 
 _ORIGINAL_BUILD_DERIVED_CELL = _base._build_derived_cell
