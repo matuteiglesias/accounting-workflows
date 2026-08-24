@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -37,6 +38,10 @@ def _build(tmp_path: Path) -> tuple[Path, Path]:
     return debt_dir, run
 
 
+def _annual_year_mask(frame: pd.DataFrame, year: int) -> pd.Series:
+    return pd.to_numeric(frame["period"], errors="coerce").eq(year)
+
+
 def test_invalid_closing_period_stays_unavailable_through_annual_metrics(tmp_path: Path) -> None:
     _, run = _build(tmp_path)
     position = pd.read_csv(run / "monthly_debt_position.csv")
@@ -55,7 +60,7 @@ def test_invalid_closing_period_stays_unavailable_through_annual_metrics(tmp_pat
     }
     stock = annual[
         annual["metric_id"].isin(stock_ids)
-        & annual["period"].astype(str).eq("2025")
+        & _annual_year_mask(annual, 2025)
         & annual["Currency"].astype(str).eq("USD")
     ]
     assert set(stock["metric_id"]) == stock_ids
@@ -65,7 +70,7 @@ def test_invalid_closing_period_stays_unavailable_through_annual_metrics(tmp_pat
 
     repayments = annual[
         annual["metric_id"].eq("ID.DEBT.ACTIVITY.REPAYMENTS")
-        & annual["period"].astype(str).eq("2025")
+        & _annual_year_mask(annual, 2025)
         & annual["Currency"].astype(str).eq("USD")
     ]
     assert len(repayments) == 1
@@ -94,4 +99,6 @@ def test_professional_position_uses_same_fail_closed_authority_after_mart(tmp_pa
     row = april.iloc[0]
     assert row["status"] == "unavailable"
     assert float(row["matched_value_sum"]) == 0.0
-    assert "no valid as_of_date" in str(row["filter_reason"])
+    filters = json.loads(str(row["filter_json"]))
+    assert filters["availability_status"] == "unavailable"
+    assert "no valid as_of_date" in filters["reason"]
