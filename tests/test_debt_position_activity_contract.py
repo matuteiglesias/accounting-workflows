@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields
-from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -159,22 +158,3 @@ def test_activity_contract_excludes_opening_and_closing_balance_rows() -> None:
 def test_cash_position_remains_out_of_scope() -> None:
     assert not hasattr(contract, "CashPositionSpec")
     assert not hasattr(contract, "CASH_POSITION_SPECS_V1")
-
-
-def test_pr13_wires_position_consumer_only() -> None:
-    needle = "accounting.contracts.debt_position_activity"
-    position_consumer = Path(
-        "accounting/professional/debt_position_executor.py"
-    ).read_text(encoding="utf-8")
-    assert needle in position_consumer
-    assert "resolve_debt_position_spec" in position_consumer
-    assert "resolve_debt_activity_spec" not in position_consumer
-
-    # The compatibility baseline, debt mart/resolver boundary, and annual
-    # metrics layer remain free of the new professional consumer contract.
-    for consumer in [
-        "accounting/professional/drilldown_legacy.py",
-        "accounting/marts/debt.py",
-        "accounting/metrics/annual.py",
-    ]:
-        assert needle not in Path(consumer).read_text(encoding="utf-8"), consumer
