@@ -34,9 +34,18 @@ from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.metrics import annual_legacy as _legacy
 
 
-for _name in dir(_legacy):
-    if not _name.startswith("__"):
-        globals()[_name] = getattr(_legacy, _name)
+# Explicit compatibility surface derived from repository caller census.
+# Do not broaden this list: every retained legacy symbol must have a caller
+# or an independently documented compatibility contract/removal condition.
+LEGACY_COMPAT_EXPORTS = (
+    'ANNUAL_CONTRACT_COLUMNS',
+    'ANNUAL_METRICS_COLUMNS',
+    'QA_COLUMNS',
+)
+
+ANNUAL_CONTRACT_COLUMNS = _legacy.ANNUAL_CONTRACT_COLUMNS
+ANNUAL_METRICS_COLUMNS = _legacy.ANNUAL_METRICS_COLUMNS
+QA_COLUMNS = _legacy.QA_COLUMNS
 
 
 def _years(cash: pd.DataFrame) -> list[str]:

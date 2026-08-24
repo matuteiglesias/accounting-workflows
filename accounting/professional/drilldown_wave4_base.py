@@ -33,9 +33,32 @@ from accounting.professional.debt_position_executor import (
 
 # Re-export the historical public/private surface so existing callers and
 # regression tests retain their import contract while routing is migrated.
-for _name in dir(_legacy):
-    if not _name.startswith("__"):
-        globals()[_name] = getattr(_legacy, _name)
+# Explicit compatibility surface derived from repository caller census.
+# Do not broaden this list: every retained legacy symbol must have a caller
+# or an independently documented compatibility contract/removal condition.
+LEGACY_COMPAT_EXPORTS = (
+    'DEFAULT_TOLERANCE',
+    'INDEX_FILENAME',
+    'STATUS_OK',
+    'STATUS_UNSUPPORTED',
+    '_annual_formula_spec',
+    '_build_annual_formula_cell',
+    '_cash_bridge_line_spec',
+    '_safe_div',
+    '_semantic_filter_for_statement_line',
+    'row_context_id',
+)
+
+DEFAULT_TOLERANCE = _legacy.DEFAULT_TOLERANCE
+INDEX_FILENAME = _legacy.INDEX_FILENAME
+STATUS_OK = _legacy.STATUS_OK
+STATUS_UNSUPPORTED = _legacy.STATUS_UNSUPPORTED
+_annual_formula_spec = _legacy._annual_formula_spec
+_build_annual_formula_cell = _legacy._build_annual_formula_cell
+_cash_bridge_line_spec = _legacy._cash_bridge_line_spec
+_safe_div = _legacy._safe_div
+_semantic_filter_for_statement_line = _legacy._semantic_filter_for_statement_line
+row_context_id = _legacy.row_context_id
 
 
 _ORIGINAL_SPEC_FOR_CELL = _legacy._spec_for_cell

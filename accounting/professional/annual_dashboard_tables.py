@@ -17,9 +17,20 @@ from accounting.cash_authority import (
 from accounting.professional import annual_dashboard_tables_legacy as _legacy
 
 
-for _name in dir(_legacy):
-    if not _name.startswith("__"):
-        globals()[_name] = getattr(_legacy, _name)
+# Explicit compatibility surface derived from repository caller census.
+# Do not broaden this list: every retained legacy symbol must have a caller
+# or an independently documented compatibility contract/removal condition.
+LEGACY_COMPAT_EXPORTS = (
+    'build_annual_debt_activity_by_pair',
+    'build_annual_debt_stock_by_pair',
+    'build_annual_funding_by_actor_channel',
+    'write_annual_long_and_wide',
+)
+
+build_annual_debt_activity_by_pair = _legacy.build_annual_debt_activity_by_pair
+build_annual_debt_stock_by_pair = _legacy.build_annual_debt_stock_by_pair
+build_annual_funding_by_actor_channel = _legacy.build_annual_funding_by_actor_channel
+write_annual_long_and_wide = _legacy.write_annual_long_and_wide
 
 
 def build_annual_cash_close_by_box(

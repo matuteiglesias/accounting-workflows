@@ -1,0 +1,6 @@
+facade,delegated_module,broad_static_surface_before,repo_referenced_symbols,explicit_compat_exports_after,facade_local_references
+accounting.metrics.annual,accounting.metrics.annual_legacy,24,4,3,1
+accounting.metrics.frontier,accounting.metrics.frontier_legacy,18,1,0,1
+accounting.professional.annual_dashboard_tables,accounting.professional.annual_dashboard_tables_legacy,19,5,4,1
+accounting.professional.drilldown_wave4_base,accounting.professional.drilldown_legacy,141,16,10,6
+accounting.professional.drilldown,accounting.professional.drilldown_wave4_base,48,23,18,5

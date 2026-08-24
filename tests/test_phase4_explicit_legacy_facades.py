@@ -1,6 +1,4 @@
-from pathlib import Path
-
-TEST = r'''from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import importlib
@@ -76,13 +74,3 @@ def test_drilldown_deletion_map_has_explicit_blockers_and_removal_conditions():
     assert "FundingSupportSpec" in blockers
     assert "FX grain" in blockers
     assert "annual lineage" in blockers
-'''
-
-Path("tests/test_phase4_explicit_legacy_facades.py").write_text(TEST, encoding="utf-8")
-
-state = Path("notes/current_state_map.md")
-text = state.read_text(encoding="utf-8")
-marker = "## Phase 4 facade ownership (2026-08-24)"
-if marker not in text:
-    text += f'''\n\n{marker}\n\n- Modern migration facades expose only an explicit repository-caller compatibility surface; broad `dir(delegate) -> globals()` re-exports are forbidden.\n- `accounting.professional.drilldown_legacy` remains a compatibility implementation, not current semantic authority. Its remaining route families and removal blockers are tracked in `notes/accounting_simplification_phase4_drilldown_deletion_map_20260824.csv`.\n- New governed consumers must import modern contracts/executors directly rather than creating new dependencies on `*_legacy` symbols.\n'''
-    state.write_text(text, encoding="utf-8")

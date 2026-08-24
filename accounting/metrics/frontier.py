@@ -19,9 +19,12 @@ from accounting.cash_authority import (
 from accounting.metrics import frontier_legacy as _legacy
 
 
-for _name in dir(_legacy):
-    if not _name.startswith("__"):
-        globals()[_name] = getattr(_legacy, _name)
+# Explicit compatibility surface derived from repository caller census.
+# Do not broaden this list: every retained legacy symbol must have a caller
+# or an independently documented compatibility contract/removal condition.
+LEGACY_COMPAT_EXPORTS = (
+)
+
 
 
 def _cash_periods(cash: pd.DataFrame) -> list[str]:
