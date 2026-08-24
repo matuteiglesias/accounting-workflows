@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Metrics-frontier facade with governed validated-cash production.
+"""Metrics-frontier facade with governed validated-cash projection.
 
 The pre-PR15B frontier implementation remains in ``frontier_legacy``. This
 module delegates all non-cash metrics to it and rewrites only the two modern
-cash headline series from the shared Wave 4 cash selector.
+cash headline series from the shared governed cash projection.
 """
 
 from pathlib import Path
@@ -12,39 +12,21 @@ from typing import Any, Dict
 
 import pandas as pd
 
-from accounting.cash_authority import (
-    select_validated_cash_period,
-    validated_cash_schema_supported,
-)
+from accounting.cash_authority import validated_cash_schema_supported
+from accounting.cash_projection import iter_validated_monthly_cash_positions
 from accounting.metrics import frontier_legacy as _legacy
 
 
 # Explicit compatibility surface derived from repository caller census.
 # Do not broaden this list: every retained legacy symbol must have a caller
 # or an independently documented compatibility contract/removal condition.
-LEGACY_COMPAT_EXPORTS = (
-)
-
-
-
-def _cash_periods(cash: pd.DataFrame) -> list[str]:
-    return sorted(
-        cash["period"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .loc[lambda s: s.str.match(r"^20\d{2}-(0[1-9]|1[0-2])$")]
-        .unique()
-        .tolist()
-    )
+LEGACY_COMPAT_EXPORTS = ()
 
 
 def _selection_period_end(selection) -> str:
     if selection.selected.empty or "period_end" not in selection.selected.columns:
         return selection.period
-    values = (
-        selection.selected["period_end"].fillna("").astype(str).str.strip()
-    )
+    values = selection.selected["period_end"].fillna("").astype(str).str.strip()
     values = values[values.ne("")]
     return values.max() if not values.empty else selection.period
 
@@ -73,63 +55,37 @@ def build_metrics_frontier(
     frontier = frontier.loc[~frontier["metric_id"].astype(str).isin(cash_ids)].copy()
     series = series.loc[~series["metric_id"].astype(str).isin(cash_ids)].copy()
 
+    projections = list(iter_validated_monthly_cash_positions(cash))
     selected_rows: list[dict[str, Any]] = []
-    periods = _cash_periods(cash)
-    currencies = sorted(
-        cash["Currency"].fillna("").astype(str).str.strip().loc[lambda s: s.ne("")].unique()
-    )
-    boxes = sorted(
-        cash["Box"].fillna("").astype(str).str.strip().loc[lambda s: s.ne("")].unique()
-    )
+    for projection in projections:
+        selected = projection.selection
+        if not selected.available:
+            continue
 
-    for period in periods:
-        for currency in currencies:
-            total = select_validated_cash_period(
-                cash, period=period, currency=currency, box=""
+        metric_id = (
+            "BS.CASH.TOTAL"
+            if projection.scope == "currency"
+            else "BS.CASH.CLOSE.BOX"
+        )
+        selected_rows.append(
+            _legacy._series_row(
+                metric_id,
+                projection.reporting_period,
+                _selection_period_end(selected),
+                projection.currency,
+                selected.value,
+                "monthly_cash_close.csv",
+                run_id,
+                as_of_date,
+                "safe",
+                True,
+                False,
+                False,
+                "Governed validated account snapshots only; inferred/internal excluded and no fallback used.",
+                dimension_name="Box" if projection.scope == "box" else "",
+                dimension_value=projection.box if projection.scope == "box" else "",
             )
-            if total.available:
-                selected_rows.append(
-                    _legacy._series_row(
-                        "BS.CASH.TOTAL",
-                        period,
-                        _selection_period_end(total),
-                        currency,
-                        total.value,
-                        "monthly_cash_close.csv",
-                        run_id,
-                        as_of_date,
-                        "safe",
-                        True,
-                        False,
-                        False,
-                        "Governed validated account snapshots only; inferred/internal excluded and no fallback used.",
-                    )
-                )
-            for box in boxes:
-                selected = select_validated_cash_period(
-                    cash, period=period, currency=currency, box=box
-                )
-                if not selected.available:
-                    continue
-                selected_rows.append(
-                    _legacy._series_row(
-                        "BS.CASH.CLOSE.BOX",
-                        period,
-                        _selection_period_end(selected),
-                        currency,
-                        selected.value,
-                        "monthly_cash_close.csv",
-                        run_id,
-                        as_of_date,
-                        "safe",
-                        True,
-                        False,
-                        False,
-                        "Governed validated account snapshots only; inferred/internal excluded and no fallback used.",
-                        dimension_name="Box",
-                        dimension_value=box,
-                    )
-                )
+        )
 
     has_governed_cash = bool(selected_rows)
     status = "active" if has_governed_cash else "unavailable"
@@ -196,7 +152,7 @@ def build_metrics_frontier(
             pd.DataFrame(
                 [
                     {
-                        "check": "cash_headline_uses_governed_validated_selector",
+                        "check": "cash_headline_uses_governed_validated_projection",
                         "status": "pass",
                         "detail": f"cash_series_rows={len(selected_rows)}; fallback_to_inferred=never",
                         "severity": "error",
@@ -205,6 +161,12 @@ def build_metrics_frontier(
                         "check": "cash_frontier_excludes_internal_and_inferred_positions",
                         "status": "pass",
                         "detail": "all BS.CASH series rows are reconstructed from cash.position.validated selections",
+                        "severity": "error",
+                    },
+                    {
+                        "check": "cash_frontier_scopes_are_source_backed",
+                        "status": "pass",
+                        "detail": f"projection_scopes={len(projections)}; no report-layer Cartesian scope synthesis",
                         "severity": "error",
                     },
                 ],
