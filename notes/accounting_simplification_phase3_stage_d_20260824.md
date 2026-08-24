@@ -49,14 +49,32 @@ This phase does **not** move `build_monthly_cash_close`, `build_semantic_outputs
 
 No live latest-pointer implementation was present in current `stage_d/materialize.py`; Phase 1 had already removed obsolete human/latest orchestration elsewhere. Nothing is invented here merely to satisfy the old cleanup checklist.
 
-## Acceptance evidence
+## Completed evidence
 
-Before merge require:
+The transformed workspace was executed before its product commit:
 
-1. `make validate`;
-2. `make smoke-full`;
-3. exact Phase-0 semantic and annual ARS/USD fixture anchors;
-4. Stage D expected artifact inventory and manifest contract still present;
-5. source regression proving generic helpers are no longer implemented locally.
+- Stage-D source size: **929 -> 793 lines** (`-136`, about `-14.6%`);
+- Stage-D source bytes: **33,712 -> 30,325**;
+- `make validate`: **PASS**;
+- pytest: **290 passed, 1 warning**;
+- warning: unchanged legacy invalid-`as_of_date` debt compatibility case;
+- compile + artifact/source/annual/publish contract checks: **PASS**;
+- `make smoke-full`: **PASS**;
+- Stage-D fixture row counts unchanged: per-flow `114`, per-party `277`, box balance `0`, box flow balance `0`, loans `0`, daily cash `4,284`;
+- full expected Stage-D artifact inventory present, including `partitions.json`, semantic/cash outputs, artifact-contract CSVs, and `meta/stage_D_materialize.json`;
+- Stage-D manifest still reports `stage = D.materialize` and the same core materialization relpaths;
+- semantic leakage QA: **0 rows**;
+- exact Phase-0 semantic classification census: **UNCHANGED**;
+- exact Phase-0 ARS/USD annual governed anchors and statuses: **UNCHANGED**;
+- governed `BS.CASH.TOTAL` remains `unavailable` for both ARS and USD in the smoke fixture;
+- native-currency separation remains intact.
+
+Representative reconciled annual anchors remain ARS revenue `33,075,422`, property OPEX `13,615,938.94`, net operating `19,459,483.06`, funding `1,427,956`, draws `29,412,662`, and USD revenue/net operating `4,180`.
+
+The new source regression also requires that Stage D no longer define its own CSV writer, SHA-256 implementation, partition loader/writer, or dead manifest writer. Shared CSV and partition helpers are behaviorally exercised.
+
+## Evidence boundary
+
+The pre-existing fixture limitation remains: `smoke-full` does not provide governed debt-position/activity source artifacts or a real professional pack. This Phase does not touch those layers and makes no new claim about them.
 
 Generated smoke outputs are evidence only and are not committed.
