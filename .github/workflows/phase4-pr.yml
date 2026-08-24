@@ -37,9 +37,35 @@ jobs:
               raise SystemExit('expected caller-error block not found')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
+      - name: Seed transitive public drilldown compatibility into Wave 4 census
+        run: |
+          cat >> accounting/professional/drilldown.py <<'PY'
+
+          # PHASE4_TRANSITIVE_COMPAT_START
+          # Temporary census-only references. Removed before validation/commit.
+          _PHASE4_TRANSITIVE_COMPAT = (
+              _base.STATUS_OK,
+              _base.STATUS_UNSUPPORTED,
+              _base._annual_formula_spec,
+              _base._build_annual_formula_cell,
+              _base._cash_bridge_line_spec,
+              _base._safe_div,
+              _base._semantic_filter_for_statement_line,
+          )
+          # PHASE4_TRANSITIVE_COMPAT_END
+          PY
       - name: Apply caller-derived explicit facade surfaces
         run: |
           python scripts/_phase4_apply.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('accounting/professional/drilldown.py')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('\n# PHASE4_TRANSITIVE_COMPAT_START')
+          end_marker = '# PHASE4_TRANSITIVE_COMPAT_END\n'
+          end = text.index(end_marker, start) + len(end_marker)
+          path.write_text(text[:start] + text[end:], encoding='utf-8')
+          PY
           python scripts/_phase4_post.py
           echo '--- facade summary ---'
           cat notes/accounting_simplification_phase4_facade_summary_20260824.csv
