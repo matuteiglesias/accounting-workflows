@@ -107,8 +107,9 @@ jobs:
               'no_cross_currency_aggregation',
               'debt_stock_not_mixed_with_flows',
               'debt_activity_reconciles_or_residual_visible',
-              'annual_cash_uses_governed_validated_selector',
+              'annual_cash_uses_governed_validated_projection',
               'annual_cash_never_sums_monthly_positions',
+              'annual_cash_scopes_are_source_backed',
           ]:
               rows = qa[qa['check'].eq(check)]
               assert len(rows) == 1 and rows.iloc[0]['status'] == 'pass', (check, rows.to_dict('records'))
@@ -120,6 +121,8 @@ jobs:
           print('annual_flows_sum_monthly_flows=pass')
           print('no_cross_currency_aggregation=pass')
           print('debt_stock_not_mixed_with_flows=pass')
+          print('annual_cash_uses_governed_validated_projection=pass')
+          print('annual_cash_scopes_are_source_backed=pass')
           PY
       - name: Measure post-Phase-5 architecture
         run: |
