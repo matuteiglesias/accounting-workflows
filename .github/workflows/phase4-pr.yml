@@ -25,17 +25,35 @@ jobs:
           python-version: "3.12"
       - name: Install bounded validation dependencies
         run: python -m pip install --upgrade pip pandas pytest
-      - name: Treat jointly transformed facades as internal migration callers
+      - name: Harden caller census for relative imports and jointly transformed facades
         run: |
           python - <<'PY'
           from pathlib import Path
           path = Path('scripts/_phase4_apply.py')
           text = path.read_text(encoding='utf-8')
-          old = "        for err in visitor.dynamic_errors:\n            errors.append(f'{rel}: {err} of {module}')\n"
-          new = "        if rel not in TARGETS:\n            for err in visitor.dynamic_errors:\n                errors.append(f'{rel}: {err} of {module}')\n"
-          if old not in text:
-              raise SystemExit('expected caller-error block not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          replacements = [
+              (
+                  "class CallerVisitor(ast.NodeVisitor):\n    def __init__(self, module: str):\n        self.module = module\n        self.parent, self.child = module.rsplit('.', 1)\n",
+                  "class CallerVisitor(ast.NodeVisitor):\n    def __init__(self, module: str, caller_package: str):\n        self.module = module\n        self.caller_package = caller_package\n        self.parent, self.child = module.rsplit('.', 1)\n",
+              ),
+              (
+                  "    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:\n        if node.module == self.module:\n            for alias in node.names:\n                if alias.name == '*':\n                    self.dynamic_errors.append('star import')\n                else:\n                    self.symbols.add(alias.name)\n        elif node.module == self.parent:\n            for alias in node.names:\n                if alias.name == self.child:\n                    self.module_aliases.add(alias.asname or alias.name)\n        self.generic_visit(node)\n",
+                  "    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:\n        source_module = node.module or ''\n        if node.level:\n            parts = self.caller_package.split('.') if self.caller_package else []\n            keep = max(0, len(parts) - (node.level - 1))\n            base = parts[:keep]\n            if source_module:\n                base.append(source_module)\n            source_module = '.'.join(base)\n        if source_module == self.module:\n            for alias in node.names:\n                if alias.name == '*':\n                    self.dynamic_errors.append('star import')\n                else:\n                    self.symbols.add(alias.name)\n        elif source_module == self.parent:\n            for alias in node.names:\n                if alias.name == self.child:\n                    self.module_aliases.add(alias.asname or alias.name)\n        self.generic_visit(node)\n",
+              ),
+              (
+                  "        visitor = CallerVisitor(module)\n",
+                  "        module_parts = rel[:-3].split('/')\n        caller_package = '.'.join(module_parts[:-1])\n        visitor = CallerVisitor(module, caller_package)\n",
+              ),
+              (
+                  "        for err in visitor.dynamic_errors:\n            errors.append(f'{rel}: {err} of {module}')\n",
+                  "        if rel not in TARGETS:\n            for err in visitor.dynamic_errors:\n                errors.append(f'{rel}: {err} of {module}')\n",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit('expected Phase 4 scanner block not found: ' + old.splitlines()[0])
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
           PY
       - name: Seed transitive public drilldown compatibility into Wave 4 census
         run: |
