@@ -1,0 +1,170 @@
+name: phase6-close
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  close:
+    if: github.head_ref == 'audit/phase6-eod-architecture-close-20260824'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out Phase 6 head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Install bounded validation dependencies
+        run: python -m pip install --upgrade pip pandas pytest
+      - name: Full validation
+        run: make validate
+      - name: Fixture-safe pipeline
+        run: make smoke-full
+      - name: Target key accounting invariants
+        run: |
+          pytest -q \
+            tests/test_property_business_scope.py \
+            tests/test_cash_position_governed.py \
+            tests/test_cash_projection_shared.py \
+            tests/test_professional_debt_position_contract.py \
+            tests/test_professional_debt_position_integration.py \
+            tests/test_professional_debt_activity_contract.py \
+            tests/test_professional_debt_activity_integration.py \
+            tests/test_professional_drilldowns.py
+      - name: Reconcile Phase 0 accounting anchors and annual QA
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import math
+          import pandas as pd
+          from accounting.metrics.annual import build_annual_balance_dashboard
+
+          root = Path('out/smoke/accounting')
+          cls = pd.read_csv(root / 'classification_audit.csv')
+          cls['amount'] = pd.to_numeric(cls['amount'], errors='coerce').fillna(0.0)
+          got = cls.groupby(['Currency','semantic_bucket','semantic_subbucket'], dropna=False)['amount'].sum().to_dict()
+          expected = {
+              ('ARS','debt_movement','principal'): 1576761.0,
+              ('ARS','family_withdrawal_candidate','personal_expense'): 29412662.0,
+              ('ARS','funding_contribution','family_or_tenant_contribution'): 1427956.0,
+              ('ARS','operating_revenue','rent'): 33075422.0,
+              ('ARS','property_opex','legal'): 147000.0,
+              ('ARS','property_opex','maintenance'): 240000.0,
+              ('ARS','property_opex','services'): 5801045.41,
+              ('ARS','property_opex','taxes'): 7427893.53,
+              ('USD','debt_movement','principal'): 2240.0,
+              ('USD','operating_revenue','rent'): 4180.0,
+          }
+          assert set(got) == set(expected)
+          for key, value in expected.items():
+              assert math.isclose(float(got[key]), value, rel_tol=0, abs_tol=1e-6), (key, got[key], value)
+          leakage = pd.read_csv(root / 'semantic_leakage_qa.csv')
+          assert len(leakage) == 0
+
+          ledger = pd.read_csv(root / 'ledger_canonical.csv')
+          as_of = str(pd.to_datetime(ledger['Date'], errors='coerce').max().date())
+          paths = build_annual_balance_dashboard(root, Path('out/smoke/phase6_metrics'), 'phase6', as_of)
+          annual = pd.read_csv(paths['annual_balance_dashboard_metrics'])
+          annual['value'] = pd.to_numeric(annual['value'], errors='coerce')
+          checks = {
+              ('ARS','IS.REVENUE.OPERATING'): 33075422.0,
+              ('ARS','IS.RENT.TOTAL'): 33075422.0,
+              ('ARS','IS.OPEX.PROPERTY'): 13615938.94,
+              ('ARS','IS.NET.OPERATING'): 19459483.06,
+              ('ARS','FUND.CONTRIB.TOTAL'): 1427956.0,
+              ('ARS','DIST.DRAWS.PERSONAL'): 29412662.0,
+              ('ARS','COV.NET.AFTER_DRAWS'): -8525222.94,
+              ('ARS','COV.SAVINGS_RATE'): -0.4381012030850936,
+              ('USD','IS.REVENUE.OPERATING'): 4180.0,
+              ('USD','IS.RENT.TOTAL'): 4180.0,
+              ('USD','IS.OPEX.PROPERTY'): 0.0,
+              ('USD','IS.NET.OPERATING'): 4180.0,
+              ('USD','FUND.CONTRIB.TOTAL'): 0.0,
+              ('USD','DIST.DRAWS.PERSONAL'): 0.0,
+              ('USD','COV.NET.AFTER_DRAWS'): 4180.0,
+              ('USD','COV.SAVINGS_RATE'): 1.0,
+          }
+          for (currency, metric_id), expected_value in checks.items():
+              rows = annual[(annual['Currency'] == currency) & (annual['metric_id'] == metric_id) & annual['dimension_name'].isna()]
+              assert len(rows) == 1, (currency, metric_id, len(rows))
+              row = rows.iloc[0]
+              assert row['value_status'] == 'available'
+              assert math.isclose(float(row['value']), expected_value, rel_tol=0, abs_tol=1e-6), (currency, metric_id, row['value'])
+          for currency in ('ARS','USD'):
+              cash = annual[(annual['Currency'] == currency) & (annual['metric_id'] == 'BS.CASH.TOTAL')]
+              assert len(cash) == 1 and cash.iloc[0]['value_status'] == 'unavailable'
+
+          qa = pd.read_csv(paths['annual_balance_dashboard_qa'])
+          for check in [
+              'annual_flows_sum_monthly_flows',
+              'ratios_use_annual_aggregates',
+              'no_cross_currency_aggregation',
+              'debt_stock_not_mixed_with_flows',
+              'debt_activity_reconciles_or_residual_visible',
+              'annual_cash_uses_governed_validated_selector',
+              'annual_cash_never_sums_monthly_positions',
+          ]:
+              rows = qa[qa['check'].eq(check)]
+              assert len(rows) == 1 and rows.iloc[0]['status'] == 'pass', (check, rows.to_dict('records'))
+          print('PHASE6_RECONCILIATION=PASS')
+          print('semantic_leakage_rows=0')
+          print('funding_ARS=1427956.0')
+          print('cash_ARS_status=unavailable')
+          print('cash_USD_status=unavailable')
+          print('annual_flows_sum_monthly_flows=pass')
+          print('no_cross_currency_aggregation=pass')
+          print('debt_stock_not_mixed_with_flows=pass')
+          PY
+      - name: Measure post-Phase-5 architecture
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from collections import defaultdict
+          import re
+
+          root = Path('accounting')
+          files = sorted(p for p in root.rglob('*.py') if 'notebooks' not in p.parts)
+          def loc(p):
+              return len(p.read_text(encoding='utf-8').splitlines())
+          total = sum(loc(p) for p in files)
+          package = defaultdict(lambda: [0,0])
+          for p in files:
+              rel = p.relative_to(root)
+              key = rel.parts[0] if len(rel.parts) > 1 else '<root>'
+              package[key][0] += 1
+              package[key][1] += loc(p)
+          broad = []
+          facade = []
+          legacy_impl = []
+          for p in files:
+              text = p.read_text(encoding='utf-8')
+              if re.search(r'for\s+_?name\s+in\s+dir\(', text) or ('globals()[' in text and 'dir(' in text):
+                  broad.append(str(p))
+              if 'LEGACY_COMPAT_EXPORTS' in text:
+                  facade.append(str(p))
+              if p.name.endswith('_legacy.py'):
+                  legacy_impl.append(str(p))
+          print('=== PHASE6_CENSUS ===')
+          print(f'accounting_python_files={len(files)}')
+          print(f'accounting_python_loc={total}')
+          print(f'professional_files={package["professional"][0]}')
+          print(f'professional_loc={package["professional"][1]}')
+          print(f'legacy_explicit_facades={len(facade)}')
+          print(f'legacy_implementation_modules={len(legacy_impl)}')
+          print(f'broad_dynamic_reexports={len(broad)}')
+          print('facades=' + ';'.join(facade))
+          print('legacy_impl=' + ';'.join(legacy_impl))
+          print('broad=' + ';'.join(broad))
+          print('=== PACKAGE_LOC ===')
+          for key, (n, lines) in sorted(package.items(), key=lambda kv: kv[1][1], reverse=True):
+              print(f'{key}: files={n} loc={lines}')
+          print('=== TOP_MODULES ===')
+          for p in sorted(files, key=loc, reverse=True)[:20]:
+              print(f'{p}: {loc(p)}')
+          PY
