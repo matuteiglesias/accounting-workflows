@@ -25,6 +25,20 @@ jobs:
           python-version: "3.12"
       - name: Install bounded validation dependencies
         run: python -m pip install --upgrade pip pandas pytest
+      - name: Harden Phase 1 applier against Makefile whitespace drift
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/_phase1_apply.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'make = must_replace(make, human_target_block, replacement_dashboard, "human target block")'
+          new = '''human_start = make.index("\\n.PHONY: run-human-report run-human-balance _run_human_balance_action")
+human_end = make.index("\\n# ========================================\\n# CHECKS", human_start)
+make = make[:human_start] + "\\n" + replacement_dashboard + make[human_end:]'''
+          if old not in text:
+              raise SystemExit('expected Phase 1 human-target replacement line not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply Phase 1 reachability cleanup
         run: python scripts/_phase1_apply.py
       - name: Validate contracts and regressions
