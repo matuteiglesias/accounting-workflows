@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import csv
-from pathlib import Path
-
 import pandas as pd
 
 from accounting.professional.drilldown import (
@@ -13,38 +10,8 @@ from accounting.professional.drilldown import (
 from accounting.professional.table_contracts import enrich_professional_table
 
 
-ROOT = Path(__file__).resolve().parents[1]
-MATRIX = ROOT / "diagnostics" / "atomic_flow_reachability_20260819.csv"
-
-
-def _rows() -> list[dict[str, str]]:
-    with MATRIX.open(encoding="utf-8", newline="") as handle:
-        return list(csv.DictReader(handle))
-
-
 def _enrich(table_id: str, row: dict[str, object]) -> pd.Series:
     return enrich_professional_table(pd.DataFrame([row]), table_id).iloc[0]
-
-
-def test_reachability_inventory_has_expected_wave3_boundary() -> None:
-    rows = _rows()
-    assert len(rows) == 20
-    counts = pd.Series([row["routing_strategy"] for row in rows]).value_counts().to_dict()
-    assert counts == {
-        "GOVERNED_ATOMIC": 12,
-        "NET_DIAGNOSTIC": 3,
-        "ANNUAL_METRIC": 2,
-        "DEFERRED_FUNDING_SUPPORT": 1,
-        "DEFERRED_FX": 1,
-        "COMPATIBILITY": 1,
-    }
-    assert not any(row["routing_strategy"] == "LEGACY_ATOMIC" for row in rows)
-    safe = {row["case_id"] for row in rows if row["safe_to_delete"] == "true"}
-    assert safe == {
-        "draws_by_box_monthly",
-        "draws_by_type_monthly",
-        "opex_by_box_category_monthly",
-    }
 
 
 def test_all_simple_monthly_atomic_rows_resolve_to_governed_specs() -> None:

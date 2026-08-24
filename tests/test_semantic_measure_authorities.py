@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pandas as pd
@@ -16,12 +15,6 @@ from accounting.professional.drilldown import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MATRIX = ROOT / "docs" / "semantic_measure_authorities_20260819.csv"
-
-
-def _matrix() -> dict[str, dict[str, str]]:
-    with MATRIX.open(encoding="utf-8", newline="") as handle:
-        return {row["semantic_concept"]: row for row in csv.DictReader(handle)}
 
 
 def _split() -> pd.DataFrame:
@@ -63,37 +56,7 @@ def _split() -> pd.DataFrame:
     )
 
 
-def test_matrix_has_requested_cases_and_measured_edit_distance() -> None:
-    rows = _matrix()
-    assert set(rows) == {
-        "rent",
-        "opex_taxes",
-        "opex_services",
-        "opex_maintenance",
-        "opex_legal",
-        "funding",
-        "withdrawals",
-        "debt_principal",
-        "debt_repayment",
-        "internal_transfer",
-        "fx_proceeds",
-        "fx_outflow",
-        "fx_cost",
-        "unknown_fx",
-        "review_required",
-    }
-    assert all(
-        row["semantic_edit_distance"] == row["production_authority_count"]
-        for row in rows.values()
-    )
-    assert {rows[name]["semantic_edit_distance"] for name in [
-        "rent", "opex_taxes", "opex_services", "opex_maintenance",
-        "opex_legal", "funding", "withdrawals", "fx_proceeds",
-        "fx_outflow", "fx_cost",
-    ]} == {"1"}
-
-
-def test_native_statement_measures_and_review_fallback_are_frozen() -> None:
+def test_native_statement_measures_and_review_fallback_are_governed() -> None:
     statement, _ = build_monthly_operating_statement_from_split(_split())
     by_line = statement.set_index("statement_line")
 
@@ -125,19 +88,33 @@ def test_native_statement_measures_and_review_fallback_are_frozen() -> None:
     assert fallback_by_line.loc["unknown_or_ambiguous_outflows", "amount"] == 25
 
 
-def test_management_and_professional_selectors_match_characterization() -> None:
-    rows = _matrix()
-    for concept in ["rent", "opex_taxes", "opex_services", "opex_maintenance", "opex_legal", "funding", "withdrawals", "fx_proceeds", "fx_outflow", "fx_cost"]:
-        row = rows[concept]
-        semantic = {
-            "semantic_bucket": row["semantic_bucket"],
-            "semantic_subbucket": row["semantic_subbucket"].replace("*", ""),
-        }
-        assert _measure_direction(semantic) == row["management_measure"].removeprefix("amount_")
+def test_management_and_professional_selectors_match_governed_atomic_direction() -> None:
+    management_cases = [
+        ("operating_revenue", "rent", "in"),
+        ("property_opex", "taxes", "out"),
+        ("property_opex", "services", "out"),
+        ("property_opex", "maintenance", "out"),
+        ("property_opex", "legal", "out"),
+        ("funding_contribution", "family_or_tenant_contribution", "in"),
+        ("family_withdrawal_candidate", "personal_expense", "out"),
+        ("treasury_fx", "fx_conversion_proceeds", "in"),
+        ("treasury_fx", "fx_conversion_outflow", "out"),
+        ("treasury_fx", "fx_cost_or_spread", "out"),
+    ]
+    for bucket, subbucket, expected in management_cases:
+        assert _measure_direction(
+            {"semantic_bucket": bucket, "semantic_subbucket": subbucket}
+        ) == expected
 
-    assert _measure_direction({"semantic_bucket": "debt_movement", "semantic_subbucket": "principal"}) == ""
-    assert _measure_direction({"semantic_bucket": "internal_transfer", "semantic_subbucket": "transfer"}) == ""
-    assert _measure_direction({"semantic_bucket": "treasury_fx", "semantic_subbucket": "unapproved_future_fx"}) == ""
+    assert _measure_direction(
+        {"semantic_bucket": "debt_movement", "semantic_subbucket": "principal"}
+    ) == ""
+    assert _measure_direction(
+        {"semantic_bucket": "internal_transfer", "semantic_subbucket": "transfer"}
+    ) == ""
+    assert _measure_direction(
+        {"semantic_bucket": "treasury_fx", "semantic_subbucket": "unapproved_future_fx"}
+    ) == ""
 
     line_measures = {
         "rent_revenue": "amount_in",
@@ -195,9 +172,7 @@ def test_annual_metrics_delegate_atomic_measures_to_upstream_or_contract() -> No
     assert '"ID.DEBT.ACTIVITY.REPAYMENTS"' in source
 
 
-def test_annual_atomic_detail_matches_characterized_monthly_measures(
-    tmp_path: Path,
-) -> None:
+def test_annual_atomic_detail_matches_governed_monthly_measures(tmp_path: Path) -> None:
     split = _split()
     split["Box"] = "Property Management"
     split["Lugar"] = "CABA"

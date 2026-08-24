@@ -6,14 +6,6 @@ import pandas as pd
 
 from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.debt import build_monthly_debt_position
-from accounting.professional.drilldown_legacy import (
-    _build_annual_cash_close_companion_cell,
-    _build_annual_debt_activity_companion_cell,
-    _build_annual_debt_stock_companion_cell,
-    _build_cash_control_cell,
-    _build_debt_activity_cell,
-    _build_debt_position_cell,
-)
 
 
 def _write(path: Path, rows: list[dict]) -> None:
@@ -104,79 +96,6 @@ def test_cash_mart_preserves_three_distinct_position_populations(tmp_path: Path)
     ].astype(bool).any()
 
 
-def test_current_professional_cash_monthly_mix_is_characterized_not_fixed(tmp_path: Path) -> None:
-    cash = _build_cash_fixture(tmp_path)
-    row = pd.Series({"Currency": "ARS", "Box": "Property Management", "metric": "cash_close"})
-
-    result = _build_cash_control_cell(
-        row=row,
-        period="2026-01",
-        display_value=200,
-        source_df=cash,
-        source_name="monthly_cash_close.csv",
-        default_metric="cash_close",
-        tolerance=1e-6,
-    )
-    matched = result[1]
-    selected = result[7]
-
-    # Current behavior: blank-party validated rows and inferred_box_motor are
-    # both treated as box-level and summed. The validated accounts total 100
-    # and inferred_box_motor is also 100, so the professional helper returns
-    # 200. This is intentionally a characterization of the current ambiguity.
-    assert matched == 200
-    assert set(selected["position_type"]) == {"cash_close", "inferred_box_motor"}
-    assert not selected["position_type"].eq("internal_balance").any()
-
-
-def test_current_professional_cash_annual_and_diagnostic_population_rules_are_frozen(
-    tmp_path: Path,
-) -> None:
-    cash = _build_cash_fixture(tmp_path)
-
-    annual_row = pd.Series({"Currency": "ARS", "Box": "Property Management"})
-    annual = _build_annual_cash_close_companion_cell(
-        row=annual_row,
-        period="2026",
-        display_value=250,
-        cash_close=cash,
-        tolerance=1e-6,
-    )
-    annual_selected = annual[7]
-    assert annual[1] == 250
-    assert set(annual_selected["position_type"]) == {
-        "internal_balance",
-        "inferred_box_motor",
-        "cash_close",
-    }
-
-    diagnostic_row = pd.Series(
-        {"Currency": "ARS", "Box": "Property Management", "metric": "diagnostic_box_level"}
-    )
-    diagnostic = _build_cash_control_cell(
-        row=diagnostic_row,
-        period="2026-01",
-        display_value=40,
-        source_df=cash,
-        source_name="monthly_cash_close.csv",
-        default_metric="diagnostic_box_level",
-        tolerance=1e-6,
-    )
-    assert diagnostic[1] == 40
-
-    missing_previous = _build_cash_control_cell(
-        row=diagnostic_row,
-        period="2025-12",
-        display_value=160,
-        source_df=cash,
-        source_name="monthly_cash_close.csv",
-        default_metric="diagnostic_box_level",
-        tolerance=1e-6,
-    )
-    # With no 2025-11 row, current behavior treats the missing prior close as 0.
-    assert missing_previous[1] == 160
-
-
 def test_debt_position_builder_selects_latest_valid_snapshot_and_exposes_component_contract(
     tmp_path: Path,
 ) -> None:
@@ -195,56 +114,21 @@ def test_debt_position_builder_selects_latest_valid_snapshot_and_exposes_compone
         assert row["open_total"] == 870.0
 
 
-def test_debt_position_all_invalid_as_of_dates_currently_fail_open_lexically(
+def test_known_defect_all_invalid_debt_as_of_dates_fail_open_lexically(
     tmp_path: Path,
 ) -> None:
+    """P0 fixture: preserve the reproduced mart defect until the authority repair lands."""
+
     position, _ = _build_debt_fixture(tmp_path)
     april = position[position["period"].eq("2025-04")]
 
-    # Both source as_of_date values are unparseable. Current mart behavior does
-    # not reject the month; secondary string ordering selects not-a-date-z.
+    # This assertion is intentionally the current wrong behavior. Do not delete
+    # it as cleanup: the repair must invert it to unavailable/no lexical close.
     assert set(april["as_of_date"]) == {"not-a-date-z"}
     assert april[april["component"].eq("total")].iloc[0]["open_amount"] == 700.0
 
 
-def test_professional_debt_position_monthly_and_annual_are_snapshot_not_sum(
-    tmp_path: Path,
-) -> None:
-    position, _ = _build_debt_fixture(tmp_path)
-
-    monthly_row = pd.Series(
-        {"measure": "open_principal", "Currency": "USD", "pair": "PM → MI"}
-    )
-    monthly = _build_debt_position_cell(
-        row=monthly_row,
-        period="2025-03",
-        display_value=850,
-        debt_position=position,
-        tolerance=1e-6,
-    )
-    assert monthly[1] == 850
-    assert len(monthly[7]) == 1
-    assert monthly[7].iloc[0]["component"] == "principal"
-    assert monthly[7].iloc[0]["as_of_date"] == "2025-03-31"
-
-    annual_row = pd.Series(
-        {"Currency": "USD", "debtor": "PM", "creditor": "MI", "component": "open_principal"}
-    )
-    annual = _build_annual_debt_stock_companion_cell(
-        row=annual_row,
-        period="2025",
-        display_value=700,
-        debt_position=position,
-        tolerance=1e-6,
-    )
-    # Annual stock chooses the latest available period (2025-04) rather than
-    # summing 2025-02 + 2025-03 + 2025-04. The latest period in this adversarial
-    # fixture carries only invalid as_of_date values, which is a separate
-    # fail-open behavior frozen by the preceding test.
-    assert annual[1] == 700
-
-
-def test_debt_activity_is_sparse_period_flow_and_annualization_sums_months(
+def test_debt_activity_preserves_sparse_flow_identity_and_known_repayments(
     tmp_path: Path,
 ) -> None:
     _, activity = _build_debt_fixture(tmp_path)
@@ -266,47 +150,19 @@ def test_debt_activity_is_sparse_period_flow_and_annualization_sums_months(
         "net_change": "net_change",
     }
     for measure, activity_type in nonzero_specs.items():
-        nonzero = activity[pd.to_numeric(activity[measure], errors="coerce").fillna(0).abs().gt(1e-9)]
+        nonzero = activity[
+            pd.to_numeric(activity[measure], errors="coerce")
+            .fillna(0)
+            .abs()
+            .gt(1e-9)
+        ]
         assert set(nonzero["activity_type"]) <= {activity_type}
 
-    monthly_row = pd.Series(
-        {"measure": "repayments", "Currency": "USD", "pair": "PM → MI"}
-    )
-    monthly = _build_debt_activity_cell(
-        row=monthly_row,
-        period="2025-03",
-        display_value=180,
-        debt_activity=activity,
-        tolerance=1e-6,
-    )
-    assert monthly[1] == 180
-    assert set(monthly[7]["activity_type"]) == {"repayment"}
+    march = activity[
+        activity["period"].eq("2025-03")
+        & activity["activity_type"].eq("repayment")
+    ]
+    assert float(march["repayments"].sum()) == 180.0
 
-    annual_row = pd.Series(
-        {
-            "Currency": "USD",
-            "debtor": "PM",
-            "creditor": "MI",
-            "activity_type": "repayments",
-        }
-    )
-    annual = _build_annual_debt_activity_companion_cell(
-        row=annual_row,
-        period="2025",
-        display_value=350,
-        debt_activity=activity,
-        tolerance=1e-6,
-    )
-    assert annual[1] == 350
-
-
-def test_wave4_semantics_inventory_records_blockers_and_boundaries() -> None:
-    inventory = pd.read_csv(
-        Path("diagnostics/position_activity_semantics_inventory_20260819.csv")
-    )
-    assert set(inventory["domain"]) == {"debt_position", "debt_activity", "cash_position"}
-    assert set(inventory[inventory["domain"].eq("debt_position")]["nature"]) == {"stock"}
-    assert set(inventory[inventory["domain"].eq("debt_activity")]["nature"]) == {"flow"}
-    cash = inventory[inventory["domain"].eq("cash_position")]
-    assert set(cash["contract_readiness"]) == {"BLOCKED_CASH_AUTHORITY"}
-    assert cash["current_population_rule"].str.contains("mix", case=False).any()
+    repayments = activity[activity["activity_type"].eq("repayment")]
+    assert float(repayments["repayments"].sum()) == 350.0

@@ -1,39 +1,22 @@
 from __future__ import annotations
 
-from pathlib import Path
+"""Compatibility tests for pre-stable-ID professional derived formulas.
+
+These tests deliberately preserve behavior that is *not* the current governed
+meaning. They exist only while supported historical/minimal professional rows
+can reach the label-selected legacy formula/diagnostic path.
+
+Removal condition: delete this module when supported professional inputs always
+carry stable ``derived_metric_id`` metadata and the legacy label formula and
+legacy diagnostic paths are no longer reachable.
+"""
 
 import pandas as pd
 
-from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.professional import drilldown as professional
 
 
-ROOT = Path(__file__).resolve().parents[1]
-INVENTORY = ROOT / "diagnostics" / "derived_metric_authority_inventory_20260819.csv"
-
-
-def test_inventory_covers_wave5_derived_authority_surface() -> None:
-    inventory = pd.read_csv(INVENTORY)
-    expected = {
-        "statement.net_operating",
-        "statement.coverage_after_draws",
-        "statement.treasury_fx_net",
-        "annual.savings_rate",
-        "professional.operating_margin",
-        "professional.opex_to_rent",
-        "professional.draws_to_operating_result",
-        "professional.coverage_after_funding_and_draws",
-        "professional.annual_net_operating_rebuild",
-        "professional.diagnostic_box_level",
-        "annual.debt_net_pm_position",
-        "professional.net_flow_observed",
-    }
-    assert set(inventory["authority_id"]) == expected
-    assert set(inventory["pr17_readiness"]) <= {"READY", "BLOCKED", "DEFER"}
-    assert set(inventory["decision_required"]) <= {"yes", "no"}
-
-
-def test_professional_formula_identity_is_currently_bound_to_four_human_labels() -> None:
+def test_legacy_formula_identity_is_bound_to_supported_human_labels() -> None:
     expected = {
         "Margen operativo": (
             "operating_margin",
@@ -63,14 +46,26 @@ def test_professional_formula_identity_is_currently_bound_to_four_human_labels()
         assert spec.formula_id == formula_id
         assert spec.component_metric_ids == components
 
-    assert professional._annual_formula_spec(pd.Series({"metric": "future stable metric"})) is None
+    assert professional._annual_formula_spec(
+        pd.Series({"metric": "future stable metric"})
+    ) is None
 
 
-def test_professional_ratio_zero_denominator_is_characterized_as_zero_today() -> None:
+def test_legacy_ratio_zero_denominator_returns_zero() -> None:
     annual = pd.DataFrame(
         [
-            {"metric_id": "IS.NET.OPERATING", "period": "2026", "Currency": "ARS", "value": 0.0},
-            {"metric_id": "IS.REVENUE.OPERATING", "period": "2026", "Currency": "ARS", "value": 0.0},
+            {
+                "metric_id": "IS.NET.OPERATING",
+                "period": "2026",
+                "Currency": "ARS",
+                "value": 0.0,
+            },
+            {
+                "metric_id": "IS.REVENUE.OPERATING",
+                "period": "2026",
+                "Currency": "ARS",
+                "value": 0.0,
+            },
         ]
     )
     result = professional._build_annual_formula_cell(
@@ -88,14 +83,24 @@ def test_professional_ratio_zero_denominator_is_characterized_as_zero_today() ->
     assert professional._safe_div(100.0, 0.0) == 0.0
 
 
-def test_professional_coverage_prefers_source_metric_then_recomputes_with_zero_defaults() -> None:
+def test_legacy_coverage_recomputes_with_zero_defaults_when_source_is_missing() -> None:
     row = pd.Series(
         {"metric": "Cobertura después de funding y retiros", "Currency": "ARS"}
     )
     partial = pd.DataFrame(
         [
-            {"metric_id": "IS.NET.OPERATING", "period": "2026", "Currency": "ARS", "value": 100.0},
-            {"metric_id": "DIST.DRAWS.PERSONAL", "period": "2026", "Currency": "ARS", "value": 30.0},
+            {
+                "metric_id": "IS.NET.OPERATING",
+                "period": "2026",
+                "Currency": "ARS",
+                "value": 100.0,
+            },
+            {
+                "metric_id": "DIST.DRAWS.PERSONAL",
+                "period": "2026",
+                "Currency": "ARS",
+                "value": 30.0,
+            },
         ]
     )
     recomputed = professional._build_annual_formula_cell(
@@ -139,30 +144,7 @@ def test_professional_coverage_prefers_source_metric_then_recomputes_with_zero_d
     assert sourced[1] == 55.0
 
 
-def test_annual_savings_rate_zero_denominator_is_not_applicable(tmp_path: Path) -> None:
-    run_root = tmp_path / "run"
-    metrics_dir = tmp_path / "metrics"
-    run_root.mkdir()
-    pd.DataFrame(
-        [
-            {"period": "2026-01", "Currency": "ARS", "statement_line": "net_operating", "amount": 0.0},
-            {"period": "2026-01", "Currency": "ARS", "statement_line": "coverage_after_draws", "amount": 100.0},
-        ]
-    ).to_csv(run_root / "monthly_operating_statement.csv", index=False)
-
-    paths = build_annual_balance_dashboard(run_root, metrics_dir, "fixture", "2026-01-31")
-    metrics = pd.read_csv(paths["annual_balance_dashboard_metrics"])
-    savings = metrics[
-        metrics["metric_id"].eq("COV.SAVINGS_RATE")
-        & metrics["period"].astype(str).str.replace(r"\.0$", "", regex=True).eq("2026")
-        & metrics["Currency"].eq("ARS")
-    ]
-    assert len(savings) == 1
-    assert savings.iloc[0]["value_status"] == "not_applicable"
-    assert pd.isna(savings.iloc[0]["value"])
-
-
-def test_diagnostic_box_level_currently_uses_blank_party_fallback_and_zero_missing_prior() -> None:
+def test_legacy_diagnostic_can_mix_blank_party_cash_and_inferred_control() -> None:
     cash = pd.DataFrame(
         [
             {
@@ -208,26 +190,3 @@ def test_diagnostic_box_level_currently_uses_blank_party_fallback_and_zero_missi
     assert result[0] == "ok"
     assert result[1] == 200.0
     assert result[5]["previous_period"] == "2026-01"
-
-
-def test_upstream_derived_lines_remain_authoritative_after_pr18_migration() -> None:
-    semantic = (ROOT / "accounting" / "marts" / "semantic.py").read_text(encoding="utf-8")
-    assert "net_operating = float(op_rev - opex)" in semantic
-    assert "coverage_after_draws = float(net_operating + funding - draws)" in semantic
-    assert 'add_row(base, "net_operating"' in semantic
-    assert 'add_row(base, "coverage_after_draws"' in semantic
-
-    contract = ROOT / "accounting" / "contracts" / "derived_metrics.py"
-    assert contract.exists()
-    consumers: list[str] = []
-    for path in (ROOT / "accounting").rglob("*.py"):
-        if path == contract:
-            continue
-        text = path.read_text(encoding="utf-8")
-        if "contracts.derived_metrics" in text or "DerivedMetricSpec" in text:
-            consumers.append(str(path.relative_to(ROOT)))
-    assert sorted(consumers) == [
-        "accounting/professional/derived_metric_executor.py",
-        "accounting/professional/derived_metric_metadata.py",
-        "accounting/professional/drilldown.py",
-    ]

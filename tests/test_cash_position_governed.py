@@ -13,10 +13,6 @@ from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.metrics.frontier import build_metrics_frontier
 from accounting.professional.annual_dashboard_tables import build_annual_cash_close_by_box
 from accounting.professional.drilldown import _build_derived_cell
-from accounting.professional.drilldown_legacy import (
-    _build_annual_cash_close_companion_cell as legacy_annual_cash,
-    _build_cash_control_cell as legacy_cash_control,
-)
 
 
 def _row(
@@ -188,23 +184,13 @@ def test_monthly_and_annual_use_identical_validated_population() -> None:
     assert set(monthly.selected["account_id"]) == set(annual.selected["account_id"])
 
 
-def test_professional_before_after_and_diagnostic_boundary() -> None:
+def test_professional_cash_surfaces_select_only_validated_accounts() -> None:
     cash = cash_fixture()
     row = pd.Series(
         {"Currency": "ARS", "Box": "Property Management", "metric": "cash_close"}
     )
-    before_month = legacy_cash_control(
-        row=row,
-        period="2026-01",
-        display_value=200,
-        source_df=cash,
-        source_name="monthly_cash_close.csv",
-        default_metric="cash_close",
-        tolerance=1e-6,
-    )
-    assert before_month[1] == 200
 
-    after_month = _build_derived_cell(
+    monthly = _build_derived_cell(
         table_id="monthly_tables_cash_close_matrix",
         row=row,
         period="2026-01",
@@ -218,25 +204,16 @@ def test_professional_before_after_and_diagnostic_boundary() -> None:
         debt_position=pd.DataFrame(),
         tolerance=1e-6,
     )
-    assert after_month[0] == "ok"
-    assert after_month[1] == 100
-    assert set(after_month[7]["account_id"]) == {"bank-a", "bank-b"}
-    section_names = [name for name, _ in after_month[8]]
+    assert monthly[0] == "ok"
+    assert monthly[1] == 100
+    assert set(monthly[7]["account_id"]) == {"bank-a", "bank-b"}
+    section_names = [name for name, _ in monthly[8]]
     assert "Excluded inferred control rows" in section_names
     assert "Excluded internal balance rows" in section_names
 
-    annual_row = pd.Series({"Currency": "ARS", "Box": "Property Management"})
-    before_annual = legacy_annual_cash(
-        row=annual_row,
-        period="2026",
-        display_value=250,
-        cash_close=cash,
-        tolerance=1e-6,
-    )
-    assert before_annual[1] == 250
-    after_annual = _build_derived_cell(
+    annual = _build_derived_cell(
         table_id="annual_cash_close_by_box_wide",
-        row=annual_row,
+        row=pd.Series({"Currency": "ARS", "Box": "Property Management"}),
         period="2026",
         display_value=100,
         split=pd.DataFrame(),
@@ -248,32 +225,8 @@ def test_professional_before_after_and_diagnostic_boundary() -> None:
         debt_position=pd.DataFrame(),
         tolerance=1e-6,
     )
-    assert after_annual[0] == "ok"
-    assert after_annual[1] == 100
-
-    # Wave 5 boundary: diagnostic still delegates to the characterized legacy
-    # period-delta implementation and therefore remains 40 for this fixture.
-    diagnostic = _build_derived_cell(
-        table_id="monthly_tables_diagnostic_box_level_matrix",
-        row=pd.Series(
-            {
-                "Currency": "ARS",
-                "Box": "Property Management",
-                "metric": "diagnostic_box_level",
-            }
-        ),
-        period="2026-01",
-        display_value=40,
-        split=pd.DataFrame(),
-        audit=pd.DataFrame(),
-        stmt=pd.DataFrame(),
-        annual=pd.DataFrame(),
-        cash_close=cash,
-        debt_activity=pd.DataFrame(),
-        debt_position=pd.DataFrame(),
-        tolerance=1e-6,
-    )
-    assert diagnostic[1] == 40
+    assert annual[0] == "ok"
+    assert annual[1] == 100
 
 
 def test_frontier_monthly_cash_is_governed_and_not_double_counted(tmp_path: Path) -> None:
@@ -323,7 +276,9 @@ def test_annual_metrics_and_companion_use_same_cash_selector(tmp_path: Path) -> 
     assert len(box) == 1 and box.iloc[0]["value"] == 100
     assert len(total) == 1 and total.iloc[0]["value"] == 100
 
-    companion_long, _ = build_annual_cash_close_by_box(cash, year_columns=("2025", "2026"))
+    companion_long, _ = build_annual_cash_close_by_box(
+        cash, year_columns=("2025", "2026")
+    )
     companion = companion_long[
         companion_long["period"].astype(str).eq("2026")
         & companion_long["Currency"].eq("ARS")

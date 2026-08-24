@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 import pytest
@@ -13,7 +12,6 @@ from accounting.contracts.semantic_measures import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CHARACTERIZATION = ROOT / "docs" / "semantic_measure_authorities_20260819.csv"
 
 
 @pytest.mark.parametrize(
@@ -62,26 +60,6 @@ def test_registry_is_versioned_and_immutable() -> None:
     assert len(SEMANTIC_MEASURE_REGISTRY_V1) == 10
     with pytest.raises(TypeError):
         SEMANTIC_MEASURE_REGISTRY_V1[("future_bucket", "*")] = "amount_in"  # type: ignore[index]
-
-
-def test_registry_matches_characterized_native_authority() -> None:
-    with CHARACTERIZATION.open(encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-
-    characterized = {
-        row["semantic_concept"]: resolve_semantic_measure(
-            row["semantic_bucket"],
-            row["semantic_subbucket"].replace("*", "representative_subbucket"),
-        )
-        for row in rows
-        if row["semantic_concept"] not in {"unknown_fx", "review_required"}
-    }
-    expected = {
-        row["semantic_concept"]: row["native_statement_measure"]
-        for row in rows
-        if row["semantic_concept"] not in {"unknown_fx", "review_required"}
-    }
-    assert characterized == expected
 
 
 def test_atomic_consumers_are_wired_to_registry() -> None:

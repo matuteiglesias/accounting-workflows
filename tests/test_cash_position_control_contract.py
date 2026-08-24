@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields
-from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -83,8 +82,6 @@ def test_validated_cash_requires_account_level_snapshot_completeness() -> None:
 
 
 def test_validated_cash_contract_matches_current_mart_validation_vocabulary() -> None:
-    # PR15A does not change the mart. This parity guard prevents the new
-    # contract from quietly approving a broader/different source vocabulary.
     assert set(APPROVED_VALIDATED_CASH_STATUSES) == set(EXPLICIT_VALIDATION_STATUSES)
     assert set(APPROVED_VALIDATED_CASH_SOURCE_TYPES) == set(VALIDATED_CASH_SOURCE_TYPES)
 
@@ -196,15 +193,3 @@ def test_resolvers_fail_closed_on_unknown_or_cross_domain_ids() -> None:
     assert resolve_inferred_box_control_spec("cash.control.unknown") is None
     assert resolve_validated_cash_position_spec("cash.control.inferred_box_motor") is None
     assert resolve_inferred_box_control_spec("cash.position.validated") is None
-
-
-def test_pr15a_adds_contracts_without_production_consumers() -> None:
-    needle = "accounting.contracts.cash_position_control"
-    for consumer in [
-        "accounting/marts/cash.py",
-        "accounting/professional/drilldown.py",
-        "accounting/professional/drilldown_legacy.py",
-        "accounting/professional/annual_dashboard_tables.py",
-        "accounting/metrics/annual.py",
-    ]:
-        assert needle not in Path(consumer).read_text(encoding="utf-8"), consumer
