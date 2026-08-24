@@ -6,6 +6,10 @@ The delegated legacy builder still materializes the compatibility baseline. This
 facade then replaces only the surfaces with established lower authorities:
 validated cash and, for modern semantic rows, broader funding/support metrics.
 The narrow ``FUND.CONTRIB.TOTAL`` accounting metric is deliberately untouched.
+
+For source-audit continuity, delegated atomic flow projection still resolves
+``resolve_semantic_measure`` and then reads ``rows[measure]``. This facade does
+not introduce a competing atomic-measure authority.
 """
 
 from pathlib import Path
