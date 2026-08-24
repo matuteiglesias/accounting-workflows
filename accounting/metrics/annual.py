@@ -18,6 +18,7 @@ import pandas as pd
 
 from accounting.cash_authority import validated_cash_schema_supported
 from accounting.cash_projection import iter_validated_annual_cash_positions
+from accounting.contracts.annual_flow_membership import build_annual_flow_membership
 from accounting.contracts.funding_support import (
     FUNDING_SUPPORT_SPECS_VERSION,
     classify_funding_support,
@@ -309,6 +310,10 @@ def build_annual_balance_dashboard(
     metrics = pd.read_csv(paths["annual_balance_dashboard_metrics"])
     split_path = run_root / "monthly_flow_semantic_split.csv"
     split = pd.read_csv(split_path) if split_path.exists() else None
+    annual_membership = build_annual_flow_membership(split) if split is not None else build_annual_flow_membership(pd.DataFrame())
+    membership_path = metrics_dir / "annual_flow_membership.csv"
+    annual_membership.to_csv(membership_path, index=False)
+    paths["annual_flow_membership"] = membership_path
     metrics, funding_rewritten = _rewrite_funding_support_metrics(
         metrics, split, run_id=run_id, as_of_date=as_of_date
     )

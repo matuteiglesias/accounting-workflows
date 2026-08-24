@@ -17,6 +17,9 @@ remain on compatibility paths; modern governed sources fail closed.
 # monthly_tables_cash_close_matrix / annual_cash_close_by_box_wide
 # monthly_tables_diagnostic_box_level_matrix
 
+from contextvars import ContextVar
+from pathlib import Path
+
 import pandas as pd
 
 from accounting.contracts.atomic_flow_drilldowns import (
@@ -26,6 +29,7 @@ from accounting.contracts.atomic_flow_drilldowns import (
 from accounting.contracts.derived_metrics import DerivedMetricSpec, resolve_derived_metric_spec
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.professional import drilldown_wave4_base as _base
+from accounting.professional.annual_flow_executor import execute_annual_flow_membership
 from accounting.professional.cash_position_executor import (
     execute_annual_cash_position,
     execute_monthly_cash_position,
@@ -87,8 +91,12 @@ row_context_id = _base.row_context_id
 
 
 _ORIGINAL_BUILD_DERIVED_CELL = _base._build_derived_cell
+_ORIGINAL_BUILD_PROFESSIONAL_FLOW_DRILLDOWNS = _base._legacy.build_professional_flow_drilldowns
 _ORIGINAL_ENRICH_PROFESSIONAL_TABLE_CONTRACTS = (
     _base._legacy.enrich_professional_table_contracts
+)
+_CURRENT_ANNUAL_FLOW_MEMBERSHIP: ContextVar[pd.DataFrame | None] = ContextVar(
+    "current_annual_flow_membership", default=None
 )
 
 
@@ -115,6 +123,18 @@ def _build_derived_cell(
     debt_position: pd.DataFrame,
     tolerance: float,
 ):
+    annual_flow_membership = _CURRENT_ANNUAL_FLOW_MEMBERSHIP.get()
+    if annual_flow_membership is not None and not annual_flow_membership.empty:
+        governed_annual_flow = execute_annual_flow_membership(
+            row=row,
+            period=period,
+            display_value=display_value,
+            annual_flow_membership=annual_flow_membership,
+            tolerance=tolerance,
+        )
+        if governed_annual_flow is not None:
+            return governed_annual_flow
+
     if table_id == "monthly_tables_cash_close_matrix":
         governed_cash = execute_monthly_cash_position(
             row=row,
@@ -176,7 +196,45 @@ def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
 _base._legacy._build_derived_cell = _build_derived_cell
 _base._legacy.enrich_professional_table_contracts = _enrich_professional_table_contracts
 
-build_professional_flow_drilldowns = _base._legacy.build_professional_flow_drilldowns
+
+def build_professional_flow_drilldowns(
+    repo_root: Path,
+    pack_dir: Path,
+    run_root: Path | None = None,
+    tables_dir: Path | None = None,
+    tolerance: float = DEFAULT_TOLERANCE,
+    fast: bool = False,
+):
+    """Run professional drilldowns with optional governed annual lineage.
+
+    The lineage artifact is loaded once at this public boundary and passed to
+    annual governed execution through invocation-local context. Historical packs
+    without the artifact continue through the characterized compatibility path.
+    """
+
+    membership_path = _base._legacy._find_source(
+        Path(repo_root), Path(pack_dir), Path(run_root) if run_root is not None else None,
+        "annual_flow_membership.csv",
+    )
+    membership = (
+        _base._legacy._read_csv(membership_path)
+        if membership_path is not None
+        else pd.DataFrame()
+    )
+    token = _CURRENT_ANNUAL_FLOW_MEMBERSHIP.set(membership)
+    try:
+        return _ORIGINAL_BUILD_PROFESSIONAL_FLOW_DRILLDOWNS(
+            repo_root=repo_root,
+            pack_dir=pack_dir,
+            run_root=run_root,
+            tables_dir=tables_dir,
+            tolerance=tolerance,
+            fast=fast,
+        )
+    finally:
+        _CURRENT_ANNUAL_FLOW_MEMBERSHIP.reset(token)
+
+
 main = _base._legacy.main
 
 
