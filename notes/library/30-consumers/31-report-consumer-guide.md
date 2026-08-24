@@ -7,78 +7,19 @@ sidebar_position: 31
 
 # 31 report consumer guide
 
-Status: draft (code-anchored)
-Last reviewed: 2026-05-22
+Status: current (code-anchored)
+Last reviewed: 2026-08-24
 
-## Purpose
+## Choose the surface by job
 
-Help humans and agents consume accounting outputs without digging through internal pipeline folders.
+**Family/stakeholder review:** use the professional pack and `professional-linked-digest` when a human-facing pack is available. Its linked drilldowns must reconcile to the displayed cells.
 
-## Which artifact each audience should read
+**Programmatic consumer:** use the scope-qualified `public/accounting/latest_<SCOPE_TAG>/manifest.json` and its listed governed artifacts.
 
-### 1) Stakeholder / family reader
+**Analyst/developer:** use canonical run, debt, and metrics roots directly for trace/reconciliation work; do not infer authority from presentation HTML.
 
-Primary artifact:
-- `public/accounting/latest/report/balance_humano_v2.html`
+## Retired surface
 
-Why:
-- this is the human-oriented narrative/report surface produced from metrics + debt artifacts.
+`public/accounting/.../report/balance_humano_v2.html`, `out/human_reports/*`, and `accounting.human.*` are no longer produced or supported. No standalone Flask/frontend application is part of this repository.
 
-### 2) Operator / support responder
-
-Primary artifacts:
-- `public/accounting/latest/manifest.json`
-- `public/accounting/latest/report/story_manifest.json`
-- selected metrics and debt CSVs under `public/accounting/latest/metrics/*` and `public/accounting/latest/debt/*`
-
-Why:
-- these show what was actually published for consumers.
-
-### 3) Analyst / power user
-
-Primary artifacts:
-- published metric views in `public/accounting/latest/metrics/metric_views/*`
-- published debt tables in `public/accounting/latest/debt/*`
-
-Optional deep-dive (debug only):
-- `out/metrics/<RUN_ID>/metric_views/*`
-- `out/debt_resolution/<RUN_ID>/*`
-
-## Internal-only vs consumer-safe directories
-
-Consumer-safe (official handoff):
-- `public/accounting/latest/*`
-
-Internal producer directories (debug/backstage):
-- `out/run/accounting/<RUN_ID>/...`
-- `out/metrics/<RUN_ID>/...`
-- `out/debt_resolution/<RUN_ID>/...`
-- `out/human_reports/<RUN_ID>/...`
-
-Rule:
-- consumer apps and downstream automation should read published snapshot paths, not raw producer internals.
-
-## What gets published today (high-value files)
-
-Metrics subset published by `accounting.publish.latest` includes:
-- `metrics/build_manifest.json`
-- `metrics/metric_views/income_statement_monthly_last6.csv`
-- `metrics/metric_views/rent_rollup_by_place_m_last6.csv`
-- `metrics/metric_views/flow_type_rollup_m_last6.csv`
-- `metrics/metric_views/draws_discipline_monthly_last6.csv`
-
-Debt subset includes:
-- `debt/debt_open_items.csv`
-- `debt/debt_repayment_events.csv`
-- `debt/debt_status_reconciliation.csv`
-
-Report surface includes:
-- `report/balance_humano_v2.html`
-- `report/story_manifest.json`
-
-## Source anchors
-
-- `accounting.human.document` (human report outputs and story manifest)
-- `accounting.publish.latest` (published file list and snapshot manifest)
-- `notes/frontend_snapshot_contract.md` (consumer boundary)
-- `notes/accounting_spine_runbook.md` (required metric view artifacts in run output)
+See `notes/public_bundle_contract.md` and `notes/accounting_spine_runbook.md`.

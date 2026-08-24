@@ -1,6 +1,6 @@
 # Accounting workflows
 
-Python pipeline for ledger ingestion, canonicalization, materialization, semantic marts, debt resolution, metrics, dashboards, human reports, and release publication.
+Python pipeline for ledger ingestion, canonicalization, materialization, semantic marts, debt resolution, governed metrics/dashboards, professional-pack drilldowns, and artifact publication.
 
 ## Official command surface
 
@@ -32,50 +32,36 @@ make run-canonical
 make run-full
 ```
 
-`run-full` runs the canonical core, debt views, metrics, dashboard assertions, the human report, publication packaging, and the release readiness check.
+`run-full` runs the canonical core, debt views, governed metrics, annual-dashboard assertions, artifact publication, and the release-readiness check.  The retired `accounting.human` report stack is not a live pipeline stage.
 
-`make run-accounting` and `make run-accounting-full` are compatibility aliases for `run-full`. They therefore include publication and release-check side effects; they are not aliases for the human-report stage alone.
+`make run-accounting` and `make run-accounting-full` are compatibility aliases for `run-full`.
 
-For bounded operation on an existing run, use the focused targets exposed by `make help`, including `metrics-from-run`, `run-dashboard`, `run-human`, and `publish-latest`.
+For bounded operation on an existing run, use the focused targets exposed by `make help`, including `metrics-from-run`, `run-dashboard`, and `publish-latest`.
 
-The legacy storypack / compile branch is not part of the canonical flow.
+### Human-facing / professional presentation
+
+The repository no longer owns a standalone Flask/front application or a parallel `human_reports` producer. Human-facing work is layered over governed artifacts:
+
+```bash
+make professional-drilldowns
+make professional-linked-digest
+```
+
+These operate on an existing professional pack. The linked digest is presentation-only and does not recalculate accounting semantics. Notebook/report consumers should likewise read governed metric/debt artifacts rather than introducing a second accounting engine.
 
 ## Runbook
-See `notes/accounting_spine_runbook.md` for the per-stage outputs, required files, and a concise smoke checklist.
+See `notes/accounting_spine_runbook.md` for the per-stage outputs and smoke checklist.
+
+## Publication contract
+See `notes/public_bundle_contract.md` for the consumer-safe artifact handoff.
 
 ## Documentation compass
-Use `notes/documentation_compass.md` as the role-based guide to choose the right docs (operators, developers, analysts, and agents).
-
-## Operations playbook
-For stability-first incident response (human + agent workflow), see `notes/human_agent_playbook.md`.
+Use `notes/documentation_compass.md` as the role-based guide to current docs.
 
 ## Repo hygiene
-- Generated outputs are not tracked (`out/`, `accounting/out/`, etc.)
+- Generated outputs are not tracked (`out/`, `accounting/out/`, etc.).
 - Local secrets are kept in `private/` and never committed.
+- Historical audits may mention retired module paths; they are evidence, not live command authority.
 
 ## Logging convention
-The pipeline uses a single Python `logging` convention across stage entrypoints and helpers:
-
-- Format: `YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message`
-- Levels used operationally: `INFO`, `WARNING`, `ERROR`
-- Normal logs go to stderr, which keeps them visible in terminals, `make`, wrapper shells, and `journalctl` under systemd
-- Output artifacts stay as files under each run directory; logs are not used as a replacement for CSV/JSON manifests or sanity reports
-- Ad-hoc dataframe shape / sample spam is available only behind DEBUG
-
-Enable extra debug output only when needed:
-
-```bash
-ACCOUNTING_DEBUG=1 make run-materialize
-# or
-ACCOUNTING_LOG_LEVEL=DEBUG python -m accounting.views --reports-dir ... --write-dir ...
-```
-
-Recommended operations flow:
-
-```bash
-make run-accounting
-journalctl --user -u accounting-spine-live.service -n 200 --no-pager
-journalctl --user -u accounting-spine-live.service --since "2026-03-18 00:00:00"
-```
-
-Keep `journalctl` as the operational log source of truth and retain per-run CSV/JSON/HTML artifacts under `out/run/accounting/<RUN_ID>/`, `out/metrics/<RUN_ID>/`, and `out/human_reports/<RUN_ID>/`. A separate per-run log file is not enabled by default because it would duplicate journal storage without adding much decision value for the current manual/systemd workflow.
+Operational Python entrypoints use `YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message`. Keep `journalctl` as the operational log source of truth and retain per-run CSV/JSON/HTML artifacts under the governed run, metrics, professional-pack, drilldown, and publication roots rather than duplicating logs into report artifacts.

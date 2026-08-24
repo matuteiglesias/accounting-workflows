@@ -22,13 +22,13 @@ def test_scoped_latest_is_isolated_in_both_orders(tmp_path, order):
 
 def test_publish_resolves_one_scope_and_rejects_mixed_runs(tmp_path):
     out = tmp_path / "out"
-    for producer in ["human_reports", "metrics", "debt_resolution"]:
+    for producer in ["metrics", "debt_resolution"]:
         base = out / producer
         (base / "run_FBPM").mkdir(parents=True)
         update_scoped_latest(base, "run_FBPM", "FBPM")
 
     paths = resolve_paths(tmp_path, Path("public/accounting"), scope_tag="FBPM")
-    assert {paths.human_latest.name, paths.metrics_latest.name, paths.debt_latest.name} == {"run_FBPM"}
+    assert {paths.metrics_latest.name, paths.debt_latest.name} == {"run_FBPM"}
     assert paths.public_root == tmp_path / "public/accounting/latest_FBPM"
 
     metrics = out / "metrics"
