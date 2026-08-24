@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from accounting.professional.funding_lineage_audit import build_audit, write_outputs
+from accounting.diagnostics.funding_lineage import build_audit, write_outputs
 
 
 def _write(path: Path, rows: list[dict]) -> None:
