@@ -156,7 +156,15 @@ def test_management_and_professional_selectors_match_governed_atomic_direction()
 
 
 def test_annual_metrics_delegate_atomic_measures_to_upstream_or_contract() -> None:
-    source = (ROOT / "accounting" / "metrics" / "annual.py").read_text(encoding="utf-8")
+    # The public annual module is a facade: audit both its governed rewrites and
+    # the explicit delegated compatibility implementation rather than assuming
+    # every unchanged annual rule remains textually copied into the facade.
+    source = "\n".join(
+        [
+            (ROOT / "accounting" / "metrics" / "annual.py").read_text(encoding="utf-8"),
+            (ROOT / "accounting" / "metrics" / "annual_legacy.py").read_text(encoding="utf-8"),
+        ]
+    )
     assert "resolve_semantic_measure" in source
     assert 'rows[measure]' in source
     assert '"IS.RENT.TOTAL",s.semantic_bucket.eq("operating_revenue")&s.semantic_subbucket.eq("rent"),"amount_in"' not in source
