@@ -6,54 +6,40 @@ sidebar_label: "Accounting Canonical Commands"
 
 # Accounting Canonical Commands
 
-Status: authority draft
-Last reviewed: 2026-05-10
+Status: current authority
+Last reviewed: 2026-08-24
 
-## Purpose
-
-This file is the command authority companion to `notes/entrypoints.md`. It maps the desired command surface to current Makefile targets.
-
-Run `make help` for the live command list. The canonical debt module CLIs are `python -m accounting.debt.resolve` and `python -m accounting.debt.balance_views`; the old flat debt module compatibility paths have been removed.
+The Makefile is the command authority. `make help` is the live command list.
 
 ## Core pipeline
 
 ```text
-make ledger        # source inputs → canonical ledger
-make materialize   # canonical ledger → Stage D analytical artifacts
-make debt          # canonical ledger/views → resolved debt contracts
-make debt-views    # debt contracts → debt balance views
-make metrics       # analytical artifacts → metric contracts
-make human-report  # metric/debt contracts → current human report
-make publish-latest # latest artifacts → frontend snapshot
+make ledger          # source inputs -> canonical ledger
+make materialize     # canonical ledger -> materialized analytical artifacts
+make debt            # canonical evidence -> resolved debt contracts
+make debt-views      # debt contracts -> stock/activity views
+make metrics         # semantic/debt artifacts -> governed metrics
+make run-dashboard   # assert governed annual dashboard outputs
+make publish-latest  # governed metrics/debt -> published artifact bundle
 ```
 
-## Composite commands
+## Composite command
 
 ```text
-make build-all     # full canonical path through publish
-make build-report  # full current report path, no publish
-make build-front   # publish latest frontend snapshot
+make build-all       # full canonical path through publication + release check
 ```
 
-## Support commands
+## Professional presentation
 
 ```text
-make doctor
-make smoke
-make validate
-make clean-derived
+make professional-drilldowns
+make professional-linked-digest
 ```
 
-## Experimental command
+These are downstream presentation/reconciliation operations over an existing professional pack. They are not an alternate semantic pipeline.
 
-```text
-make front-report
-```
+## Removed Phase-1 surfaces
 
-`front-report` calls `accounting.human.front`. It remains experimental until the front report has a stable consumer and output contract.
+The `human-report`, `run-human*`, `front-report`, `build-report`, and `build-front` command families were removed on 2026-08-24. Their former producer package (`accounting.human`) was an alternate presentation stack with no production Python caller outside its own package. The old front factory was static HTML scaffolding; the repository contains no Flask runtime.
 
-## Legacy/compatibility command surface
-
-The existing `run-*` targets remain available during transition. They are implementation/compatibility targets behind the clearer canonical aliases.
-
-New docs and scripts should prefer the canonical names unless they specifically need lower-level `run-*` behavior.
+`accounting.publish.latest` remains supported, but it publishes a metrics/debt artifact bundle rather than requiring `human_reports` or a viewer application.

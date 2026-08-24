@@ -1,5 +1,5 @@
 # Makefile.v3 - Accounting spine
-# Official path: run-ingest -> run-materialize -> run-marts -> run-metrics -> run-human-report
+# Official path: run-ingest -> run-materialize -> run-marts -> run-debt-views -> run-metrics -> run-dashboard -> publish-latest
 # Design goals:
 # - Two modes: smoke (fixture/offline) vs run (live/bounded)
 # - Explicit out-dir passed to all Python entrypoints
@@ -122,10 +122,8 @@ SMOKE_RUN_ID := smoke
 RUN_RUN_ID   := $(RUN_REL)
 
 RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_RUN_ID)
-RUN_HUMAN_DIR   := $(OUT)/human_reports/$(RUN_RUN_ID)/balance_human_v2
 
 METRICS_LATEST := $(OUT)/metrics/latest_$(SCOPE_TAG)
-HUMAN_LATEST   := $(OUT)/human_reports/latest_$(SCOPE_TAG)
 
 RUN_DEBT_DIR          := $(OUT)/debt_resolution/$(RUN_RUN_ID)
 RUN_DEBT_BALANCE_DIR  := $(OUT)/debt_resolution/$(RUN_RUN_ID)
@@ -149,7 +147,7 @@ _update_latest:
 	@echo "[RUN][LATEST] run=$(RUN_REL)"
 	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
 		--base "$(RUN_BASE)" --base "$(OUT)/debt_resolution" \
-		--base "$(OUT)/metrics" --base "$(OUT)/human_reports"
+		--base "$(OUT)/metrics"
 
 # ----------------------------------------
 # Help
@@ -170,7 +168,7 @@ help:
 	@echo "  make smoke-usd-ccl-management-flows # isolated projected-flow eligibility and reconciliation"
 	@echo "  make smoke              # compatibility alias for smoke-core"
 	@echo ""
-	@echo "Live canonical / metrics / dashboard / human:"
+	@echo "Live canonical / metrics / dashboard:"
 	@echo "  make run-canonical      # live ingest -> materialize -> marts -> debt wrappers"
 	@echo "  make run-usd-ccl-valuation RUN_ROOT=<exact-run> CCL_RATES=<local.csv> # offline existing-run valuation"
 	@echo "  make run-usd-ccl-management-flows RUN_ROOT=<exact-run> CCL_RATES=<local.csv> # offline valuation + flow eligibility"
@@ -178,7 +176,6 @@ help:
 	@echo "  make run-metrics        # alias for metrics-from-run"
 	@echo "  make run-metrics-live   # orchestrate live upstream then metrics"
 	@echo "  make run-dashboard      # assert annual dashboard outputs from metrics"
-	@echo "  make run-human          # build human report from existing metrics/run artifacts"
 	@echo "  make run-full           # full live pipeline -> publish -> release-check"
 	@echo ""
 	@echo "Publish / release:"
@@ -186,12 +183,11 @@ help:
 	@echo "  make release-check      # validate the scope-qualified public bundle"
 	@echo ""
 	@echo "Legacy compatibility aliases:"
-	@echo "  make ledger | materialize | debt | debt-views | metrics | human-report | publish | build-all"
-	@echo "  make run-accounting | run-accounting-full | run-human-balance | run-debt-balance"
+	@echo "  make ledger | materialize | debt | debt-views | metrics | publish | build-all"
+	@echo "  make run-accounting | run-accounting-full | run-debt-balance"
 	@echo ""
 	@echo "Diagnostics / cleanup / experimental:"
 	@echo "  make clean-derived      # remove derived accounting outputs"
-	@echo "  make front-report       # presentation-only report factory stub"
 	@echo ""
 	@echo "Key vars:"
 	@echo "  OUT=out RUN_STAMP=<timestamp> BOXES='Family Business,Property Management'"
@@ -204,7 +200,7 @@ help:
 # Meta targets
 # ----------------------------------------
 # Canonical names: these are the preferred operational surface.
-.PHONY: ledger materialize debt debt-views metrics human-report publish-latest publish
+.PHONY: ledger materialize debt debt-views metrics publish-latest publish
 ledger: run-ingest
 
 materialize: run-materialize
@@ -214,8 +210,6 @@ debt: run-debt
 debt-views: run-debt-views
 
 metrics: run-metrics
-
-human-report: run-human-report
 
 publish-latest:
 	@bash -eu -o pipefail -c '\
@@ -227,16 +221,12 @@ publish-latest:
 # Compatibility alias; prefer publish-latest.
 publish: publish-latest
 
-# Composite names: one clear path for full builds and frontend handoff.
-.PHONY: build-all build-report build-front
+# Composite name: one clear path for the full accounting build and publication.
+.PHONY: build-all
 build-all: run-full
 
-build-report: human-report
-
-build-front: publish-latest
-
 # Support and experimental command surface.
-.PHONY: doctor validate clean-derived front-report
+.PHONY: doctor validate clean-derived
 doctor:
 	@$(PY) --version
 	@$(PY) -m compileall -q accounting scripts tests
@@ -249,24 +239,10 @@ validate: doctor
 	@echo "compile, contract, and regression validation ok"
 
 clean-derived:
-	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/human_reports" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest" "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
+	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/debt_resolution" "$(ROOT)/public/accounting/latest" "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
 
-front-report:
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR). Run make metrics first or point RUN_STAMP to an existing run."; exit 2)
-	@mkdir -p "$(OUT)/front/$(RUN_RUN_ID)"
-	@$(PY) -m accounting.human.front \
-		--run-root "$(RUN_OUT)" \
-		--metrics-dir "$(RUN_METRICS_DIR)" \
-		--write-dir "$(OUT)/front/$(RUN_RUN_ID)" \
-		--months "$(METRIC_MONTHS)" \
-		--rent-place-col "$(RENT_PLACE_COL)" \
-		--rent-detail-col "$(RENT_DETAIL_COL)" \
-		--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
-		--include-statuses "$(INCLUDE_STATUSES)" \
-		--noise-floor "$(NOISE_FLOOR)"
 
-.PHONY: smoke-core smoke-full smoke-usd-ccl-valuation smoke-usd-ccl-management-flows run-usd-ccl-valuation run-usd-ccl-management-flows run-canonical run-full run-dashboard run-human metrics-from-run run-metrics-live smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger run-metrics-and-human run-human-balance-only
+.PHONY: smoke-core smoke-full smoke-usd-ccl-valuation smoke-usd-ccl-management-flows run-usd-ccl-valuation run-usd-ccl-management-flows run-canonical run-full run-dashboard metrics-from-run run-metrics-live smoke-accounting run-accounting run-accounting-full run-downstream-from-ledger
 
 smoke-usd-ccl-valuation:
 	@$(call _guard_out_dir,$(USD_CCL_SMOKE_OUT))
@@ -346,13 +322,13 @@ smoke-core: smoke-ingest
 
 smoke-full: smoke-core validate
 	@$(PY) -m accounting.publish.latest --project-root "$(ROOT)" --dry-run >/dev/null
-	@echo "smoke-full partial: fixture core + validation + publish dry-run passed; fixture debt/human publish remains documented follow-up"
+	@echo "smoke-full partial: fixture core + validation + publish dry-run passed; fixture debt and real professional-pack execution remain documented follow-up"
 
 smoke-accounting: smoke-core
 
 run-canonical: run-marts
 
-run-full: run-canonical run-debt-views run-metrics run-dashboard run-human publish-latest release-check
+run-full: run-canonical run-debt-views run-metrics run-dashboard publish-latest release-check
 
 run-accounting: run-accounting-full
 run-accounting-full: run-full
@@ -365,7 +341,6 @@ run-downstream-from-ledger:
 	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
-	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
 
 
@@ -374,14 +349,13 @@ run-downstream-from-ledger:
 update-latest-light:
 	@echo "[RUN][LATEST-LIGHT] run=$(RUN_REL)"
 	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
-		--base "$(RUN_BASE)" --base "$(OUT)/metrics" --base "$(OUT)/human_reports"
+		--base "$(RUN_BASE)" --base "$(OUT)/metrics"
 .PHONY: run-live-light
 
 run-live-light:
 	@$(MAKE) run-marts RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
 	@$(MAKE) run-metrics RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) run-dashboard RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
-	@$(MAKE) run-human RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 	@$(MAKE) update-latest-light RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
 	@echo "[LIVE-LIGHT] refreshed non-debt live outputs"
 	
@@ -398,18 +372,6 @@ assert-live-light-no-debt:
 	fi; \
 	echo "OK: run-live-light did not create debt artifacts"
 
-run-metrics-and-human:
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_VIEWS_SANITY)" || (echo "ERROR: missing views_sanity.json at $(RUN_VIEWS_SANITY). Run make run-marts first or point RUN_STAMP to an existing run."; exit 2)
-	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
-	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
-
-run-human-balance-only:
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR). Run make run-metrics first or point RUN_STAMP to an existing run."; exit 2)
-	@$(MAKE) _run_human_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)" METRIC_MONTHS="$(METRIC_MONTHS)" RENT_PLACE_COL="$(RENT_PLACE_COL)" RENT_DETAIL_COL="$(RENT_DETAIL_COL)" FLOW_ROLLUP_GROUPBY="$(FLOW_ROLLUP_GROUPBY)" INCLUDE_STATUSES="$(INCLUDE_STATUSES)" NOISE_FLOOR="$(NOISE_FLOOR)"
 
 # ========================================
 # SMOKE MODE
@@ -633,46 +595,11 @@ _run_metrics_action:
 	'
 
 
-.PHONY: run-human-report run-human-balance _run_human_balance_action
-run-human-report: run-human
-
-run-human: _run_human_balance_action
-
+.PHONY: run-dashboard
 run-dashboard: run-metrics
 	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_metrics.csv"
 	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_contract.csv"
 	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_qa.csv"
-
-# Compatibility alias; prefer run-human-report.
-run-human-balance: run-human-report
-
-_run_human_balance_action:
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_METRICS_DIR)/metric_values.csv" || (echo "ERROR: missing metric_values.csv at $(RUN_METRICS_DIR)"; exit 2)
-	@mkdir -p "$(RUN_HUMAN_DIR)"
-	@bash -eu -o pipefail -c '\
-		$(PY) -m accounting.human.document \
-			--run-root "$(RUN_OUT)" \
-			--metrics-dir "$(RUN_METRICS_DIR)" \
-			--write-dir "$(RUN_HUMAN_DIR)" \
-			--months "$(METRIC_MONTHS)" \
-			--rent-place-col "$(RENT_PLACE_COL)" \
-			--rent-detail-col "$(RENT_DETAIL_COL)" \
-			--flow-rollup-groupby "$(FLOW_ROLLUP_GROUPBY)" \
-			--include-statuses "$(INCLUDE_STATUSES)" \
-			--noise-floor "$(NOISE_FLOOR)"; \
-		test -s "$(RUN_HUMAN_DIR)/balance_humano_v2.html"; \
-		test -s "$(RUN_HUMAN_DIR)/story_manifest.json"; \
-	'
-	@$(MAKE) _update_latest \
-		RUN_STAMP="$(RUN_STAMP)" \
-		RUN_OUT="$(RUN_OUT)" \
-		RUN_RUN_ID="$(RUN_RUN_ID)" \
-		RUN_REL="$(RUN_REL)" \
-		OUT="$(OUT)" \
-		RUN_BASE="$(RUN_BASE)"
-
-	
 
 # ========================================
 # CHECKS

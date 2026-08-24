@@ -6,152 +6,64 @@ sidebar_label: "Accounting spine runbook"
 
 # Accounting spine runbook
 
+Status: current authority
+Last reviewed: 2026-08-24
+
 ## Official path
 
-The supported local execution order is:
+The supported live order is:
 
-1. `make run-ingest`
-2. `make run-materialize`
-3. `make run-views`
-4. `make run-metrics`
-5. `make run-human-report`
+1. ingest / canonical ledger
+2. materialization + semantic marts
+3. debt resolution/views
+4. governed metrics + annual dashboard
+5. artifact publication
 
-`run-accounting` is just the wrapper target for the same happy path. Legacy storypack / compile targets are not part of the supported path.
+`make run-full` is the canonical composite. The retired `human_reports` producer is not a stage.
 
-## Stage outputs
+## Key outputs
 
-### 1. `run-ingest`
-Writes to `out/run/accounting/<RUN_ID>/`.
-
-Required outputs:
+### Canonical run root — `out/run/accounting/<RUN_ID>/`
 - `ledger_canonical.csv`
-- ingest-side metadata/check files produced by `accounting.ledger.ingest`
+- `ledger_canonical_all_status.csv`
+- semantic/materialized monthly artifacts and QA
 
-### 2. `run-materialize`
-Writes to the same run root: `out/run/accounting/<RUN_ID>/`.
+### Debt — `out/debt_resolution/<RUN_ID>/`
+- resolved debt evidence and status reconciliation
+- governed debt stock/activity inputs consumed downstream
 
-Required outputs:
-- `per_flow_time_long.freq=M.csv` (or current `FREQ`)
-- `per_party_time_long.freq=M.csv` (or current `FREQ`)
-- `daily_cash_position.csv`
-
-### 3. `run-views`
-Writes to `out/run/accounting/<RUN_ID>/views/`.
-
-Required outputs:
-- `views/views_sanity.json`
-- `views/v_contributions_monthly.csv`
-- `views/v_opex_category_monthly.csv`
-
-Optional / transitional inputs:
-- `out/run/accounting/<RUN_ID>/reports/fondos_report.csv`
-- `out/run/accounting/<RUN_ID>/reports/renta_*.csv`
-
-These legacy report artifacts are best-effort only and are not part of the required pipeline contract.
-
-### 4. `run-metrics`
-Writes to `out/metrics/<RUN_ID>/`.
-
-Required contract outputs:
+### Metrics — `out/metrics/<RUN_ID>/`
 - `metric_registry.csv`
 - `metric_values.csv`
 - `validation_report.csv`
 - `build_manifest.json`
-- `metric_views/income_statement_monthly_last6.csv`
-- `metric_views/rent_rollup_by_place_m_last6.csv`
-- `metric_views/rent_rollup_by_detail_m_last6.csv`
-- `metric_views/flow_type_rollup_m_last6.csv`
-- `metric_views/draws_discipline_monthly_last6.csv`
-- `metric_views/metric_views_manifest.csv`
+- `metric_contract_frontier.csv`
+- `frontend_metric_series.csv`
+- `annual_balance_dashboard_metrics.csv`
+- `annual_balance_dashboard_contract.csv`
+- `annual_balance_dashboard_qa.csv`
+- governed metric views/drilldowns
 
-Optional outputs:
-- `metric_values.parquet`
-- `metric_values_q_wide.csv`
-- `metric_values_y_wide.csv`
-- `income_statement_q.csv`
-- `income_statement_y.csv`
-- `balance_cash_q.csv`
-- `balance_cash_y.csv`
+### Publication — `public/accounting/latest_<SCOPE_TAG>/`
+- `manifest.json` (`accounting_public_bundle.v1`)
+- `artifact_contracts.csv`
+- `publish_contract_qa.csv`
+- classified governed metric/debt artifacts
 
-### 5. `run-human-report`
-Reads from:
-- run root: `out/run/accounting/<RUN_ID>/`
-- metrics root: `out/metrics/<RUN_ID>/`
+Publication is packaging only. It does not require `human_reports` and does not own a web application.
 
-Required inputs from metrics:
-- `metric_registry.csv`
-- `metric_values.csv`
-- `validation_report.csv`
-- `build_manifest.json`
-- every file listed under `metric_views/` above
+### Professional pack / drilldowns
+A real professional pack is generated/maintained outside fixture CI. `accounting.professional.drilldown` and `accounting.professional.render_linked_digest` are the supported richer human-facing surfaces. They must reconcile to displayed values and may not invent accounting semantics.
 
-Writes to `out/human_reports/<RUN_ID>/balance_human_v2/`.
-
-Required outputs:
-- `balance_humano_v2.html`
-- `story_manifest.json`
-- `tables/` CSV exports
-- `html/` per-section HTML exports
-
-## Smoke checklist
-
-Exact command sequence:
+## Fixture validation
 
 ```bash
-make run-ingest
-make run-materialize
-make run-views
-make run-metrics
-make run-human-report
+make smoke-core
+make smoke-full
+make validate
 ```
 
-At the end, confirm these paths exist for the active `<RUN_ID>`:
+`smoke-full` is fixture-safe and includes publication dry-run. As frozen in the Phase-0 baseline, fixture debt and real professional-pack execution require separate evidence when affected.
 
-```text
-out/run/accounting/<RUN_ID>/ledger_canonical.csv
-out/run/accounting/<RUN_ID>/views/views_sanity.json
-out/metrics/<RUN_ID>/metric_values.csv
-out/metrics/<RUN_ID>/metric_views/income_statement_monthly_last6.csv
-out/human_reports/<RUN_ID>/balance_human_v2/balance_humano_v2.html
-```
-
-## Logging / operations
-
-### Log format
-All supported stage entrypoints now emit operational logs with this format:
-
-```text
-YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message
-```
-
-Examples:
-
-```bash
-make run-materialize
-ACCOUNTING_DEBUG=1 make run-views
-journalctl --user -u accounting-spine-live.service -n 100 --no-pager
-journalctl --user -u accounting-spine-live.service --since "1 hour ago"
-```
-
-### What should appear in logs
-Keep logs focused on:
-- stage start / finish
-- effective input/output directories
-- key files written
-- row counts
-- important warnings (for example null currency values, dropped rows, invariant issues, optional export failures)
-- final errors when a stage aborts
-
-Do not treat logs as a substitute for artifacts such as:
-- `views/views_sanity.json`
-- `meta/*.json` manifests
-- `metric_views/*.csv`
-- `tables/*.csv` and final HTML outputs
-
-### DEBUG mode
-Verbose dataframe diagnostics are available only when explicitly enabled:
-
-```bash
-ACCOUNTING_DEBUG=1 make run-materialize
-ACCOUNTING_LOG_LEVEL=DEBUG python -m accounting.views --reports-dir ... --write-dir ...
-```
+## Logging
+Operational logs are evidence about execution, not substitutes for CSV/JSON contracts. A successful process exit is insufficient: validate totals, scope, currency grain, status, and affected drilldowns.

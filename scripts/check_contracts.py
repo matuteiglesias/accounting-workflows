@@ -18,7 +18,7 @@ except ModuleNotFoundError as exc:
     QA_COLUMNS = []
     ANNUAL_IMPORT_ERROR = exc
 
-from accounting.publish.latest import METRIC_FILES_BY_CLASS, DEBT_FILES_BY_CLASS, PRESENTATION_FILES, _published_contract_row
+from accounting.publish.latest import METRIC_FILES_BY_CLASS, DEBT_FILES_BY_CLASS, _published_contract_row
 
 KNOWN_ARTIFACTS = [
     "ledger_canonical.csv",
@@ -100,7 +100,7 @@ def check_module_schema_smokes() -> None:
                 fail(f"{name} columns are empty")
             print(f"{name}: pass columns={len(cols)}")
 
-    publish_files = [*METRIC_FILES_BY_CLASS.get("public_contract", []), *METRIC_FILES_BY_CLASS.get("canonical_dashboard", []), *PRESENTATION_FILES, *DEBT_FILES_BY_CLASS.get("unsafe_for_frontend", [])]
+    publish_files = [*METRIC_FILES_BY_CLASS.get("public_contract", []), *METRIC_FILES_BY_CLASS.get("canonical_dashboard", []), *DEBT_FILES_BY_CLASS.get("unsafe_for_frontend", [])]
     if not publish_files:
         fail("publish contract file lists are empty")
     for rel in ["public_contract/metric_contract_frontier.csv", "legacy_reconciliation/income_statement_y.csv", "unsafe_for_frontend/debt_open_items.csv"]:
