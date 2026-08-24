@@ -101,6 +101,21 @@ def test_core_funding_metric_stays_narrow_while_broader_support_is_explicit(tmp_
     run_root = tmp_path / "run"
     metrics_dir = tmp_path / "metrics"
     build_semantic_outputs(ledger, run_root)
+
+    # The narrow core funding metric is owned by the operating-statement layer.
+    # Seed that established source explicitly rather than teaching the annual
+    # support facade to synthesize core funding from the broader support surface.
+    pd.DataFrame(
+        [
+            {
+                "period": "2026-01",
+                "Currency": "ARS",
+                "statement_line": "funding_contributions",
+                "amount": 50.0,
+            }
+        ]
+    ).to_csv(run_root / "monthly_operating_statement.csv", index=False)
+
     paths = build_annual_balance_dashboard(
         run_root, metrics_dir, run_id="funding-support-test", as_of_date="2026-01-31"
     )
@@ -114,6 +129,7 @@ def test_core_funding_metric_stays_narrow_while_broader_support_is_explicit(tmp_
     core = ars_2026[ars_2026["metric_id"].eq("FUND.CONTRIB.TOTAL")]
     assert len(core) == 1
     assert float(core.iloc[0]["value"]) == 50.0
+    assert core.iloc[0]["source_table"] == "monthly_operating_statement.csv"
 
     direct = ars_2026[ars_2026["metric_id"].eq("FUND.CONTRIB.DIRECT_OBLIGATION")]
     debt = ars_2026[ars_2026["metric_id"].eq("FUND.CONTRIB.DEBT_LINKED")]
