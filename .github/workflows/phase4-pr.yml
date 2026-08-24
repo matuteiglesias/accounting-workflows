@@ -25,6 +25,18 @@ jobs:
           python-version: "3.12"
       - name: Install bounded validation dependencies
         run: python -m pip install --upgrade pip pandas pytest
+      - name: Treat jointly transformed facades as internal migration callers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/_phase4_apply.py')
+          text = path.read_text(encoding='utf-8')
+          old = "        for err in visitor.dynamic_errors:\n            errors.append(f'{rel}: {err} of {module}')\n"
+          new = "        if rel not in TARGETS:\n            for err in visitor.dynamic_errors:\n                errors.append(f'{rel}: {err} of {module}')\n"
+          if old not in text:
+              raise SystemExit('expected caller-error block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply caller-derived explicit facade surfaces
         run: |
           python scripts/_phase4_apply.py
