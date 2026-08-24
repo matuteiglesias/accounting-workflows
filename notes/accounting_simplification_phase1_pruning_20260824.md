@@ -43,14 +43,23 @@ After: publication requires matching metrics + debt latest roots only and writes
 
 Removed live `human-report`, `run-human*`, `front-report`, `build-report`, `build-front`, and `run-metrics-and-human` surfaces plus `out/human_reports` latest management. `run-full` now ends `... -> metrics -> dashboard -> publish -> release-check`. Professional drilldown/linked-digest targets remain separate because a real professional pack is not fixture-CI input.
 
-## Evidence requirements
+## Validation evidence
 
-Validation for this PR must include:
+Validated on the transformed Phase-1 tree before commit:
 
-1. `make validate`;
-2. `make smoke-full`;
-3. Phase-0 semantic/monthly/annual fixture parity;
-4. source reachability assertions that the retired modules/commands are absent;
-5. confirmation that the pre-existing `smoke-views` null-Box issue is not being reinterpreted or “fixed” here.
+- `make validate`: **PASS** — 284 tests passed, 1 intentional legacy invalid-`as_of_date` warning; compile and contract validation passed.
+- `make smoke-full`: **PASS** — fixture ingest/materialization, semantic/cash wrapper checks, validation, and publication dry-run passed.
+- publish contract import smoke: **PASS**, 12 classified files on the new metrics/debt bundle surface.
+- exact Phase-0 semantic classification totals: **UNCHANGED** for all ARS/USD fixture buckets.
+- semantic leakage QA: **0 rows**, unchanged.
+- exact Phase-0 annual governed values/statuses: **UNCHANGED** for ARS/USD revenue, rent, OPEX, net operating, funding, draws, coverage, savings rate, and FX net.
+- governed `BS.CASH.TOTAL`: remains **unavailable** for both ARS and USD in the fixture; no inferred/internal fallback was introduced.
+- native-currency separation: preserved by the exact ARS/USD annual comparison.
 
-A real professional-pack before/after is not fabricated: this PR does not modify professional calculation/drilldown code, and the repository fixture does not contain a real pack. Professional values remain governed by the unchanged professional regression suite.
+The final transformation commit removed 5,109 lines and added 455 lines across 26 files; the deletions are overwhelmingly retired presentation/compatibility code, not semantic computation.
+
+The pre-existing `smoke-views` null-Box fixture failure frozen in Phase 0 is not modified or reinterpreted by this PR.
+
+## Evidence boundary
+
+The committed fixture still lacks debt-position/activity source artifacts and a real professional pack. Therefore this PR does **not** claim new fixture evidence for debt balances or a whole-pack drilldown status histogram. It does not modify debt calculation, professional execution, or drilldown code; those remain protected by the regression suite and the Phase-0 requirement for dedicated real-pack evidence when a later PR touches those layers.
