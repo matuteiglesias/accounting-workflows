@@ -10,6 +10,10 @@ from typing import Any
 
 import pandas as pd
 
+from accounting.debt.position_authority import (
+    select_debt_position,
+    selected_debt_position_rows,
+)
 from accounting.contracts.debt_position_activity import (
     DEBT_POSITION_SPECS_VERSION,
     DebtPositionSpec,
@@ -161,43 +165,6 @@ def _strict_candidates(
     return debt_position.loc[mask].copy()
 
 
-def _latest_period_rows(rows: pd.DataFrame) -> tuple[pd.DataFrame, str]:
-    if rows.empty or "period" not in rows.columns:
-        return rows.iloc[0:0].copy(), ""
-    periods = sorted(
-        value
-        for value in rows["period"].dropna().astype(str).unique().tolist()
-        if value
-    )
-    if not periods:
-        return rows.iloc[0:0].copy(), ""
-    selected_period = periods[-1]
-    return rows.loc[rows["period"].astype(str).eq(selected_period)].copy(), selected_period
-
-
-def _latest_valid_as_of(
-    rows: pd.DataFrame,
-    spec: DebtPositionSpec,
-) -> tuple[pd.DataFrame, int]:
-    if rows.empty or spec.as_of_field not in rows.columns:
-        return rows.iloc[0:0].copy(), 0
-
-    work = rows.copy()
-    work["__governed_as_of"] = pd.to_datetime(
-        work[spec.as_of_field], errors="coerce"
-    )
-    valid = work.loc[work["__governed_as_of"].notna()].copy()
-    if valid.empty:
-        return rows.iloc[0:0].copy(), 0
-
-    selected = (
-        valid.sort_values(["__governed_as_of"], kind="stable")
-        .tail(1)
-        .drop(columns=["__governed_as_of"])
-        .copy()
-    )
-    return selected, int(len(valid))
-
 
 def execute_monthly_debt_position(
     *,
@@ -302,17 +269,24 @@ def execute_monthly_debt_position(
             [("All candidate snapshots in period", candidates)],
         )
 
-    selected, valid_count = _latest_valid_as_of(candidates, spec)
+    selection = select_debt_position(
+        candidates,
+        period=period,
+        annual=False,
+        as_of_field=spec.as_of_field,
+    )
+    selected = selected_debt_position_rows(candidates, selection)
+    valid_count = selection.valid_as_of_rows
     sections = [
         ("Selected monthly close snapshot", selected),
         ("All candidate snapshots in period", candidates),
     ]
-    if selected.empty:
+    if not selection.available or selected.empty:
         return _unavailable(
             display_value=display_value,
             filters=filters,
             candidates=candidates,
-            reason="no valid as_of_date in selected monthly debt-position candidates",
+            reason=selection.reason,
             sections=sections,
         )
 
@@ -327,7 +301,7 @@ def execute_monthly_debt_position(
         **filters,
         "candidate_rows": int(len(candidates)),
         "valid_as_of_rows": valid_count,
-        "selected_as_of_date": _legacy._norm(selected.iloc[0].get(spec.as_of_field)),
+        "selected_as_of_date": selection.selected_as_of_date,
     }
     return (
         status,
@@ -444,21 +418,31 @@ def execute_annual_debt_position(
             [("Candidate debt position rows in year", year_candidates)],
         )
 
-    month_candidates, selected_period = _latest_period_rows(year_candidates)
+    selection = select_debt_position(
+        year_candidates,
+        period=period,
+        annual=True,
+        as_of_field=spec.as_of_field,
+    )
+    selected_period = selection.selected_period
+    month_candidates = year_candidates.loc[
+        year_candidates["period"].astype(str).eq(selected_period)
+    ].copy()
     filters = {**base_filters, "selected_period": selected_period}
-    selected, valid_count = _latest_valid_as_of(month_candidates, spec)
+    selected = selected_debt_position_rows(year_candidates, selection)
+    valid_count = selection.valid_as_of_rows
     sections = [
         ("Annual companion row", _legacy._annual_companion_long_row(row, period, display_value)),
         ("Selected annual close row", selected),
         ("Candidates in selected closing period", month_candidates),
         ("Candidate debt position rows in year", year_candidates),
     ]
-    if selected.empty:
+    if not selection.available or selected.empty:
         return _unavailable(
             display_value=display_value,
             filters=filters,
             candidates=month_candidates,
-            reason="latest debt-position period has no valid as_of_date; prior periods are not substituted",
+            reason=selection.reason,
             sections=sections,
         )
 
@@ -474,7 +458,7 @@ def execute_annual_debt_position(
         "year_candidate_rows": int(len(year_candidates)),
         "selected_period_candidate_rows": int(len(month_candidates)),
         "valid_as_of_rows": valid_count,
-        "selected_as_of_date": _legacy._norm(selected.iloc[0].get(spec.as_of_field)),
+        "selected_as_of_date": selection.selected_as_of_date,
     }
     return (
         status,
