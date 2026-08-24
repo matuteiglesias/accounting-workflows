@@ -70,14 +70,33 @@ Phase 5 enumerates only actual source-backed scopes. This can remove **phantom u
 
 Tests characterize this explicitly with disjoint ARS/2025 and USD/2026 source scopes: the shared projection produces only the four real currency/Box scopes and never fabricates 2025/USD or 2026/ARS rows.
 
-## Validation required before merge
+## Validation and reconciliation evidence
 
-- full `make validate` regression suite;
-- `make smoke-full`;
-- existing governed cash tests;
-- new shared-projection/source-scope tests;
-- exact Phase-0 semantic and annual accounting anchors unchanged;
-- semantic leakage QA remains empty;
-- final committed head conventional `accounting-ci` green.
+The PR-specific Phase 5 gate passed on the corrected branch head:
+
+- `make validate`: **PASS**;
+- pytest: **298 passed, 1 warning**;
+- the warning is the unchanged intentional legacy invalid-`as_of_date` debt compatibility case;
+- compile, artifact-contract, source-contract, annual-schema, and publish-contract checks: **PASS**;
+- `make smoke-full`: **PASS** for the repository's documented fixture-safe surface;
+- semantic leakage QA: **0 rows**;
+- exact Phase-0 semantic classification census: **UNCHANGED**;
+- exact Phase-0 ARS/USD annual governed non-cash values/statuses: **UNCHANGED**;
+- native-currency separation: **UNCHANGED**.
+
+Representative annual anchors still reconcile exactly:
+
+- ARS operating revenue: `33,075,422`;
+- ARS property OPEX: `13,615,938.94`;
+- ARS net operating: `19,459,483.06`;
+- ARS funding: `1,427,956`;
+- ARS personal draws: `29,412,662`;
+- ARS net after draws: `-8,525,222.94`;
+- USD operating revenue/net operating: `4,180`;
+- USD savings rate: `1.0`.
+
+The new disjoint-scope regression also proves the only intended reporting-shape change: impossible 2025/USD and 2026/ARS cash scopes are no longer fabricated merely because both currencies exist somewhere in the source history.
+
+The smoke fixture still lacks governed debt-position/activity inputs and a real professional pack. Phase 5 does not alter those domains and does not treat the fixture run as evidence about real debt/professional-pack values.
 
 No generated reports, smoke outputs, live ledgers, professional packs, large datasets, caches, or confidential accounting records are versioned by this phase.
