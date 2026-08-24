@@ -1,0 +1,20 @@
+case_id,expectation_id,table_id,period,currency,box,filter_contains,displayed_value,value_status,drilldown_status,matched_total,source_member_ids,semantic_purpose
+flows,monthly_rent_ars,monthly_tables_fb_bridge_matrix,2026-01,ARS,,rent_or_revenue_in,70,available,ok,70,rent_ars,monthly rent
+flows,monthly_rent_usd,monthly_tables_fb_bridge_matrix,2026-01,USD,,rent_or_revenue_in,10,available,ok,10,rent_usd,native-currency monthly rent
+flows,monthly_opex,monthly_tables_flow_subbucket_all_measures,2026-01,ARS,Property Management,services,100,available,ok,100,opex_pm,property OPEX excluding Household
+flows,monthly_draw,monthly_tables_draws_by_box_amount_out,2026-01,ARS,Household,,20,available,ok,20,draw_hh,personal draw
+flows,annual_rent,overview_balance_dashboard,2026,ARS,,IS.RENT.TOTAL,70,available,ok,70,rent_ars,annual rent flow
+flows,annual_opex,overview_balance_dashboard,2026,ARS,,IS.OPEX.PROPERTY,100,available,ok,100,opex_pm,annual property OPEX flow
+flows,annual_draw,overview_balance_dashboard,2026,ARS,,DIST.DRAWS.PERSONAL,20,available,ok,20,draw_hh,annual personal draw flow
+funding,core_funding,overview_balance_dashboard,2026,ARS,,FUND.CONTRIB.TOTAL,50,available,ok,50,fund_cash,core funding contribution
+funding,direct_support,overview_balance_dashboard,2026,ARS,,tenant_direct_tax_payment,30,available,ok,30,support_direct,broader direct-obligation support
+funding,debt_linked_support,overview_balance_dashboard,2026,ARS,,FUND.CONTRIB.DEBT_LINKED,90,available,ok,90,support_debt,broader debt-linked support
+debt,debt_position_valid,monthly_tables_debt_position_matrix,2025-03,USD,,debt.position.principal,850,available,ok,850,,valid debt stock
+debt,debt_position_invalid,monthly_tables_debt_position_matrix,2025-04,USD,,debt.position.principal,700,unavailable,unavailable,0,,all-invalid debt as_of fails closed
+debt,debt_activity_monthly,monthly_tables_debt_activity_matrix,2025-04,USD,,debt.activity.repayment,170,available,ok,170,,independent debt repayment activity
+debt,debt_activity_annual,annual_debt_activity_by_pair_wide,2025,USD,,debt.activity.repayment,350,available,ok,350,,annual debt activity sums flows
+cash,cash_available,monthly_tables_cash_close_matrix,2026-01,ARS,Property Management,cash,100,available,ok,100,bank-a;bank-b,validated cash only
+cash,cash_unavailable,monthly_tables_cash_close_matrix,2026-02,ARS,Property Management,cash,100,unavailable,unsupported,0,,validated cash unavailable no fallback
+derived,opex_to_rent,overview_balance_dashboard,2026,ARS,,derived.opex_to_rent,0.25,available,ok,0.25,,governed derived metric
+fx,fx_currency_total,monthly_tables_fx_treasury_amount_in,2026-01,ARS,,,200,available,ok,200,fx_pm,FX currency-total route
+fx,fx_box_annual,cash_annual_box_flow_bridge_wide,2026,ARS,Property Management,fx,200,available,ok,200,fx_pm,FX Box by currency route
