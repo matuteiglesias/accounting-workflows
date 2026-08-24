@@ -49,6 +49,9 @@ def load_partitions_json(path: Path) -> Dict[str, Any]:
 
 
 def save_partitions_json(path: Path, data: Dict[str, Any]) -> None:
+    """Atomically write partition metadata while preserving the established JSON shape."""
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf8")
+    tmp.replace(path)
