@@ -25,6 +25,7 @@ source inputs
 
 - `accounting.ledger` owns canonical ingest evidence.
 - `accounting.stage_d` / `accounting.marts` own materialized and semantic tables.
+- `accounting.stage_d` owns Stage-D orchestration and mechanical builders but delegates generic CSV/hash/partition/manifest infrastructure to `accounting.support` / `accounting.artifacts`; semantic/cash sequencing remains unchanged.
 - `accounting.debt.resolve` and `accounting.debt.balance_views` own debt resolution/balance evidence; empty re-export `models`/`rules` seams are gone.
 - `accounting.metrics` owns governed metric and annual-dashboard contracts.
 - `accounting.professional` owns professional table producers, contracts/adapters, drilldown execution, and professional-pack rendering. It consumes governed values and must not become either a parallel accounting engine or a home for forensic characterization utilities.

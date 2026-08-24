@@ -14,11 +14,7 @@ Writes CSV files (atomic) and small JSON manifest / partitions files.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import logging
 import os
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -37,6 +33,9 @@ from accounting.core.timeseries import (
 )
 
 from accounting.logging_utils import configure_logging, get_logger
+from accounting.support.hashing import sha256_file
+from accounting.support.io import atomic_write_df
+from accounting.support.partitions import load_partitions_json, save_partitions_json
 LOG = get_logger("materialize")
 
 
@@ -60,52 +59,14 @@ def _ensure_amount_float(ledger: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _atomic_write_csv(df: pd.DataFrame, path: Path) -> None:
-    """
-    Atomically write CSV to `path`: write to tmp then rename.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    df.to_csv(tmp, index=False)
-    tmp.replace(path)
 
-
-def _sha256_file(path: Path) -> Optional[str]:
+def _safe_sha256(path: Path) -> Optional[str]:
+    """Keep Stage D's historical fail-soft metadata behavior over shared hashing."""
     try:
-        h = hashlib.sha256()
-        with path.open("rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
+        return sha256_file(path)
     except Exception:
         LOG.exception("Failed to hash file: %s", path)
         return None
-
-
-def load_partitions_json(path: Path) -> Dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf8"))
-    except Exception:
-        LOG.exception("Failed reading partitions.json - returning empty")
-        return {}
-
-
-def save_partitions_json(path: Path, data: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf8")
-    tmp.replace(path)
-
-
-def _write_manifest(out_dir: Path, manifest: Dict[str, Any]) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "meta/stage_D_materialize.json"
-    tmp = manifest_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2, default=str, ensure_ascii=False), encoding="utf8")
-    tmp.replace(manifest_path)
-    return manifest_path
 
 
 # -----------------------
@@ -141,7 +102,7 @@ def materialize_per_flow(
                        f"Available={list(df.columns)}")
     out_df = df[cols].copy()
 
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote per_flow rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -187,7 +148,7 @@ def materialize_per_party(
                        f"Available={list(agg.columns)}")
     out_df = agg[cols].copy()
 
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote per_party rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -224,7 +185,7 @@ def materialize_daily_cash(
     # Keep provenance hash if available (optional)
     if "source_ledger_hash" in df.columns:
         out_df["source_ledger_hash"] = df["source_ledger_hash"]
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote daily_cash rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -324,7 +285,7 @@ def materialize_box_balance_time_long(
     out_df = agg[["TimePeriod", "TimePeriod_end", "Box", "Currency", "in_amt", "out_amt", "net", "cum_net"]
     ].copy()
 
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote box_balance rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -425,7 +386,7 @@ def materialize_box_flow_balance_time_long(
 
     out_df = agg[["TimePeriod", "TimePeriod_end", "Box", "Currency", "Flujo", "Tipo", "in_amt", "out_amt", "net", "n_tx"]].copy()
 
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote box_flow_balance rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -456,7 +417,7 @@ def materialize_loans(
         df["TimePeriod_ts_end"] = pd.to_datetime(df["TimePeriod_ts_end"], errors="coerce").dt.date.astype(str)
 
     out_df = df.copy()
-    _atomic_write_csv(out_df, target)
+    atomic_write_df(out_df, target, index=False)
     LOG.info("Wrote loans rows=%d -> %s", len(out_df), target)
     return out_df, target
 
@@ -509,7 +470,7 @@ def materialize_all(
         ldf = ledger_df.copy()
         if "Date" in ldf.columns:
             ldf["Date"] = pd.to_datetime(ldf["Date"], errors="coerce").dt.date.astype(str)
-        _atomic_write_csv(ldf, ledger_path)
+        atomic_write_df(ldf, ledger_path, index=False)
     else:
         LOG.info("Keeping existing ledger_canonical -> %s", ledger_path)
 
@@ -517,13 +478,13 @@ def materialize_all(
         aggregates[ledger_path.name] = {
             "path": str(ledger_path),
             "rows": None,
-            "sha256": _sha256_file(ledger_path),
+            "sha256": _safe_sha256(ledger_path),
         }
 
     # 1) per_flow
     try:
         pf_df, pf_path = materialize_per_flow(ledger_df, out_dir, freq=freq, force=force)
-        aggregates[pf_path.name] = {"path": str(pf_path), "rows": len(pf_df), "sha256": _sha256_file(pf_path)}
+        aggregates[pf_path.name] = {"path": str(pf_path), "rows": len(pf_df), "sha256": _safe_sha256(pf_path)}
     except Exception:
         LOG.exception("Failed materialize_per_flow")
         aggregates["per_flow_failed"] = {"error": "failed"}
@@ -531,7 +492,7 @@ def materialize_all(
     # 2) per_party
     try:
         pp_df, pp_path = materialize_per_party(ledger_df, out_dir, freq=freq, force=force)
-        aggregates[pp_path.name] = {"path": str(pp_path), "rows": len(pp_df), "sha256": _sha256_file(pp_path)}
+        aggregates[pp_path.name] = {"path": str(pp_path), "rows": len(pp_df), "sha256": _safe_sha256(pp_path)}
     except Exception:
         LOG.exception("Failed materialize_per_party")
         aggregates["per_party_failed"] = {"error": "failed"}
@@ -544,7 +505,7 @@ def materialize_all(
     # 2.5) box balance (Box motor)
     try:
         bb_df, bb_path = materialize_box_balance_time_long(ledger_df, out_dir, freq=freq, force=force)
-        aggregates[bb_path.name] = {"path": str(bb_path), "rows": len(bb_df), "sha256": _sha256_file(bb_path)}
+        aggregates[bb_path.name] = {"path": str(bb_path), "rows": len(bb_df), "sha256": _safe_sha256(bb_path)}
     except Exception:
         LOG.exception("Failed materialize_box_balance_time_long")
         aggregates["box_balance_failed"] = {"error": "failed"}
@@ -552,7 +513,7 @@ def materialize_all(
     # 2.6) box flow balance (motor decomposition by Flujo/Tipo)
     try:
         bfb_df, bfb_path = materialize_box_flow_balance_time_long(ledger_df, out_dir, freq=freq, force=force)
-        aggregates[bfb_path.name] = {"path": str(bfb_path), "rows": len(bfb_df), "sha256": _sha256_file(bfb_path)}
+        aggregates[bfb_path.name] = {"path": str(bfb_path), "rows": len(bfb_df), "sha256": _safe_sha256(bfb_path)}
     except Exception:
         LOG.exception("Failed materialize_box_flow_balance_time_long")
         aggregates["box_flow_balance_failed"] = {"error": "failed"}
@@ -563,7 +524,7 @@ def materialize_all(
     loans_freq = "M"
     try:
         loans_df, loans_path = materialize_loans(ledger_df, loan_register_df, out_dir, freq=loans_freq, force=force)
-        aggregates[loans_path.name] = {"path": str(loans_path), "rows": len(loans_df), "sha256": _sha256_file(loans_path)}
+        aggregates[loans_path.name] = {"path": str(loans_path), "rows": len(loans_df), "sha256": _safe_sha256(loans_path)}
     except Exception:
         LOG.exception("Failed materialize_loans")
         aggregates["loans_failed"] = {"error": "failed"}
@@ -571,7 +532,7 @@ def materialize_all(
     # 4) daily cash
     try:
         dc_df, dc_path = materialize_daily_cash(ledger_df, out_dir, as_of=None, force=force)
-        aggregates[dc_path.name] = {"path": str(dc_path), "rows": len(dc_df), "sha256": _sha256_file(dc_path)}
+        aggregates[dc_path.name] = {"path": str(dc_path), "rows": len(dc_df), "sha256": _safe_sha256(dc_path)}
     except Exception:
         LOG.exception("Failed materialize_daily_cash")
         aggregates["daily_cash_failed"] = {"error": "failed"}
@@ -580,7 +541,7 @@ def materialize_all(
     try:
         cash_paths = build_monthly_cash_close(out_dir=out_dir, freq=freq)
         for name, path in cash_paths.items():
-            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _sha256_file(path)}
+            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _safe_sha256(path)}
     except Exception:
         LOG.exception("Failed monthly cash close build")
         raise
@@ -590,7 +551,7 @@ def materialize_all(
         semantic_paths = build_semantic_outputs(ledger_df, out_dir=out_dir, freq="M")
         operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir)
         for name, path in {**semantic_paths, **operating_statement_paths}.items():
-            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _sha256_file(path)}
+            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _safe_sha256(path)}
     except Exception:
         LOG.exception("Failed semantic mart / monthly operating statement build")
         raise
@@ -620,11 +581,11 @@ def materialize_all(
     anomalies = ledger_df.attrs.get("anomalies")
     if isinstance(anomalies, pd.DataFrame) and not anomalies.empty:
         anomalies_path = out_dir / "anomalies.csv"
-        _atomic_write_csv(anomalies, anomalies_path)
+        atomic_write_df(anomalies, anomalies_path, index=False)
         anomalies_meta = {
             "path": str(anomalies_path),
             "rows": len(anomalies),
-            "sha256": _sha256_file(anomalies_path),
+            "sha256": _safe_sha256(anomalies_path),
         }
 
     return {
@@ -723,130 +684,33 @@ def main() -> int:
         content_type="text/csv",
     )
 
-    # outputs esperados
+    # Stable Stage D artifact inventory. The manifest authority remains
+    # accounting.artifacts.manifest; Stage D only declares expected paths.
     out_arts = []
-
-    per_flow = out_dir / f"per_flow_time_long.freq={freq}.csv"
-    if per_flow.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="per_flow_time_long",
-                path=per_flow,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
+    output_specs = [
+        ("per_flow_time_long", out_dir / f"per_flow_time_long.freq={freq}.csv", "derived", "text/csv"),
+        ("per_party_time_long", out_dir / f"per_party_time_long.freq={freq}.csv", "derived", "text/csv"),
+        ("box_balance_time_long", out_dir / f"box_balance_time_long.freq={freq}.csv", "derived", "text/csv"),
+        ("box_flow_balance_time_long", out_dir / f"box_flow_balance_time_long.freq={freq}.csv", "derived", "text/csv"),
+        ("loans_time", out_dir / "loans_time.freq=M.csv", "derived", "text/csv"),
+        ("daily_cash_position", out_dir / "daily_cash_position.csv", "derived", "text/csv"),
+        ("partitions", out_dir / "partitions.json", "meta", "application/json"),
+        ("anomalies", out_dir / "anomalies.csv", "derived", "text/csv"),
+    ]
+    for name, path, role, content_type in output_specs:
+        if path.exists():
+            out_arts.append(
+                artifact_from_path(
+                    name=name,
+                    path=path,
+                    stage="D.materialize",
+                    mode=args.mode,
+                    run_id=run_id,
+                    role=role,
+                    root_dir=out_dir,
+                    content_type=content_type,
+                )
             )
-        )
-
-    per_party = out_dir / f"per_party_time_long.freq={freq}.csv"
-    if per_party.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="per_party_time_long",
-                path=per_party,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
-
-    # Box balance (per Box, per Currency, per period)
-    box_balance = out_dir / f"box_balance_time_long.freq={freq}.csv"
-    if box_balance.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="box_balance_time_long",
-                path=box_balance,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
-
-    # Box motor decomposition by (Flujo, Tipo)
-    box_flow_balance = out_dir / f"box_flow_balance_time_long.freq={freq}.csv"
-    if box_flow_balance.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="box_flow_balance_time_long",
-                path=box_flow_balance,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
-
-    loans = out_dir / "loans_time.freq=M.csv"
-    if loans.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="loans_time",
-                path=loans,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
-
-    daily_cash = out_dir / "daily_cash_position.csv"
-    if daily_cash.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="daily_cash_position",
-                path=daily_cash,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
-
-    parts = out_dir / "partitions.json"
-    if parts.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="partitions",
-                path=parts,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="meta",
-                root_dir=out_dir,
-                content_type="application/json",
-            )
-        )
-
-    anomalies = out_dir / "anomalies.csv"
-    if anomalies.exists():
-        out_arts.append(
-            artifact_from_path(
-                name="anomalies",
-                path=anomalies,
-                stage="D.materialize",
-                mode=args.mode,
-                run_id=run_id,
-                role="derived",
-                root_dir=out_dir,
-                content_type="text/csv",
-            )
-        )
 
     known_relpaths = {art["relpath"] for art in [in_art, *out_arts]}
     for filename, meta in sorted(result.get("aggregates", {}).items()):
