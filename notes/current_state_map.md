@@ -27,7 +27,8 @@ source inputs
 - `accounting.stage_d` / `accounting.marts` own materialized and semantic tables.
 - `accounting.debt.resolve` and `accounting.debt.balance_views` own debt resolution/balance evidence; empty re-export `models`/`rules` seams are gone.
 - `accounting.metrics` owns governed metric and annual-dashboard contracts.
-- `accounting.professional` owns professional table/drilldown/presentation machinery; it must consume governed values rather than become a parallel accounting engine.
+- `accounting.professional` owns professional table producers, contracts/adapters, drilldown execution, and professional-pack rendering. It consumes governed values and must not become either a parallel accounting engine or a home for forensic characterization utilities.
+- `accounting.diagnostics` owns read-only forensic audits, issue digests, migration characterization, and other diagnostics over supplied artifacts. Diagnostics may inspect professional outputs but do not own the displayed values or accounting semantics they audit.
 - `accounting.publish.latest` owns scope-safe packaging of metrics/debt into `public/accounting/latest_<SCOPE_TAG>`.
 
 ## Phase-1 removals
@@ -35,3 +36,7 @@ source inputs
 `accounting.human`, `accounting.viz`, `accounting.config`, `accounting.contracts.models`, `accounting.debt.models`, `accounting.debt.rules`, and `accounting.publish.snapshot` were removed after exact reachability census showed no supported production caller. The old front factory was static HTML scaffolding; no Flask import/runtime was present.
 
 The former `human` capabilities were either pass-through projections of governed metric views or presentation duplication. Reusable current presentation belongs to professional table contracts, drilldowns, linked digest, and notebook/report consumers. No accounting formula was migrated into presentation code.
+
+## Phase-2 ownership cleanup
+
+`funding_lineage_audit.py` and `issue_digest.py` were moved out of `accounting.professional` into `accounting.diagnostics` without changing their diagnostic algorithms. The professional package is therefore limited more clearly to production/reporting responsibilities, while diagnostic tooling remains available under explicit diagnostic module paths.
