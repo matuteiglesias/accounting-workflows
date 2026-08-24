@@ -64,6 +64,9 @@ jobs:
           _PHASE4_TRANSITIVE_COMPAT = (
               _base.STATUS_OK,
               _base.STATUS_UNSUPPORTED,
+              _base.DEFAULT_TOLERANCE,
+              _base.INDEX_FILENAME,
+              _base.row_context_id,
               _base._annual_formula_spec,
               _base._build_annual_formula_cell,
               _base._cash_bridge_line_spec,
