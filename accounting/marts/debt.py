@@ -6,6 +6,10 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from accounting.debt.position_authority import (
+    select_debt_position,
+    selected_debt_position_rows,
+)
 from accounting.debt.resolve import RULE_VERSION
 
 DEBT_POSITION_COLUMNS = [
@@ -16,6 +20,10 @@ DEBT_POSITION_COLUMNS = [
     "creditor",
     "Currency",
     "component",
+    "position_status",
+    "selection_reason",
+    "candidate_rows",
+    "valid_as_of_rows",
     "open_amount",
     "open_principal",
     "open_interest",
@@ -153,7 +161,7 @@ def _build_monthly_debt_activity(
     totals = position.loc[position["component"].astype(str).eq("total")].copy()
     totals["closing_total"] = pd.to_numeric(
         totals["open_amount"], errors="coerce"
-    ).fillna(0.0)
+    )
     totals = totals[
         ["period", "period_end", "debtor", "creditor", "Currency", "closing_total"]
     ].drop_duplicates(["period", "debtor", "creditor", "Currency"])
@@ -247,15 +255,17 @@ def _build_monthly_debt_activity(
     )
     keys["closing_total"] = pd.to_numeric(
         keys["closing_total"], errors="coerce"
-    ).fillna(0.0)
+    )
     keys = keys.sort_values(["debtor", "creditor", "Currency", "period"]).reset_index(
         drop=True
     )
-    keys["opening_total"] = (
-        keys.groupby(["debtor", "creditor", "Currency"], dropna=False)["closing_total"]
-        .shift(1)
-        .fillna(0.0)
-    )
+    keys["opening_total"] = keys.groupby(
+        ["debtor", "creditor", "Currency"], dropna=False
+    )["closing_total"].shift(1)
+    first_in_pair = keys.groupby(
+        ["debtor", "creditor", "Currency"], dropna=False
+    ).cumcount().eq(0)
+    keys.loc[first_in_pair & keys["opening_total"].isna(), "opening_total"] = 0.0
     keys["net_change"] = keys["closing_total"] - keys["opening_total"]
 
     def merge_amount(
@@ -283,8 +293,10 @@ def _build_monthly_debt_activity(
         - activity_base["interest_accrued"]
         + activity_base["repayments"]
     )
-    activity_base["reconciliation_status"] = (
-        activity_base["adjustments"]
+    reconcilable = activity_base[["opening_total", "closing_total"]].notna().all(axis=1)
+    activity_base["reconciliation_status"] = "unavailable_position"
+    activity_base.loc[reconcilable, "reconciliation_status"] = (
+        activity_base.loc[reconcilable, "adjustments"]
         .abs()
         .le(0.01)
         .map({True: "reconciled", False: "residual_adjustment_visible"})
@@ -431,14 +443,17 @@ def _build_monthly_debt_activity(
             "severity": "error",
         },
         {
-            "check": "opening_closing_present",
+            "check": "opening_closing_present_or_position_unavailable",
             "status": (
                 "pass"
                 if out.empty
-                or out[["opening_total", "closing_total"]].notna().all().all()
+                or (
+                    out[["opening_total", "closing_total"]].notna().all(axis=1)
+                    | out["reconciliation_status"].astype(str).eq("unavailable_position")
+                ).all()
                 else "fail"
             ),
-            "detail": f"rows={len(out)}",
+            "detail": f"rows={len(out)}; unavailable_position_rows={int(out['reconciliation_status'].astype(str).eq('unavailable_position').sum()) if not out.empty else 0}",
             "severity": "error",
         },
         {
@@ -455,8 +470,15 @@ def _build_monthly_debt_activity(
         },
         {
             "check": "activity_reconciles_to_position",
-            "status": "pass" if recon.abs().le(0.01).all() else "fail",
-            "detail": f"max_diff={float(recon.abs().max()) if len(recon) else 0.0}",
+            "status": (
+                "pass"
+                if recon.loc[activity_base["reconciliation_status"].ne("unavailable_position")].abs().le(0.01).all()
+                else "fail"
+            ),
+            "detail": (
+                f"max_diff={float(recon.loc[activity_base['reconciliation_status'].ne('unavailable_position')].abs().max()) if activity_base['reconciliation_status'].ne('unavailable_position').any() else 0.0}; "
+                f"unavailable_position_periods={int(activity_base['reconciliation_status'].eq('unavailable_position').sum())}"
+            ),
             "severity": "error",
         },
         {
@@ -570,7 +592,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     # debt_balance_monthly may contain repeated rows per item_type and, in
     # legacy artifacts, multiple stock snapshots inside one month. Use the
     # selected monthly close: latest as_of_date per debtor/creditor/currency.
-    unique = base.drop_duplicates(
+    candidates = base.drop_duplicates(
         ["period", "debtor", "creditor", "Currency", "as_of_date"]
     )[
         [
@@ -585,13 +607,38 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             "open_total",
         ]
     ].copy()
-    unique["__as_of_date"] = pd.to_datetime(unique["as_of_date"], errors="coerce")
+    selected_groups: list[pd.DataFrame] = []
+    for _, group in candidates.groupby(
+        ["period", "debtor", "creditor", "Currency"],
+        dropna=False,
+        sort=False,
+    ):
+        period = str(group.iloc[0]["period"])
+        selection = select_debt_position(group, period=period, annual=False)
+        if selection.available:
+            chosen = selected_debt_position_rows(group, selection).tail(1).copy()
+            chosen["position_status"] = "available"
+            chosen["selection_reason"] = selection.reason
+            chosen["candidate_rows"] = selection.candidate_rows
+            chosen["valid_as_of_rows"] = selection.valid_as_of_rows
+            selected_groups.append(chosen)
+            continue
+        unavailable = group.iloc[[0]].copy()
+        unavailable["as_of_date"] = ""
+        unavailable[["open_principal", "open_interest", "open_total"]] = pd.NA
+        unavailable["position_status"] = "unavailable"
+        unavailable["selection_reason"] = selection.reason
+        unavailable["candidate_rows"] = selection.candidate_rows
+        unavailable["valid_as_of_rows"] = selection.valid_as_of_rows
+        selected_groups.append(unavailable)
     unique = (
-        unique.sort_values(["period", "debtor", "creditor", "Currency", "__as_of_date", "as_of_date"], na_position="first")
-        .groupby(["period", "debtor", "creditor", "Currency"], dropna=False, as_index=False)
-        .tail(1)
-        .drop(columns=["__as_of_date"])
-        .reset_index(drop=True)
+        pd.concat(selected_groups, ignore_index=True)
+        if selected_groups
+        else pd.DataFrame(columns=[
+            "period", "period_end", "as_of_date", "debtor", "creditor", "Currency",
+            "open_principal", "open_interest", "open_total", "position_status",
+            "selection_reason", "candidate_rows", "valid_as_of_rows",
+        ])
     )
 
     counts = pd.DataFrame(
@@ -624,6 +671,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             "n_open_items",
         ]
         n_open_items = int(n_match.iloc[0]) if not n_match.empty else 0
+        available = str(row.get("position_status", "available")) == "available"
         for component, amount_col in [
             ("principal", "open_principal"),
             ("interest", "open_interest"),
@@ -638,22 +686,30 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
                     "creditor": row["creditor"],
                     "Currency": row["Currency"],
                     "component": component,
-                    "open_amount": float(row[amount_col]),
-                    "open_principal": float(row["open_principal"]),
-                    "open_interest": float(row["open_interest"]),
-                    "open_total": float(row["open_total"]),
+                    "position_status": row.get("position_status", "available"),
+                    "selection_reason": row.get("selection_reason", ""),
+                    "candidate_rows": int(row.get("candidate_rows", 0)),
+                    "valid_as_of_rows": int(row.get("valid_as_of_rows", 0)),
+                    "open_amount": float(row[amount_col]) if available else pd.NA,
+                    "open_principal": float(row["open_principal"]) if available else pd.NA,
+                    "open_interest": float(row["open_interest"]) if available else pd.NA,
+                    "open_total": float(row["open_total"]) if available else pd.NA,
                     "source_table": "debt_balance_monthly.csv",
                     "source_rule_version": RULE_VERSION,
                     "n_open_items": n_open_items,
-                    "caveat": "Consumption wrapper over resolved debt balances; debt engine logic is unchanged.",
-                    "frontend_suitability": "safe_with_caveat",
+                    "caveat": (
+                        "Consumption wrapper over resolved debt balances; latest valid as_of authority applied."
+                        if available
+                        else f"Governed debt position unavailable: {row.get('selection_reason', '')}; no lexical or prior-period fallback."
+                    ),
+                    "frontend_suitability": "safe_with_caveat" if available else "unavailable",
                 }
             )
 
     out = pd.DataFrame(rows, columns=DEBT_POSITION_COLUMNS)
     out.to_csv(out_path, index=False)
 
-    source_total = float(unique["open_total"].sum())
+    source_total = float(pd.to_numeric(unique["open_total"], errors="coerce").sum())
     wrapper_total = (
         float(out.loc[out["component"].eq("total"), "open_amount"].sum())
         if not out.empty
@@ -739,6 +795,17 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             "check": "total_reconciles_to_source",
             "status": "pass" if abs(source_total - wrapper_total) < 0.01 else "fail",
             "detail": f"source_total={source_total}; wrapper_total={wrapper_total}",
+            "severity": "error",
+        },
+        {
+            "check": "invalid_as_of_fails_closed",
+            "status": (
+                "pass"
+                if out.empty
+                or out.loc[out["position_status"].astype(str).eq("unavailable"), "open_amount"].isna().all()
+                else "fail"
+            ),
+            "detail": f"unavailable_rows={int(out['position_status'].astype(str).eq('unavailable').sum()) if not out.empty else 0}; lexical_fallback=never",
             "severity": "error",
         },
         {
