@@ -210,7 +210,8 @@ def test_professional_corpus_cash_available_and_unavailable(tmp_path: Path) -> N
     available = _match(index, _expected("cash").query("expectation_id == 'cash_available'").iloc[0])
     assert set(pd.read_csv(pack / available["detail_csv_relpath"])["account_id"]) == {"bank-a", "bank-b"}
     unavailable = _match(index, _expected("cash").query("expectation_id == 'cash_unavailable'").iloc[0])
-    assert json.loads(unavailable["filter_json"])["availability_status"] == "unavailable"
+    assert unavailable["status"] == "unsupported"
+    assert float(unavailable["matched_value_sum"]) == 0.0
 
 
 def test_professional_corpus_governed_derived_metric(tmp_path: Path) -> None:
