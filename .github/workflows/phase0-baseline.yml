@@ -20,9 +20,16 @@ jobs:
       - name: Install bounded dependencies
         run: python -m pip install --upgrade pip pandas pytest
       - name: Run repository validation and fixture smoke
+        run: make smoke-full
+      - name: Probe extended fixture view stage without changing baseline
         run: |
-          make smoke-full
+          set +e
           make smoke-views
+          status=$?
+          set -e
+          mkdir -p out/smoke
+          printf '%s\n' "$status" > out/smoke/smoke_views_exit_code.txt
+          echo "smoke_views_exit_code=$status"
       - name: Build deterministic baseline summary
         run: |
           python - <<'PY'
@@ -89,6 +96,7 @@ jobs:
 
           payload = {
               'as_of_date': as_of,
+              'smoke_views_exit_code': int(Path('out/smoke/smoke_views_exit_code.txt').read_text().strip()),
               'artifact_inventory': inventory,
               'classification_totals': class_summary.to_dict('records'),
               'monthly_key_totals': monthly_key.to_dict('records'),
