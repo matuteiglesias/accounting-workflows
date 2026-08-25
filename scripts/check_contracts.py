@@ -8,9 +8,19 @@ import tempfile
 from pathlib import Path
 
 from accounting.artifacts import manifest as artifact_manifest
-from accounting.artifacts.manifest import artifact_contract_for_name, write_artifact_contract_qa, write_artifact_contracts_csv
+from accounting.artifacts.manifest import (
+    artifact_contract_for_name,
+    write_artifact_contract_qa,
+    write_artifact_contracts_csv,
+)
+
 try:
-    from accounting.metrics.annual import ANNUAL_CONTRACT_COLUMNS, ANNUAL_METRICS_COLUMNS, QA_COLUMNS
+    from accounting.metrics.annual import (
+        ANNUAL_CONTRACT_COLUMNS,
+        ANNUAL_METRICS_COLUMNS,
+        QA_COLUMNS,
+    )
+
     ANNUAL_IMPORT_ERROR = None
 except ModuleNotFoundError as exc:
     ANNUAL_CONTRACT_COLUMNS = []
@@ -18,7 +28,11 @@ except ModuleNotFoundError as exc:
     QA_COLUMNS = []
     ANNUAL_IMPORT_ERROR = exc
 
-from accounting.publish.latest import METRIC_FILES_BY_CLASS, DEBT_FILES_BY_CLASS, _published_contract_row
+from accounting.publish.latest import (
+    DEBT_FILES_BY_CLASS,
+    METRIC_FILES_BY_CLASS,
+    _published_contract_row,
+)
 
 KNOWN_ARTIFACTS = [
     "ledger_canonical.csv",
@@ -36,8 +50,7 @@ KNOWN_ARTIFACTS = [
     "frontend_metric_series.csv",
     "annual_balance_dashboard_metrics.csv",
     "annual_balance_dashboard_contract.csv",
-    "income_statement_y.csv",
-    "balance_cash_y.csv",
+    "annual_flow_membership.csv",
     "debt_open_items.csv",
     "build_manifest.json",
 ]
@@ -64,7 +77,9 @@ def check_contract_vocab() -> None:
         for field, allowed in VOCABS.items():
             value = contract.get(field, "")
             if value not in allowed:
-                errors.append(f"{name}: {field}={value!r} not in declared vocabulary")
+                errors.append(
+                    f"{name}: {field}={value!r} not in declared vocabulary"
+                )
     if errors:
         fail("; ".join(errors))
     print(f"artifact_contract_vocab_consistency: pass rows={len(KNOWN_ARTIFACTS)}")
@@ -74,7 +89,9 @@ def check_lookup_and_qa_smoke() -> None:
     rows = [{"name": name, "relpath": name} for name in KNOWN_ARTIFACTS]
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        contracts_path = write_artifact_contracts_csv(root / "artifact_contracts.csv", rows)
+        contracts_path = write_artifact_contracts_csv(
+            root / "artifact_contracts.csv", rows
+        )
         qa_path = write_artifact_contract_qa(root / "source_contract_qa.csv", rows)
         for path in [contracts_path, qa_path]:
             if not path.exists() or path.stat().st_size == 0:
@@ -82,14 +99,19 @@ def check_lookup_and_qa_smoke() -> None:
         with contracts_path.open(encoding="utf-8", newline="") as fh:
             contract_rows = list(csv.DictReader(fh))
         if len(contract_rows) != len(rows):
-            fail(f"artifact contract lookup smoke row mismatch: {len(contract_rows)} != {len(rows)}")
+            fail(
+                f"artifact contract lookup smoke row mismatch: {len(contract_rows)} != {len(rows)}"
+            )
     print("artifact_contract_lookup_smoke: pass")
     print("source_contract_qa_smoke: pass")
 
 
 def check_module_schema_smokes() -> None:
     if ANNUAL_IMPORT_ERROR is not None:
-        print(f"annual_metrics_schema_import_smoke: warning skipped optional dependency import ({ANNUAL_IMPORT_ERROR})")
+        print(
+            "annual_metrics_schema_import_smoke: warning skipped optional "
+            f"dependency import ({ANNUAL_IMPORT_ERROR})"
+        )
     else:
         for name, cols in {
             "annual_metrics_schema_import_smoke": ANNUAL_METRICS_COLUMNS,
@@ -100,13 +122,30 @@ def check_module_schema_smokes() -> None:
                 fail(f"{name} columns are empty")
             print(f"{name}: pass columns={len(cols)}")
 
-    publish_files = [*METRIC_FILES_BY_CLASS.get("public_contract", []), *METRIC_FILES_BY_CLASS.get("canonical_dashboard", []), *DEBT_FILES_BY_CLASS.get("unsafe_for_frontend", [])]
+    publish_files = [
+        *METRIC_FILES_BY_CLASS.get("public_contract", []),
+        *METRIC_FILES_BY_CLASS.get("canonical_dashboard", []),
+        *DEBT_FILES_BY_CLASS.get("unsafe_for_frontend", []),
+    ]
     if not publish_files:
         fail("publish contract file lists are empty")
-    for rel in ["public_contract/metric_contract_frontier.csv", "legacy_reconciliation/income_statement_y.csv", "unsafe_for_frontend/debt_open_items.csv"]:
+    for rel in [
+        "public_contract/metric_contract_frontier.csv",
+        "canonical_dashboard/annual_balance_dashboard_metrics.csv",
+        "unsafe_for_frontend/debt_open_items.csv",
+    ]:
         row = _published_contract_row(rel)
         if not row.get("publish_class"):
             fail(f"publish contract lookup missing class for {rel}")
+    selected_names = {Path(x).name for x in publish_files}
+    retired = {
+        "metric_registry.csv",
+        "metric_values.csv",
+        "income_statement_y.csv",
+        "balance_cash_y.csv",
+    }
+    if selected_names.intersection(retired):
+        fail(f"retired metric outputs remain selected for publication: {selected_names & retired}")
     print(f"publish_contract_schema_import_smoke: pass files={len(publish_files)}")
 
 
