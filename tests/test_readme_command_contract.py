@@ -69,8 +69,9 @@ def _public_targets(makefile: str) -> set[str]:
 
 def test_makefile_public_surface_is_exact_and_alias_free() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    assert _public_targets(makefile) == EXPECTED_PUBLIC_TARGETS
-    assert RETIRED_TARGETS.isdisjoint(_public_targets(makefile))
+    public_targets = _public_targets(makefile)
+    assert public_targets == EXPECTED_PUBLIC_TARGETS
+    assert RETIRED_TARGETS.isdisjoint(public_targets)
     assert ".DEFAULT_GOAL := help" in makefile
 
 
@@ -84,8 +85,13 @@ def test_stage_targets_are_replayable_and_live_composites_are_explicit() -> None
     assert "run-canonical: run-ingest" in makefile
     assert "run-full: run-canonical" in makefile
 
-    for retired in RETIRED_TARGETS:
-        assert f"{retired}:" not in makefile
+
+def test_one_make_invocation_freezes_one_run_identity() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)" in makefile
+    assert "RUN_STAMP := $(RUN_STAMP)" in makefile
+    assert "RUN_ID ?= $(RUN_STAMP)_$(SCOPE_TAG)" in makefile
+    assert "RUN_ID := $(RUN_ID)" in makefile
 
 
 def test_readme_names_only_current_command_contract() -> None:
