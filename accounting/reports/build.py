@@ -43,6 +43,22 @@ def _validation_status(path: Path) -> str:
     return "pass"
 
 
+def _assert_annual_run_identity(metrics_path: Path, expected_run_id: str) -> None:
+    frame = pd.read_csv(metrics_path, usecols=lambda col: col == "run_id")
+    if "run_id" not in frame.columns:
+        raise ValueError("annual report source is missing run_id provenance")
+    run_ids = {
+        str(value).strip()
+        for value in frame["run_id"].dropna()
+        if str(value).strip()
+    }
+    if run_ids != {expected_run_id}:
+        raise ValueError(
+            "annual report source run_id does not match exact run directory: "
+            f"expected={expected_run_id} actual={sorted(run_ids)}"
+        )
+
+
 def _annual_metadata(metrics_path: Path) -> tuple[str, str]:
     frame = pd.read_csv(metrics_path, usecols=lambda col: col in {"period", "as_of_date"})
     periods = sorted(
@@ -124,6 +140,7 @@ def build_report_bundle(
     if missing:
         raise FileNotFoundError(f"report source artifact(s) missing: {missing}")
 
+    _assert_annual_run_identity(annual_metrics, source_run_id)
     as_of_date, annual_period_label = _annual_metadata(annual_metrics)
     treasury_period_label = _treasury_period_label(treasury_accountability)
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat()
@@ -193,6 +210,9 @@ def build_report_bundle(
     treasury_manifest_path = treasury_dir / "report_manifest.json"
     write_report_manifest(treasury_manifest_path, treasury_manifest)
 
+    # The catalog is the viewer boundary. Internal provenance manifests and
+    # trace/validation CSVs remain under out/reports and are deliberately not
+    # part of the public document-discovery contract.
     catalog = build_report_catalog(
         source_run_id=source_run_id,
         scope_tag=scope_tag,
@@ -210,7 +230,7 @@ def build_report_bundle(
                 sort_order=10,
                 html="annual_management/report.html",
                 pdf="annual_management/report.pdf" if require_pdf else None,
-                manifest="annual_management/report_manifest.json",
+                manifest=None,
             ),
             ReportCatalogItem(
                 report_id="treasury_accountability",
@@ -223,7 +243,7 @@ def build_report_bundle(
                 sort_order=20,
                 html="treasury_accountability/report.html",
                 pdf="treasury_accountability/report.pdf" if require_pdf else None,
-                manifest="treasury_accountability/report_manifest.json",
+                manifest=None,
             ),
         ],
     )
