@@ -53,12 +53,19 @@ def _annual_year_currency(
     ].copy()
     if sub.empty:
         return {}
-    sub = sub.loc[sub["period"].astype(str).str.fullmatch(r"\d{4}")].copy()
+
+    # annual CSVs contain unavailable rows with blank periods, so pandas may
+    # deserialize the period column as float and turn a real year into 2025.0.
+    # Normalize the observation here rather than changing the production schema
+    # or annual accounting logic to satisfy a CSV dtype accident.
+    year = pd.to_numeric(sub["period"], errors="coerce")
+    sub = sub.loc[year.notna()].copy()
+    sub["year"] = year.loc[sub.index].astype("Int64").astype(str)
     sub["value"] = pd.to_numeric(sub["value"], errors="coerce").fillna(0.0)
-    grouped = sub.groupby(["period", "Currency"], dropna=False)["value"].sum()
+    grouped = sub.groupby(["year", "Currency"], dropna=False)["value"].sum()
     return {
-        (str(year), str(currency)): float(value)
-        for (year, currency), value in grouped.items()
+        (str(year_value), str(currency)): float(value)
+        for (year_value, currency), value in grouped.items()
     }
 
 
