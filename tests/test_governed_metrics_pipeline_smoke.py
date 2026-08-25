@@ -24,17 +24,24 @@ def _run(*args: str) -> None:
     )
 
 
-def _statement_year_currency(stmt: pd.DataFrame, line: str) -> dict[tuple[str, str], float]:
+def _statement_year_currency(
+    stmt: pd.DataFrame, line: str
+) -> dict[tuple[str, str], float]:
     sub = stmt.loc[stmt["statement_line"].astype(str).eq(line)].copy()
     if sub.empty:
         return {}
     sub["year"] = sub["period"].astype(str).str.slice(0, 4)
     sub["amount"] = pd.to_numeric(sub["amount"], errors="coerce").fillna(0.0)
     grouped = sub.groupby(["year", "Currency"], dropna=False)["amount"].sum()
-    return {(str(year), str(currency)): float(value) for (year, currency), value in grouped.items()}
+    return {
+        (str(year), str(currency)): float(value)
+        for (year, currency), value in grouped.items()
+    }
 
 
-def _annual_year_currency(metrics: pd.DataFrame, metric_id: str) -> dict[tuple[str, str], float]:
+def _annual_year_currency(
+    metrics: pd.DataFrame, metric_id: str
+) -> dict[tuple[str, str], float]:
     sub = metrics.loc[
         metrics["metric_id"].astype(str).eq(metric_id)
         & metrics["value_status"].astype(str).eq("available")
@@ -44,16 +51,28 @@ def _annual_year_currency(metrics: pd.DataFrame, metric_id: str) -> dict[tuple[s
     sub = sub.loc[sub["period"].astype(str).str.fullmatch(r"\d{4}")].copy()
     sub["value"] = pd.to_numeric(sub["value"], errors="coerce").fillna(0.0)
     grouped = sub.groupby(["period", "Currency"], dropna=False)["value"].sum()
-    return {(str(year), str(currency)): float(value) for (year, currency), value in grouped.items()}
+    return {
+        (str(year), str(currency)): float(value)
+        for (year, currency), value in grouped.items()
+    }
 
 
-def _assert_close_dict(actual: dict[tuple[str, str], float], expected: dict[tuple[str, str], float]) -> None:
+def _assert_close_dict(
+    actual: dict[tuple[str, str], float],
+    expected: dict[tuple[str, str], float],
+) -> None:
     assert set(actual) == set(expected)
     for key, expected_value in expected.items():
-        assert abs(actual[key] - expected_value) < 1e-6, (key, actual[key], expected_value)
+        assert abs(actual[key] - expected_value) < 1e-6, (
+            key,
+            actual[key],
+            expected_value,
+        )
 
 
-def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(tmp_path: Path) -> None:
+def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(
+    tmp_path: Path,
+) -> None:
     run_root = tmp_path / "run"
     metrics_dir = tmp_path / "metrics"
 
@@ -113,9 +132,15 @@ def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(tmp_path: P
 
     frontier = pd.read_csv(metrics_dir / "metric_contract_frontier.csv")
     series = pd.read_csv(metrics_dir / "frontend_metric_series.csv")
-    assert not frontier["legacy_flag"].astype(str).str.lower().isin({"true", "1", "yes", "y"}).any()
-    assert not series["legacy_flag"].astype(str).str.lower().isin({"true", "1", "yes", "y"}).any()
-    assert set(series["source_table"].dropna().astype(str)).issubset(CANONICAL_FRONTIER_SOURCES)
+    assert not frontier["legacy_flag"].astype(str).str.lower().isin(
+        {"true", "1", "yes", "y"}
+    ).any()
+    assert not series["legacy_flag"].astype(str).str.lower().isin(
+        {"true", "1", "yes", "y"}
+    ).any()
+    assert set(series["source_table"].dropna().astype(str)).issubset(
+        CANONICAL_FRONTIER_SOURCES
+    )
     assert series["Currency"].fillna("").astype(str).str.strip().ne("").all()
 
     stmt = pd.read_csv(run_root / "monthly_operating_statement.csv")
@@ -139,10 +164,12 @@ def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(tmp_path: P
         & annual["value_status"].astype(str).eq("available")
     ]
     if not available_cash.empty:
-        assert available_cash["source_table"].astype(str).eq("monthly_cash_close.csv").all()
+        assert available_cash["source_table"].astype(str).eq(
+            "monthly_cash_close.csv"
+        ).all()
         assert available_cash["calculation_rule"].astype(str).str.contains(
             "never sum monthly positions", case=False, regex=False
         ).all()
-        assert ~available_cash["source_filter"].astype(str).str.contains(
-            "inferred", case=False, regex=False
-        ).any()
+        assert available_cash["source_filter"].astype(str).str.contains(
+            "fallback_to_inferred=never", case=False, regex=False
+        ).all()
