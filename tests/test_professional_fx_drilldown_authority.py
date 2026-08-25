@@ -108,10 +108,10 @@ def test_fx_drilldown_authority_reconciles_explicit_measure_and_grain(tmp_path: 
     assert float(supported["matched_value_sum"]) == 200.0
     assert "Property Management" in supported["row_context_json"]
     assert float(unsupported["matched_value_sum"]) == 0.0
-    assert "missing Box" in unsupported["caveat"]
+    assert '"unsupported": true' in unsupported["filter_json"]
 
     compact = _row(index, "monthly_tables_fx_treasury_compact")
     assert compact["status"] == "unsupported"
     assert float(compact["matched_value_sum"]) == 0.0
     assert compact["measure"] != "net_amount"
-    assert "no explicit recognized measure" in compact["caveat"]
+    assert '"unsupported": true' in compact["filter_json"]
