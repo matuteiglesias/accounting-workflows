@@ -90,7 +90,7 @@ def test_acceptance_scope_major_cells_have_details_and_caveats(tmp_path: Path) -
     _write(tables / "monthly_tables_pm_stress_matrix.csv", [{"Currency": "ARS", "metric": "property_opex_out", "2026-01": 133}])
     _write(tables / "monthly_tables_household_bridge_matrix.csv", [{"Currency": "ARS", "metric": "funding_in", "2026-01": 55}])
     _write(tables / "monthly_tables_opex_by_type_amount_out.csv", [{"Currency": "ARS", "Box": "Property Management", "semantic_subbucket": "taxes", "2026-01": 33}])
-    _write(tables / "monthly_tables_fx_treasury_compact.csv", [{"Currency": "ARS", "2026-01": 200}])
+    _write(tables / "monthly_tables_fx_treasury_compact.csv", [{"measure": "amount_in", "Currency": "ARS", "2026-01": 200}])
     _write(tables / "monthly_tables_unknown_review_net_matrix.csv", [{"Currency": "ARS", "2026-01": -7}])
 
     paths = build_professional_flow_drilldowns(repo, pack, run)
