@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from accounting.reports.catalog import validate_catalog_files
-from accounting.reports.common import ensure_relative_bundle_path
+from accounting.reports.common import atomic_write_json, ensure_relative_bundle_path
 
 
 DEFAULT_PUBLIC_SUBDIR = Path("public") / "reports"
@@ -24,15 +25,19 @@ def _catalog(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _public_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Strip internal provenance references from the viewer-facing catalog."""
+
+    public_catalog = deepcopy(catalog)
+    for report in public_catalog.get("reports", []):
+        report["manifest"] = None
+    return public_catalog
+
+
 def _public_files(catalog: dict[str, Any]) -> list[str]:
-    """Return the document-only viewer publication surface.
+    """Return only finished human documents referenced by the catalog."""
 
-    Internal report manifests may exist in an exact-run catalog for provenance,
-    but they are never part of ``public/reports``.  The downstream viewer only
-    receives the discovery catalog plus finished HTML/PDF documents.
-    """
-
-    files = ["report_catalog.json"]
+    files: list[str] = []
     for report in catalog.get("reports", []):
         for key in ("html", "pdf"):
             value = report.get(key)
@@ -77,10 +82,12 @@ def publish_report_bundle(
         )
 
     target_root = project_root / public_subdir / f"latest_{scope_tag}"
-    files = _public_files(catalog)
+    public_catalog = _public_catalog(catalog)
+    files = _public_files(public_catalog)
     if dry_run:
         print(f"source={source_root}")
         print(f"target={target_root}")
+        print("report_catalog.json")
         for rel in files:
             print(rel)
         return target_root
@@ -88,6 +95,7 @@ def publish_report_bundle(
     if clean:
         _remove_path(target_root)
     target_root.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(target_root / "report_catalog.json", public_catalog)
     for rel in files:
         source = source_root / rel
         if not source.is_file():
@@ -96,12 +104,7 @@ def publish_report_bundle(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
 
-    # Validate the published document set without requiring any internal
-    # manifest path that may have been present in the exact-run catalog.
-    published_catalog = _catalog(target_root / "report_catalog.json")
-    for report in published_catalog.get("reports", []):
-        report["manifest"] = None
-    validate_catalog_files(published_catalog, bundle_root=target_root)
+    validate_catalog_files(_catalog(target_root / "report_catalog.json"), bundle_root=target_root)
     return target_root
 
 
