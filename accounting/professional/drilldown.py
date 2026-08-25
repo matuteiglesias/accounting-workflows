@@ -260,6 +260,7 @@ def _spec_for_cell(table_id: str, row: pd.Series):
 _base.FX_TREASURY_TABLE_IDS = FX_TREASURY_TABLE_IDS
 _base.FX_MEASURES = FX_MEASURES
 _base._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
+_base._spec_for_cell = _spec_for_cell
 _base._legacy.FX_TREASURY_TABLE_IDS = FX_TREASURY_TABLE_IDS
 _base._legacy.FX_MEASURES = FX_MEASURES
 _base._legacy._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
