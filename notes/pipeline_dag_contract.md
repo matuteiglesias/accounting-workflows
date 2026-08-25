@@ -1,6 +1,9 @@
 # Makefile pipeline DAG contract
 
-This document defines the intended Makefile control-plane surface. It documents orchestration only; it does not change accounting formulas, semantic rules, cash/debt logic, or metric definitions.
+Status: current authority
+Last reviewed: 2026-08-25
+
+This document defines orchestration only. Accounting classification, cash selection, debt position/activity, annual aggregation and FX membership remain governed by their dedicated contracts.
 
 ## Intended DAG
 
@@ -11,48 +14,62 @@ smoke-core
 smoke-full
 
 run-canonical
-  run-ingest -> run-materialize -> run-marts -> run-debt -> run-debt-views
+  run-ingest -> run-materialize
+
+run-debt-views
+  run-canonical -> debt.resolve -> debt.balance_views
+                -> monthly_debt_position / monthly_debt_activity
+                -> treasury accountability
 
 metrics-from-run / run-metrics
-  existing RUN_OUT -> accounting.metrics.build -> frontier + annual dashboard artifacts
+  existing RUN_OUT
+    -> accounting.metrics.build
+    -> metric frontier + annual dashboard + source contracts
 
 run-dashboard
   asserts annual dashboard metrics, contract, and QA outputs
 
-run-human
-  metrics + canonical/report-safe sources -> human report
-
 publish-latest
-  latest producer outputs -> public/accounting/latest package
+  scope-qualified latest debt/metrics -> public/accounting/latest_<SCOPE_TAG>
 
 release-check
-  public/accounting/latest -> dashboard readiness validation
+  public bundle -> dashboard-readiness validation
+
+professional-drilldowns / professional-linked-digest
+  existing governed professional pack -> traceable presentation/drilldowns
 ```
+
+There is no `run-marts` generic views stage, `views_sanity.json` gate, generic `metric_values` registry engine, or standalone human-report accounting stage.
 
 ## Target contracts
 
-| Target | Stage | Command | Required inputs | Produced artifacts | QA artifacts | Contract assumptions | Live env required |
-|---|---|---|---|---|---|---|---|
-| `doctor` | environment/static | `python -m py_compile ...` | Python and repo files | compile status | none | command modules import/compile | no |
-| `validate` | static/contracts | `doctor`, `make help`, `scripts/check_contracts.py` | source tree | validation status | temp artifact/source contract QA | emitted contracts match declared vocabularies | no |
-| `smoke-core` | fixture core | `smoke-ingest` + `accounting.stage_d.materialize` | `fixtures/ledger_fixture.csv` | smoke ingest, Stage D semantic/cash artifacts | materialize checks, `semantic/cash artifact presence checks` | fixture path exercises offline core | no |
-| `smoke-full` | fixture product | `smoke-core validate publish --dry-run` | fixture core | dry-run publish manifest on stdout | validate checks | full fixture debt/human publish is a documented follow-up | no |
-| `run-canonical` | live canonical | `run-debt-views` | Google Sheet credentials and sheet URL | run root, marts, debt wrappers | ingest/materialize/view/debt checks | canonical backend stops before metrics/human/publish | yes |
-| `metrics-from-run` | metrics | `_run_metrics_action` | existing `RUN_OUT` with canonical artifacts | metric registry, metric values, frontier, annual dashboard outputs | validation report, source contract QA | consumes existing canonical artifacts only | no |
-| `run-metrics-live` | metrics orchestration | `run-debt-views _run_metrics_action` | Google Sheet credentials | metrics outputs | metrics QA | live orchestration retained separately | yes |
-| `run-dashboard` | dashboard | file assertions | metrics dir | annual dashboard metrics/contract/QA | annual dashboard QA | dashboard outputs are produced by metrics build | no |
-| `run-human` | human | `accounting.human.document` | `RUN_OUT`, metrics dir | human HTML/report manifest | story manifest | does not recompute semantics | no |
-| `publish-latest` | publish | `accounting.publish.latest` | latest symlinks for run/debt/metrics/human | public bundle | publish contract QA | packaging only, not release readiness | no |
-| `release-check` | release | `scripts/check_release.py` | `public/accounting/latest` | readiness status | printed checks | public bundle is dashboard-ready | no |
-| `run-full` | full live | `run-canonical -> run-metrics -> run-dashboard -> run-human -> publish-latest -> release-check` | live env | public bundle | release-check | full live release path | yes |
+| Target | Stage | Required inputs | Produced artifacts | Main invariant | Live env required |
+|---|---|---|---|---|---|
+| `doctor` | static | source tree | compile status | command modules import/compile | no |
+| `validate` | static/contracts/tests | source tree | validation status | declared contracts and regressions pass | no |
+| `smoke-core` | fixture canonical | ledger fixture | canonical/materialized semantic + cash artifacts | offline canonical path works | no |
+| `smoke-full` | fixture product | smoke-core | validate + publish dry-run | fixture-safe product gates | no |
+| `run-canonical` | live canonical | Google Sheet credentials | canonical ledger + governed materialization | no downstream reclassification stage | yes |
+| `run-debt-views` | debt | canonical all-status ledger | debt resolution + position/activity + treasury | stock and movement remain distinct | yes when upstream live |
+| `metrics-from-run` | governed metrics | existing canonical run | frontier, annual dashboard, flow membership, contracts | canonical sources only | no |
+| `run-metrics-live` | live metrics | live canonical/debt path | governed metric artifacts | same authority as existing-run metrics | yes |
+| `run-dashboard` | dashboard gate | metrics directory | assertions only | annual artifacts exist | no |
+| `publish-latest` | packaging | latest metrics/debt | public bundle | no computation or legacy metric revival | no |
+| `release-check` | release | public bundle | readiness status | cash/debt/currency/publication checks | no |
+| `run-full` | full live | live env | public bundle | canonical -> debt -> governed metrics -> publish | yes |
 
-## Latest symlink contract
+## Latest pointer contract
 
-After human report generation, `_update_latest` updates all producer latest pointers consistently:
+After a complete run, `_update_latest` aligns one run identity across:
 
 ```text
-out/run/accounting/latest
-out/debt_resolution/latest
-out/metrics/latest
-out/human_reports/latest
+out/run/accounting/latest_<SCOPE_TAG>
+out/debt_resolution/latest_<SCOPE_TAG>
+out/metrics/latest_<SCOPE_TAG>
 ```
+
+The primary scope may also maintain the documented compatibility `latest` pointer. No `human_reports/latest` or views-stage latest pointer belongs to the current spine.
+
+## Change rule
+
+A Makefile change is not validated merely because commands execute. Any change that affects an accounting layer must also reconcile the relevant totals/scope/currency and professional drilldowns. Structural pruning may retire obsolete compatibility outputs when their underlying governed facts remain available.
