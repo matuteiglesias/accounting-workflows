@@ -4,14 +4,16 @@ from pathlib import Path
 
 import pandas as pd
 
+from accounting.contracts.atomic_flow_drilldowns import resolve_flow_cell_spec
+from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.management.usd_ccl_flows import _measure_direction
 from accounting.marts.semantic import build_monthly_operating_statement_from_split
 from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.professional.drilldown import (
     _cash_bridge_line_spec,
     _fx_treasury_measure_for_row,
-    _semantic_filter_for_statement_line,
 )
+from accounting.professional.table_contracts import EXPLICIT_STATEMENT_LINE_FLOW_CELL_IDS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +61,6 @@ def _split() -> pd.DataFrame:
 def test_native_statement_measures_and_review_fallback_are_governed() -> None:
     statement, _ = build_monthly_operating_statement_from_split(_split())
     by_line = statement.set_index("statement_line")
-
     expected = {
         "rent_revenue": (11, "amount_in"),
         "taxes": (12, "amount_out"),
@@ -88,7 +89,7 @@ def test_native_statement_measures_and_review_fallback_are_governed() -> None:
     assert fallback_by_line.loc["unknown_or_ambiguous_outflows", "amount"] == 25
 
 
-def test_management_and_professional_selectors_match_governed_atomic_direction() -> None:
+def test_management_and_professional_contracts_share_governed_atomic_direction() -> None:
     management_cases = [
         ("operating_revenue", "rent", "in"),
         ("property_opex", "taxes", "out"),
@@ -102,19 +103,11 @@ def test_management_and_professional_selectors_match_governed_atomic_direction()
         ("treasury_fx", "fx_cost_or_spread", "out"),
     ]
     for bucket, subbucket, expected in management_cases:
-        assert _measure_direction(
-            {"semantic_bucket": bucket, "semantic_subbucket": subbucket}
-        ) == expected
+        assert _measure_direction({"semantic_bucket": bucket, "semantic_subbucket": subbucket}) == expected
 
-    assert _measure_direction(
-        {"semantic_bucket": "debt_movement", "semantic_subbucket": "principal"}
-    ) == ""
-    assert _measure_direction(
-        {"semantic_bucket": "internal_transfer", "semantic_subbucket": "transfer"}
-    ) == ""
-    assert _measure_direction(
-        {"semantic_bucket": "treasury_fx", "semantic_subbucket": "unapproved_future_fx"}
-    ) == ""
+    assert _measure_direction({"semantic_bucket": "debt_movement", "semantic_subbucket": "principal"}) == ""
+    assert _measure_direction({"semantic_bucket": "internal_transfer", "semantic_subbucket": "transfer"}) == ""
+    assert _measure_direction({"semantic_bucket": "treasury_fx", "semantic_subbucket": "unapproved_future_fx"}) == ""
 
     line_measures = {
         "rent_revenue": "amount_in",
@@ -124,20 +117,18 @@ def test_management_and_professional_selectors_match_governed_atomic_direction()
         "treasury_fx_conversion_in": "amount_in",
         "treasury_fx_conversion_out": "amount_out",
         "treasury_fx_cost": "amount_out",
-        "treasury_fx_net": "net_amount",
     }
     for line, expected in line_measures.items():
-        spec = _semantic_filter_for_statement_line(line)
-        assert spec is not None and spec[0] == expected
-
-    assert _semantic_filter_for_statement_line("debt_movements") is None
-    assert _semantic_filter_for_statement_line("internal_transfers") is None
-    assert _semantic_filter_for_statement_line("unknown_or_ambiguous_outflows")[0] == "amount_abs"
+        cell_id = EXPLICIT_STATEMENT_LINE_FLOW_CELL_IDS[line]
+        spec = resolve_flow_cell_spec(cell_id)
+        assert spec is not None
+        assert resolve_semantic_measure(*spec.measure_ref) == expected
 
     for metric, expected in {
         "fx_conversion_proceeds": "amount_in",
         "fx_conversion_outflow": "amount_out",
         "fx_cost_or_spread": "amount_out",
+        "fx_net": "net_amount",
         "future_unknown_fx": "",
     }.items():
         assert _fx_treasury_measure_for_row(
@@ -156,9 +147,6 @@ def test_management_and_professional_selectors_match_governed_atomic_direction()
 
 
 def test_annual_metrics_delegate_atomic_measures_to_upstream_or_contract() -> None:
-    # The public annual module is a facade: audit both its governed rewrites and
-    # the explicit delegated compatibility implementation rather than assuming
-    # every unchanged annual rule remains textually copied into the facade.
     source = "\n".join(
         [
             (ROOT / "accounting" / "metrics" / "annual.py").read_text(encoding="utf-8"),
@@ -192,9 +180,7 @@ def test_annual_atomic_detail_matches_governed_monthly_measures(tmp_path: Path) 
     split.to_csv(run_root / "monthly_flow_semantic_split.csv", index=False)
     statement.to_csv(run_root / "monthly_operating_statement.csv", index=False)
 
-    paths = build_annual_balance_dashboard(
-        run_root, metrics_dir, run_id="semantic-parity", as_of_date="2026-08-19"
-    )
+    paths = build_annual_balance_dashboard(run_root, metrics_dir, run_id="semantic-parity", as_of_date="2026-08-19")
     annual = pd.read_csv(paths["annual_balance_dashboard_metrics"])
     available = annual[annual["value_status"].eq("available")]
 
@@ -204,12 +190,7 @@ def test_annual_atomic_detail_matches_governed_monthly_measures(tmp_path: Path) 
 
     assert values("IS.RENT.TOTAL")[""] == 11
     assert values("IS.RENT.BY_PROPERTY")["CABA"] == 11
-    assert values("IS.OPEX.BY_CATEGORY") == {
-        "legal": 15,
-        "maintenance": 14,
-        "services": 13,
-        "taxes": 12,
-    }
+    assert values("IS.OPEX.BY_CATEGORY") == {"legal": 15, "maintenance": 14, "services": 13, "taxes": 12}
     assert values("FUND.CONTRIB.BY_ACTOR")["Matías"] == 16
     assert values("DIST.DRAWS.BY_TYPE")["personal_expense"] == 17
     assert values("TR.FX.BY_BOX")["Property Management"] == -48
