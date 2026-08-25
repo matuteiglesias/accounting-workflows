@@ -265,6 +265,7 @@ _base._legacy.FX_TREASURY_TABLE_IDS = FX_TREASURY_TABLE_IDS
 _base._legacy.FX_MEASURES = FX_MEASURES
 _base._legacy._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
 _base._legacy._spec_for_cell = _spec_for_cell
+_base._legacy.SUPPORTED_TABLE_IDS = tuple(dict.fromkeys(_base._legacy.SUPPORTED_TABLE_IDS))
 _base._legacy._build_derived_cell = _build_derived_cell
 _base._legacy.enrich_professional_table_contracts = _enrich_professional_table_contracts
 
