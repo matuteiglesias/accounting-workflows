@@ -44,6 +44,12 @@ from accounting.professional.debt_position_executor import (
 )
 from accounting.professional.derived_metric_executor import execute_derived_metric
 from accounting.professional.derived_metric_metadata import enrich_derived_metric_tables
+from accounting.professional.fx_drilldown_authority import (
+    FX_MEASURES,
+    FX_TREASURY_TABLE_IDS,
+    _fx_treasury_measure_for_row,
+    resolve_fx_drilldown,
+)
 
 
 # Explicit compatibility surface derived from repository caller census.
@@ -86,10 +92,10 @@ _execute_governed_derived_flow = _base._execute_governed_derived_flow
 _governed_flow_resolution = _base._governed_flow_resolution
 _safe_div = _base._safe_div
 _semantic_filter_for_statement_line = _base._semantic_filter_for_statement_line
-_spec_for_cell = _base._spec_for_cell
 row_context_id = _base.row_context_id
 
 
+_ORIGINAL_SPEC_FOR_CELL = _base._spec_for_cell
 _ORIGINAL_BUILD_DERIVED_CELL = _base._build_derived_cell
 _ORIGINAL_BUILD_PROFESSIONAL_FLOW_DRILLDOWNS = _base._legacy.build_professional_flow_drilldowns
 _ORIGINAL_ENRICH_PROFESSIONAL_TABLE_CONTRACTS = (
@@ -185,14 +191,81 @@ def _build_derived_cell(
     )
 
 
-FX_TREASURY_TABLE_IDS = _base.FX_TREASURY_TABLE_IDS
-FX_MEASURES = _base.FX_MEASURES
+def _unsupported_fx_spec(table_id: str, row: pd.Series, reason: str, measure: str):
+    return _base._legacy.CellSpec(
+        table_id,
+        measure or _base._legacy._norm(row.get("measure")) or _base._legacy._metric_name(row),
+        lambda df, _row: pd.Series(False, index=df.index),
+        caveat_func=lambda _row, why=reason: f"FX drilldown unsupported: {why}.",
+        unsupported_if=lambda _row: True,
+    )
 
 
-def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
-    return _base._fx_treasury_measure_for_row(table_id, row)
+def _fx_spec_for_cell(table_id: str, row: pd.Series):
+    resolution = resolve_fx_drilldown(table_id, row)
+    if resolution is None:
+        return None
+    if not resolution.supported:
+        return _unsupported_fx_spec(
+            table_id,
+            row,
+            resolution.unsupported_reason,
+            resolution.measure,
+        )
+
+    def _filter(df: pd.DataFrame, _row: pd.Series) -> pd.Series:
+        if "Currency" not in df.columns or "semantic_bucket" not in df.columns:
+            return pd.Series(False, index=df.index)
+        mask = (
+            df["Currency"].fillna("").astype(str).str.strip().eq(resolution.currency)
+            & df["semantic_bucket"].fillna("").astype(str).str.strip().eq("treasury_fx")
+        )
+        if resolution.grain == "box_currency":
+            if "Box" not in df.columns:
+                return pd.Series(False, index=df.index)
+            mask &= df["Box"].fillna("").astype(str).str.strip().eq(resolution.box)
+        if resolution.semantic_subbucket:
+            if "semantic_subbucket" not in df.columns:
+                return pd.Series(False, index=df.index)
+            mask &= (
+                df["semantic_subbucket"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .eq(resolution.semantic_subbucket)
+            )
+        return mask
+
+    return _base._legacy.CellSpec(
+        table_id,
+        resolution.measure,
+        _filter,
+        caveat_func=lambda _row: (
+            "FX drilldown authority: "
+            f"grain={resolution.grain}; measure={resolution.measure}."
+        ),
+    )
 
 
+def _spec_for_cell(table_id: str, row: pd.Series):
+    fx_spec = _fx_spec_for_cell(table_id, row)
+    if fx_spec is not None:
+        return fx_spec
+    return _ORIGINAL_SPEC_FOR_CELL(table_id, row)
+
+
+# The legacy/base modules remain import-compatible, but every live FX selector
+# points at this facade's imported single authority. Their historical resolver
+# bodies are therefore no longer on the execution path.
+_base.FX_TREASURY_TABLE_IDS = FX_TREASURY_TABLE_IDS
+_base.FX_MEASURES = FX_MEASURES
+_base._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
+_base._spec_for_cell = _spec_for_cell
+_base._legacy.FX_TREASURY_TABLE_IDS = FX_TREASURY_TABLE_IDS
+_base._legacy.FX_MEASURES = FX_MEASURES
+_base._legacy._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
+_base._legacy._spec_for_cell = _spec_for_cell
+_base._legacy.SUPPORTED_TABLE_IDS = tuple(dict.fromkeys(_base._legacy.SUPPORTED_TABLE_IDS))
 _base._legacy._build_derived_cell = _build_derived_cell
 _base._legacy.enrich_professional_table_contracts = _enrich_professional_table_contracts
 

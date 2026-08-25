@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
+from accounting.professional import drilldown, drilldown_legacy, drilldown_wave4_base
 from accounting.professional.drilldown import _fx_treasury_measure_for_row
-
-
-ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "accounting" / "professional" / "drilldown.py"
+from accounting.professional.fx_drilldown_authority import (
+    FX_MEASURES,
+    FX_TREASURY_TABLE_IDS,
+    resolve_fx_drilldown,
+)
 
 
 @pytest.mark.parametrize(
@@ -31,7 +30,7 @@ MODULE = ROOT / "accounting" / "professional" / "drilldown.py"
         ("monthly_tables_fx_treasury_all_measures", {"metric": "fx_cost_or_spread"}, "amount_out"),
         ("monthly_tables_fx_treasury_all_measures", {"metric": "fx_net"}, "net_amount"),
         ("monthly_tables_fx_treasury_all_measures", {"metric": "amount_abs"}, "amount_abs"),
-        ("monthly_tables_fx_treasury_compact", {}, "net_amount"),
+        ("monthly_tables_fx_treasury_compact", {}, ""),
         ("monthly_tables_fx_treasury_all_measures", {}, ""),
         ("monthly_tables_fx_treasury_all_measures", {"metric": "future_fx_metric"}, ""),
     ],
@@ -42,7 +41,7 @@ def test_effective_fx_measure_resolution_is_characterized(
     assert _fx_treasury_measure_for_row(table_id, pd.Series(row, dtype=object)) == expected
 
 
-def test_explicit_measure_precedes_table_and_metric_fallbacks() -> None:
+def test_explicit_measure_precedes_legacy_table_and_metric_fallbacks() -> None:
     row = pd.Series(
         {
             "measure": "amount_abs",
@@ -54,22 +53,67 @@ def test_explicit_measure_precedes_table_and_metric_fallbacks() -> None:
     ) == "amount_abs"
 
 
-def test_shadowed_fx_resolver_and_constants_are_gone() -> None:
-    tree = ast.parse(MODULE.read_text(encoding="utf-8"))
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_fx_treasury_measure_for_row"
-    ]
-    assigned_names = [
-        target.id
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        for target in node.targets
-        if isinstance(target, ast.Name)
-    ]
+def test_currency_total_and_box_currency_grains_are_explicit() -> None:
+    total = resolve_fx_drilldown(
+        "monthly_tables_fx_treasury_amount_in",
+        pd.Series({"Currency": "ARS"}),
+    )
+    assert total is not None and total.supported
+    assert (total.grain, total.measure, total.currency, total.box) == (
+        "currency_total",
+        "amount_in",
+        "ARS",
+        "",
+    )
 
-    assert len(functions) == 1
-    assert assigned_names.count("FX_TREASURY_TABLE_IDS") == 1
-    assert assigned_names.count("FX_MEASURES") == 1
+    by_box = resolve_fx_drilldown(
+        "monthly_tables_fx_treasury_all_measures",
+        pd.Series(
+            {
+                "Currency": "USD",
+                "Box": "Property Management",
+                "measure": "amount_out",
+            }
+        ),
+    )
+    assert by_box is not None and by_box.supported
+    assert (by_box.grain, by_box.measure, by_box.currency, by_box.box) == (
+        "box_currency",
+        "amount_out",
+        "USD",
+        "Property Management",
+    )
+
+
+def test_box_required_contract_without_box_fails_closed() -> None:
+    resolution = resolve_fx_drilldown(
+        "monthly_tables_fx_treasury_all_measures",
+        pd.Series(
+            {
+                "Currency": "ARS",
+                "drilldown_cell_id": "flow.fx.conversion_proceeds",
+            }
+        ),
+    )
+    assert resolution is not None and not resolution.supported
+    assert resolution.measure == "amount_in"
+    assert resolution.grain == "box_currency"
+    assert "missing Box" in resolution.unsupported_reason
+
+
+def test_compact_row_without_measure_is_unsupported_not_net() -> None:
+    resolution = resolve_fx_drilldown(
+        "monthly_tables_fx_treasury_compact",
+        pd.Series({"Currency": "ARS"}),
+    )
+    assert resolution is not None and not resolution.supported
+    assert resolution.measure == ""
+    assert "no explicit recognized measure" in resolution.unsupported_reason
+
+
+def test_all_live_fx_exports_share_one_runtime_authority() -> None:
+    assert drilldown._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
+    assert drilldown_wave4_base._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
+    assert drilldown_legacy._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
+    assert drilldown.FX_TREASURY_TABLE_IDS is FX_TREASURY_TABLE_IDS
+    assert drilldown.FX_MEASURES is FX_MEASURES
