@@ -250,7 +250,7 @@ smoke-usd-ccl-valuation:
 	@$(PY) -m accounting.valuation.usd_ccl \
 		--ledger "$(USD_CCL_LEDGER_FIXTURE)" \
 		--rates "$(USD_CCL_RATE_FIXTURE)" \
-		--policy "$(USD_CCL_RATE_FIXTURE)" \
+		--policy "$(USD_CCL_POLICY_FIXTURE)" \
 		--output-dir "$(USD_CCL_SMOKE_OUT)" \
 		--run-id "smoke-usd-ccl-valuation" \
 		--source-scope-tag "FBPM"
