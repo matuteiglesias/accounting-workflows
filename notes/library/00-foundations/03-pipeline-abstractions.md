@@ -7,29 +7,41 @@ sidebar_position: 3
 
 # 03 pipeline abstractions
 
-Status: draft (code-anchored)
-Last reviewed: 2026-05-22
+Status: current pointer (code-anchored)
+Last reviewed: 2026-08-25
 
 ## Layer model
 
 1. Source inputs
 2. Canonical ledger
-3. Stage D materialized artifacts
-4. Views/debt/metrics contracts
-5. Human report surfaces
-6. Published frontend snapshot
+3. Governed materialization / semantic + cash facts
+4. Debt position/activity + treasury
+5. Governed frontier + annual metrics
+6. Finished human reports
+7. Published machine/document handoffs
+8. Professional evidence and drilldowns
 
 ## Command abstraction
 
-- canonical layer commands: `make ledger`, `materialize`, `debt`, `debt-views`, `metrics`, `human-report`, `publish-latest`
-- composite command: `make build-all`
+```text
+run-canonical [live]
+  -> run-debt [exact run]
+  -> run-metrics [exact run]
+  -> run-reports [exact run]
+```
+
+`run-full` is the ordered live composite through latest alignment, publication, and release checks. Focused downstream stages operate on `RUN_ID` and do not silently invoke live ingest.
 
 ## Consumer abstraction
 
-- read for consumption: `public/accounting/latest/*`
-- read for debugging: `out/*`
+- machine consumers: `public/accounting/latest_<SCOPE>/`;
+- report consumers: `public/reports/latest_<SCOPE>/`;
+- debugging/replay: exact-run artifacts under `out/*`.
 
 ## Governance abstraction
 
-- every layer publishes named artifacts,
-- downstream layers consume contract artifacts, not ad-hoc intermediate files.
+- every layer publishes named governed artifacts;
+- downstream layers consume contract artifacts, not ad-hoc intermediate files;
+- presentation cannot redefine accounting semantics;
+- compatibility aliases do not substitute for stage boundaries;
+- historical diagnostics/notebooks are evidence, not runtime layers.
