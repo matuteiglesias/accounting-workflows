@@ -266,19 +266,19 @@ def test_latest_preflight_leaves_existing_pointer_unchanged_when_later_target_mi
     assert (base_b / "latest_FBPM").resolve() == base_b / "old"
 
 
-def test_makefile_wires_full_reports_without_expanding_focused_metric_latest() -> None:
+def test_makefile_wires_reports_into_one_atomic_latest_update() -> None:
     makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
-    assert "RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_RUN_ID)" in makefile
-    assert ".PHONY: run-reports reports-from-run _run_reports_action" in makefile
+    assert "RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_ID)" in makefile
+    assert ".PHONY: run-reports _run_reports_action" in makefile
+    assert "run-reports: _run_reports_action" in makefile
     assert "publish-reports:" in makefile
-    assert (
-        "run-full: run-debt-views run-reports _update_latest publish-latest "
-        "publish-reports release-check"
-    ) in makefile
+    assert "run-full: run-canonical" in makefile
 
-    full_latest = makefile.split("_update_latest:\n", 1)[1].split("\n\n_update_latest_core:", 1)[0]
-    assert '--base "$(RUN_REPORTS_BASE)"' in full_latest
+    full = makefile.split("run-full: run-canonical\n", 1)[1].split("\n\n\n#", 1)[0]
+    for stage in ["run-debt", "run-metrics", "run-reports", "_update_latest", "publish-latest", "publish-reports", "release-check"]:
+        assert f"$(MAKE) {stage}" in full
 
-    core_latest = makefile.split("_update_latest_core:\n", 1)[1].split("\n\nupdate-latest-light:", 1)[0]
-    assert '--base "$(RUN_REPORTS_BASE)"' not in core_latest
-    assert "run-metrics-live: run-debt-views _run_metrics_action _update_latest_core" in makefile
+    latest = makefile.split("_update_latest:\n", 1)[1].split("\n\n.PHONY: publish-latest", 1)[0]
+    assert '--base "$(RUN_REPORTS_BASE)"' in latest
+    assert "_update_latest_core" not in makefile
+    assert "update-latest-light" not in makefile
