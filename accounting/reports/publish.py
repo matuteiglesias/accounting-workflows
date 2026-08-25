@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from accounting.reports.catalog import validate_catalog_files
-from accounting.reports.common import ensure_relative_bundle_path
+from accounting.reports.common import atomic_write_json, ensure_relative_bundle_path
 
 
 DEFAULT_PUBLIC_SUBDIR = Path("public") / "reports"
@@ -24,10 +25,21 @@ def _catalog(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _public_catalog(catalog: dict[str, Any]) -> dict[str, Any]:
+    """Strip internal provenance references from the viewer-facing catalog."""
+
+    public_catalog = deepcopy(catalog)
+    for report in public_catalog.get("reports", []):
+        report["manifest"] = None
+    return public_catalog
+
+
 def _public_files(catalog: dict[str, Any]) -> list[str]:
-    files = ["report_catalog.json"]
+    """Return only finished human documents referenced by the catalog."""
+
+    files: list[str] = []
     for report in catalog.get("reports", []):
-        for key in ("html", "pdf", "manifest"):
+        for key in ("html", "pdf"):
             value = report.get(key)
             if value:
                 files.append(ensure_relative_bundle_path(str(value)))
@@ -70,10 +82,12 @@ def publish_report_bundle(
         )
 
     target_root = project_root / public_subdir / f"latest_{scope_tag}"
-    files = _public_files(catalog)
+    public_catalog = _public_catalog(catalog)
+    files = _public_files(public_catalog)
     if dry_run:
         print(f"source={source_root}")
         print(f"target={target_root}")
+        print("report_catalog.json")
         for rel in files:
             print(rel)
         return target_root
@@ -81,6 +95,7 @@ def publish_report_bundle(
     if clean:
         _remove_path(target_root)
     target_root.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(target_root / "report_catalog.json", public_catalog)
     for rel in files:
         source = source_root / rel
         if not source.is_file():
