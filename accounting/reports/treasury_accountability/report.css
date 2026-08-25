@@ -1,0 +1,100 @@
+:root {
+  --navy: #102a56;
+  --blue: #315f98;
+  --ink: #151b26;
+  --muted: #687386;
+  --line: #d9dee7;
+  --line-strong: #aeb8c7;
+  --soft: #f4f6f9;
+  --soft-blue: #eef3f8;
+  --white: #ffffff;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: #eef1f5;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.report-shell { max-width: 1540px; margin: 0 auto; padding: 26px 22px 60px; }
+.hero, .box-section, .qa-card { background: white; border: 1px solid var(--line); border-radius: 9px; }
+.hero { padding: 26px 28px 22px; margin-bottom: 18px; }
+.eyebrow { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; font-weight: 750; color: var(--blue); }
+h1 { margin: 5px 0; font-size: 31px; line-height: 1.05; letter-spacing: -.55px; color: var(--navy); }
+.hero-sub { color: var(--muted); font-size: 14px; max-width: 900px; line-height: 1.45; }
+.meta-row, .toc { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 16px; font-size: 11px; color: var(--muted); }
+.toc { margin-top: 12px; }
+.toc a { color: var(--navy); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 2px; }
+.method-note { margin-top: 18px; border-left: 3px solid var(--blue); padding: 9px 12px; background: var(--soft-blue); color: #3c4757; font-size: 11px; line-height: 1.45; }
+.box-section { margin: 18px 0; overflow: hidden; }
+.box-head { padding: 21px 24px 15px; border-bottom: 1px solid var(--line); }
+.box-title { margin: 0; color: var(--navy); font-size: 22px; letter-spacing: -.25px; }
+.box-subtitle { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.series-section { padding: 18px 20px 24px; }
+.series-section + .series-section { border-top: 3px solid var(--soft); }
+.series-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.series-title { font-size: 16px; font-weight: 760; color: var(--navy); }
+.series-range { color: var(--muted); font-size: 10px; }
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 13px; }
+.kpi { padding: 11px 13px; min-height: 68px; border-right: 1px solid var(--line); }
+.kpi:last-child { border-right: none; }
+.kpi-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
+.kpi-value { margin-top: 5px; font-size: 19px; line-height: 1.05; font-weight: 700; color: var(--ink); }
+.kpi-value.navy { color: var(--navy); }
+.kpi-note { margin-top: 4px; color: var(--muted); font-size: 8.5px; }
+.status-strip { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.status-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 9px; color: #4c5768; background: var(--soft); }
+.chart-card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 8px; margin-bottom: 13px; }
+.chart-title { font-weight: 700; color: var(--navy); font-size: 10px; margin-bottom: 4px; }
+.chart-subtitle { color: var(--muted); font-size: 8.5px; margin-bottom: 3px; }
+svg.cash-chart { width: 100%; height: auto; display: block; }
+.table-wrap { overflow: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+table.treasury { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9px; }
+table.treasury th, table.treasury td { padding: 6px 8px; border-bottom: 1px solid #e8ebf0; border-right: 1px solid #eef0f4; text-align: right; white-space: nowrap; background: white; }
+table.treasury thead th { position: sticky; top: 0; z-index: 4; font-weight: 720; }
+table.treasury thead tr.group-head th { background: var(--navy); color: white; text-align: center; font-size: 8px; letter-spacing: .035em; text-transform: uppercase; border-right-color: rgba(255,255,255,.18); }
+table.treasury thead tr.col-head th { top: 27px; background: var(--soft-blue); color: var(--navy); font-size: 8px; border-bottom: 1px solid var(--line-strong); }
+table.treasury th.month, table.treasury td.month { position: sticky; left: 0; z-index: 3; text-align: left; min-width: 83px; font-weight: 650; }
+table.treasury thead th.month { z-index: 6; }
+table.treasury tbody tr.year-start td { border-top: 2px solid var(--line-strong); }
+table.treasury tbody tr:hover td { background: #fafbfd; }
+table.treasury td.zero { color: #aab2bf; text-align: center; }
+table.treasury td.net-pos, table.treasury td.net-neg, table.treasury td.close { font-weight: 720; }
+table.treasury td.net-pos { color: var(--blue); }
+table.treasury td.net-neg { color: #384252; }
+table.treasury td.close { color: var(--navy); background: #fafcff; }
+table.treasury td.non-cash { color: #667085; background: #fafafa; }
+.group-divider { border-left: 2px solid var(--line-strong) !important; }
+.table-note { margin-top: 7px; color: var(--muted); font-size: 8.5px; line-height: 1.4; }
+.qa-card { margin-top: 18px; padding: 20px 22px; }
+.qa-card h2 { margin: 0 0 10px; color: var(--navy); font-size: 17px; }
+.qa-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+.qa-item { border: 1px solid var(--line); background: var(--soft); border-radius: 5px; padding: 10px; }
+.qa-item strong { display: block; color: var(--navy); font-size: 10px; }
+.qa-item span { display: block; color: var(--muted); font-size: 9px; margin-top: 4px; line-height: 1.35; }
+.footer { color: var(--muted); font-size: 8.5px; padding: 14px 4px 0; display: flex; justify-content: space-between; gap: 20px; }
+@media (max-width: 900px) {
+  .report-shell { padding: 10px 8px 30px; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .kpi { border-bottom: 1px solid var(--line); }
+  .qa-grid { grid-template-columns: 1fr 1fr; }
+}
+@media print {
+  @page { size: A4 landscape; margin: 8mm; }
+  body { background: white; }
+  .report-shell { max-width: none; padding: 0; }
+  .hero, .box-section, .qa-card { border-radius: 0; border-color: #bfc6d0; }
+  .box-section { break-before: page; }
+  .chart-card { break-inside: avoid; }
+  .table-wrap { overflow: visible; border-radius: 0; }
+  table.treasury { width: 100%; min-width: 0; font-size: 6.4px; }
+  table.treasury th, table.treasury td { padding: 3px 3.5px; }
+  table.treasury thead { display: table-header-group; }
+  table.treasury thead th { position: static !important; }
+  table.treasury th.month, table.treasury td.month { position: static; }
+  table.treasury tbody tr { break-inside: avoid; }
+  .toc { display: none; }
+  .kpis { grid-template-columns: repeat(5, 1fr); }
+}
