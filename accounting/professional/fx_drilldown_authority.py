@@ -158,9 +158,9 @@ def resolve_fx_drilldown(
 
 
 def _fx_treasury_measure_for_row(table_id: str, row: pd.Series) -> str:
-    """Compatibility selector backed by the single measure/grain authority."""
+    """Compatibility measure selector backed by the single FX authority."""
 
     resolution = resolve_fx_drilldown(table_id, row)
-    if resolution is None or not resolution.supported:
+    if resolution is None or resolution.measure not in FX_MEASURES:
         return ""
     return resolution.measure
