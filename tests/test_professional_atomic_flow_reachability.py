@@ -16,69 +16,20 @@ def _enrich(table_id: str, row: dict[str, object]) -> pd.Series:
 
 def test_all_simple_monthly_atomic_rows_resolve_to_governed_specs() -> None:
     cases = [
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "operating_revenue", "Currency": "ARS", "2026-01": 10},
-            "flow.operating_revenue",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "rent_revenue", "Currency": "ARS", "2026-01": 10},
-            "flow.rent.total",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "property_opex_true", "Currency": "ARS", "2026-01": 10},
-            "flow.property_opex.total",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "taxes", "Currency": "ARS", "2026-01": 10},
-            "flow.property_opex.taxes",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "services", "Currency": "ARS", "2026-01": 10},
-            "flow.property_opex.services",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "maintenance", "Currency": "ARS", "2026-01": 10},
-            "flow.property_opex.maintenance",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "legal", "Currency": "ARS", "2026-01": 10},
-            "flow.property_opex.legal",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "funding_contributions", "Currency": "ARS", "2026-01": 10},
-            "flow.funding_contribution.total",
-        ),
-        (
-            "monthly_tables_operating_statement_matrix",
-            {"statement_line": "family_draws_or_distributions", "Currency": "ARS", "2026-01": 10},
-            "flow.family_draws_or_distributions.total",
-        ),
-        (
-            "monthly_tables_draws_by_box_amount_out",
-            {"Currency": "ARS", "Box": "Household", "2026-01": 10},
-            "flow.draws.by_box",
-        ),
-        (
-            "monthly_tables_draws_by_type_amount_out",
-            {"Currency": "ARS", "semantic_subbucket": "personal_expense", "2026-01": 10},
-            "flow.draws.by_type",
-        ),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "operating_revenue", "Currency": "ARS", "2026-01": 10}, "flow.operating_revenue"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "rent_revenue", "Currency": "ARS", "2026-01": 10}, "flow.rent.total"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "property_opex_true", "Currency": "ARS", "2026-01": 10}, "flow.property_opex.total"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "taxes", "Currency": "ARS", "2026-01": 10}, "flow.property_opex.taxes"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "services", "Currency": "ARS", "2026-01": 10}, "flow.property_opex.services"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "maintenance", "Currency": "ARS", "2026-01": 10}, "flow.property_opex.maintenance"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "legal", "Currency": "ARS", "2026-01": 10}, "flow.property_opex.legal"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "funding_contributions", "Currency": "ARS", "2026-01": 10}, "flow.funding_contribution.total"),
+        ("monthly_tables_operating_statement_matrix", {"statement_line": "family_draws_or_distributions", "Currency": "ARS", "2026-01": 10}, "flow.family_draws_or_distributions.total"),
+        ("monthly_tables_draws_by_box_amount_out", {"Currency": "ARS", "Box": "Household", "2026-01": 10}, "flow.draws.by_box"),
+        ("monthly_tables_draws_by_type_amount_out", {"Currency": "ARS", "semantic_subbucket": "personal_expense", "2026-01": 10}, "flow.draws.by_type"),
         (
             "monthly_tables_opex_by_type_amount_out",
-            {
-                "Currency": "ARS",
-                "Box": "Property Management",
-                "semantic_subbucket": "services",
-                "2026-01": 10,
-            },
+            {"Currency": "ARS", "Box": "Property Management", "semantic_subbucket": "services", "2026-01": 10},
             "flow.property_opex.by_box_category",
         ),
     ]
@@ -92,12 +43,7 @@ def test_all_simple_monthly_atomic_rows_resolve_to_governed_specs() -> None:
 def test_opex_by_box_category_preserves_box_and_subbucket_grain() -> None:
     row = _enrich(
         "monthly_tables_opex_by_type_amount_out",
-        {
-            "Currency": "ARS",
-            "Box": "Property Management",
-            "semantic_subbucket": "services",
-            "2026-01": 10,
-        },
+        {"Currency": "ARS", "Box": "Property Management", "semantic_subbucket": "services", "2026-01": 10},
     )
     spec = _spec_for_cell("monthly_tables_opex_by_type_amount_out", row)
     assert spec is not None
@@ -105,27 +51,9 @@ def test_opex_by_box_category_preserves_box_and_subbucket_grain() -> None:
 
     split = pd.DataFrame(
         [
-            {
-                "Currency": "ARS",
-                "Box": "Property Management",
-                "semantic_bucket": "property_opex",
-                "semantic_subbucket": "services",
-                "amount_out": 10,
-            },
-            {
-                "Currency": "ARS",
-                "Box": "Household",
-                "semantic_bucket": "property_opex",
-                "semantic_subbucket": "services",
-                "amount_out": 99,
-            },
-            {
-                "Currency": "ARS",
-                "Box": "Property Management",
-                "semantic_bucket": "property_opex",
-                "semantic_subbucket": "taxes",
-                "amount_out": 88,
-            },
+            {"Currency": "ARS", "Box": "Property Management", "semantic_bucket": "property_opex", "semantic_subbucket": "services", "amount_out": 10},
+            {"Currency": "ARS", "Box": "Household", "semantic_bucket": "property_opex", "semantic_subbucket": "services", "amount_out": 99},
+            {"Currency": "ARS", "Box": "Property Management", "semantic_bucket": "property_opex", "semantic_subbucket": "taxes", "amount_out": 88},
         ]
     )
     selected = split.loc[spec.filter_func(split, row)]
@@ -134,15 +62,10 @@ def test_opex_by_box_category_preserves_box_and_subbucket_grain() -> None:
     assert set(selected["semantic_subbucket"]) == {"services"}
 
 
-def test_deferred_semantics_remain_explicit_and_fail_closed_to_legacy() -> None:
+def test_deferred_funding_stays_explicit_while_fx_uses_governed_grain() -> None:
     funding = _enrich(
         "monthly_tables_operating_statement_matrix",
-        {
-            "drilldown_cell_id": "flow.funding_contribution.by_actor",
-            "Currency": "ARS",
-            "funding_actor": "Matías",
-            "2026-01": 10,
-        },
+        {"drilldown_cell_id": "flow.funding_contribution.by_actor", "Currency": "ARS", "funding_actor": "Matías", "2026-01": 10},
     )
     assert funding["drilldown_cell_id"] == "flow.funding_contribution.by_actor"
     assert _governed_flow_resolution(funding) is None
@@ -152,7 +75,10 @@ def test_deferred_semantics_remain_explicit_and_fail_closed_to_legacy() -> None:
         {"statement_line": "treasury_fx_conversion_out", "Currency": "ARS", "2026-01": 10},
     )
     assert fx["drilldown_cell_id"] == "flow.fx.conversion_outflow"
-    assert _governed_flow_resolution(fx) is None
+    resolution = _governed_flow_resolution(fx)
+    assert resolution is not None
+    assert resolution[1] == "amount_out"
+    assert resolution[3] == ("Box",)
 
 
 def test_annual_atomic_identity_preserves_annual_lineage_path() -> None:
