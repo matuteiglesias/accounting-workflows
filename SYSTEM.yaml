@@ -31,15 +31,18 @@ downstream:
 - repo.accounting-docs
 - repo.accounting-viewer
 canonical_commands:
-- make run-all
+- make run-canonical
+- make run-metrics
+- make run-full
 generated_paths:
 - out/
 verification:
   status: partial
-  last_verified: '2026-08-04'
-  command: make run-all
+  last_verified: '2026-08-25'
+  command: make validate
   unknowns:
-  - full execution depends on local accounting inputs
+  - full live execution depends on local accounting inputs
+  - overlapping same-scope runs remain unsupported until concurrency issue #44 is resolved
 maintenance:
   cadence: quarterly
   next_review: '2026-11-01'

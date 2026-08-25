@@ -105,14 +105,21 @@ def _actor_from_text(row: pd.Series) -> str:
 
 
 def _is_funding_support_candidate(row: pd.Series) -> bool:
+    """Return true only for semantic classes that establish support membership.
+
+    Text mentioning funding/debt is not enough to manufacture explicit support
+    metadata. Unknown, transfer, rent, or other rows remain ordinary semantic
+    rows unless they already qualify as core funding, debt-linked support, or a
+    direct tax/service obligation payment by a recognized actor.
+    """
+
     bucket = _norm(row.get("semantic_bucket"))
     subbucket = _norm(row.get("semantic_subbucket")).casefold()
-    blob = _semantic_blob(row).casefold()
     if bucket in {"funding_contribution", "debt_movement"}:
         return True
     if bucket == "property_opex" and subbucket in {"taxes", "services"} and _actor_from_text(row):
         return True
-    return bool(re.search(r"fund|aporte|contrib|support|soporte|deuda|debt", blob, flags=re.IGNORECASE))
+    return False
 
 
 def _box_for_row(row: pd.Series) -> str:
@@ -188,11 +195,6 @@ def _derive_funding_dimensions(row: pd.Series) -> dict[str, str]:
         source_box = ""
         if debt_effect == "none" and re.search(r"deuda|debt|prestamo|repago|repayment", blob):
             debt_effect = "ambiguous"
-    elif is_support:
-        funding_channel = "named_actor_support" if actor else "other"
-        beneficiary_box = beneficiary_box or box
-        target_box = target_box or box
-        cash_effect = cash_effect or "non_cash_support"
 
     return {
         "funding_actor": actor,
