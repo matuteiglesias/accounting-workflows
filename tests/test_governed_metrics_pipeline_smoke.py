@@ -15,12 +15,17 @@ FIXTURE = REPO_ROOT / "fixtures" / "ledger_fixture.csv"
 
 
 def _run(*args: str) -> None:
-    subprocess.run(
+    proc = subprocess.run(
         [sys.executable, *args],
         cwd=REPO_ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
+    )
+    assert proc.returncode == 0, (
+        f"command failed: {proc.args}\n"
+        f"stdout:\n{proc.stdout}\n"
+        f"stderr:\n{proc.stderr}"
     )
 
 
