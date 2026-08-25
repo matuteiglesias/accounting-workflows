@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -30,12 +31,46 @@ CANONICAL_SOURCE_NAMES = [
     "monthly_debt_activity.csv",
 ]
 
+RETIRED_OUTPUTS = [
+    "metric_registry.csv",
+    "metric_values.csv",
+    "metric_values.parquet",
+    "metric_values_q_wide.csv",
+    "metric_values_y_wide.csv",
+    "income_statement_q.csv",
+    "income_statement_y.csv",
+    "balance_cash_q.csv",
+    "balance_cash_y.csv",
+    "balance_debt_q.csv",
+    "balance_debt_y.csv",
+    "validation_report.csv",
+    "parquet_error.txt",
+]
+RETIRED_OUTPUT_DIRS = ["metric_views", "metric_drilldown"]
+
 
 def find_latest_run_root(base: Path) -> Path:
     candidates = [p for p in base.iterdir() if p.is_dir()]
     if not candidates:
         raise FileNotFoundError(f"No run directories found under: {base}")
     return sorted(candidates, key=lambda p: p.name)[-1]
+
+
+def remove_retired_outputs(out_dir: Path) -> list[str]:
+    """Prevent stale compatibility artifacts from surviving a governed rebuild."""
+
+    removed: list[str] = []
+    for name in RETIRED_OUTPUTS:
+        path = out_dir / name
+        if path.exists() or path.is_symlink():
+            path.unlink()
+            removed.append(name)
+    for name in RETIRED_OUTPUT_DIRS:
+        path = out_dir / name
+        if path.exists():
+            shutil.rmtree(path)
+            removed.append(f"{name}/")
+    return removed
 
 
 def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, Path]:
@@ -65,6 +100,11 @@ def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, P
 
     qa = pd.read_csv(qa_path)
     existing = sorted(rel for rel in CANONICAL_SOURCE_NAMES if (run_root / rel).exists())
+    legacy_present = sorted(
+        name for name in RETIRED_OUTPUTS if (out_dir / name).exists()
+    ) + sorted(
+        f"{name}/" for name in RETIRED_OUTPUT_DIRS if (out_dir / name).exists()
+    )
     qa = pd.concat(
         [
             qa,
@@ -78,8 +118,8 @@ def build_metrics_source_contracts(run_root: Path, out_dir: Path) -> dict[str, P
                     },
                     {
                         "check": "legacy_metric_universe_absent",
-                        "status": "pass",
-                        "detail": "metric_registry/metric_values/metric_views are not built or consumed",
+                        "status": "pass" if not legacy_present else "fail",
+                        "detail": f"retired_outputs_present={legacy_present}",
                         "severity": "error",
                     },
                 ]
@@ -101,6 +141,7 @@ def build_governed_metrics(
     """Build the current frontier and annual dashboard from governed sources."""
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    removed = remove_retired_outputs(out_dir)
     frontier_paths = build_metrics_frontier(
         run_root=run_root,
         metrics_dir=out_dir,
@@ -123,20 +164,8 @@ def build_governed_metrics(
         "frontier_outputs": {k: str(v) for k, v in frontier_paths.items()},
         "annual_dashboard_outputs": {k: str(v) for k, v in annual_paths.items()},
         "source_contract_outputs": {k: str(v) for k, v in contract_paths.items()},
-        "retired_outputs": [
-            "metric_registry.csv",
-            "metric_values.csv",
-            "metric_values.parquet",
-            "metric_values_q_wide.csv",
-            "metric_values_y_wide.csv",
-            "income_statement_q.csv",
-            "income_statement_y.csv",
-            "balance_cash_q.csv",
-            "balance_cash_y.csv",
-            "balance_debt_q.csv",
-            "balance_debt_y.csv",
-            "metric_views/*",
-        ],
+        "retired_outputs": [*RETIRED_OUTPUTS, *[f"{x}/*" for x in RETIRED_OUTPUT_DIRS]],
+        "retired_outputs_removed_on_start": removed,
     }
     (out_dir / BUILD_MANIFEST_FILENAME).write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -171,14 +200,6 @@ def main() -> None:
         default="",
         help="Optional reporting cutoff; Stage-A cutoff remains authoritative.",
     )
-    # Deprecated presentation arguments remain parse-compatible for one wave so
-    # existing shell invocations do not fail while the Makefile is simplified.
-    parser.add_argument("--months", type=int, default=6)
-    parser.add_argument("--rent-place-col", default="Lugar")
-    parser.add_argument("--rent-detail-col", default="Detalle")
-    parser.add_argument("--flow-rollup-groupby", default="Flujo,Tipo,Currency")
-    parser.add_argument("--include-statuses", default="pagado")
-    parser.add_argument("--noise-floor", default="ARS:5000,USD:10")
     args = parser.parse_args()
 
     run_root = (
@@ -203,10 +224,11 @@ def main() -> None:
         as_of_date=as_of_date,
     )
     LOG.info(
-        "Stage finish governed metrics run_id=%s outputs=%s",
+        "Stage finish governed metrics run_id=%s outputs=%s retired_removed=%s",
         run_id,
         sorted(manifest.get("frontier_outputs", {}))
         + sorted(manifest.get("annual_dashboard_outputs", {})),
+        manifest.get("retired_outputs_removed_on_start", []),
     )
 
 
