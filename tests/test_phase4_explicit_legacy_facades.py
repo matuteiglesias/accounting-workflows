@@ -7,7 +7,6 @@ from pathlib import Path
 
 FACADES = {
     "accounting.metrics.annual": "accounting.metrics.annual_legacy",
-    "accounting.metrics.frontier": "accounting.metrics.frontier_legacy",
     "accounting.professional.annual_dashboard_tables": "accounting.professional.annual_dashboard_tables_legacy",
     "accounting.professional.drilldown_wave4_base": "accounting.professional.drilldown_legacy",
     "accounting.professional.drilldown": "accounting.professional.drilldown_wave4_base",
@@ -20,10 +19,9 @@ def _inventory():
         return list(csv.DictReader(f))
 
 
-def test_facades_have_no_broad_dynamic_reexport():
+def test_remaining_facades_have_no_broad_dynamic_reexport():
     paths = [
         Path("accounting/metrics/annual.py"),
-        Path("accounting/metrics/frontier.py"),
         Path("accounting/professional/annual_dashboard_tables.py"),
         Path("accounting/professional/drilldown_wave4_base.py"),
         Path("accounting/professional/drilldown.py"),
@@ -33,6 +31,17 @@ def test_facades_have_no_broad_dynamic_reexport():
         assert "for _name in dir(" not in text, path
         assert "globals()[_name]" not in text, path
         assert "LEGACY_COMPAT_EXPORTS" in text, path
+
+
+def test_reunified_frontier_has_no_legacy_delegate():
+    frontier = Path("accounting/metrics/frontier.py")
+    text = frontier.read_text(encoding="utf-8")
+
+    assert not Path("accounting/metrics/frontier_legacy.py").exists()
+    assert "frontier_legacy" not in text
+    assert "LEGACY_COMPAT_EXPORTS" not in text
+    assert "def build_metrics_frontier(" in text
+    assert "iter_validated_monthly_cash_positions" in text
 
 
 def test_explicit_compat_exports_are_exactly_caller_inventory():
