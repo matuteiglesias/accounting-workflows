@@ -4,7 +4,7 @@
 
 Maintain the canonical accounting transformation and reporting pipeline without weakening provenance, business-rule, privacy, or publication boundaries.
 
-This repository turns approved accounting inputs into canonical ledger, materialized views, debt outputs, metrics, human reports, professional packs, drilldowns, and publication bundles. It is not the raw-document intake system, the browser viewer, or the documentation authority.
+This repository turns approved accounting inputs into a canonical ledger, governed semantic/cash/debt facts, monthly and annual metric artifacts, professional packs, drilldowns, and publication bundles. It is not the raw-document intake system, the browser viewer, or the documentation authority. Retired generic views, `metric_values`, and human-report layers are not accounting authorities and must not be recreated as parallel pipelines.
 
 ## Authority boundary
 
@@ -30,7 +30,7 @@ Agents must not independently:
 
 Canonical business logic and transformations live in code, configuration, and tested rules.
 
-Generated outputs under `out/`, `public/accounting/latest/`, reports, professional packs, drilldowns, and `latest` links are evidence from a run. Do not hand-edit them.
+Generated outputs under `out/`, `public/accounting/latest/`, professional packs, drilldowns, and `latest` links are evidence from a run. Do not hand-edit them.
 
 When a generated number is wrong:
 
@@ -42,6 +42,21 @@ When a generated number is wrong:
 6. record the run ID and output paths.
 
 Do not commit large, private, or source accounting datasets for convenience.
+
+## Current pipeline
+
+The supported production spine is:
+
+```text
+ledger ingest
+  -> governed materialization / semantic + cash facts
+  -> debt position/activity + treasury
+  -> governed frontier + annual dashboard
+  -> publication
+  -> professional presentation / drilldowns
+```
+
+There is no generic `run-marts` views stage and no parallel `metric_values` engine. Compatibility code may remain only as an explicit non-authoritative boundary for supported historical presentation shapes.
 
 ## Execution modes
 
