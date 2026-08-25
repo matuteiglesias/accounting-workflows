@@ -5,11 +5,9 @@ import importlib
 from pathlib import Path
 
 
-FACADES = {
+REMAINING_FACADES = {
     "accounting.metrics.annual": "accounting.metrics.annual_legacy",
     "accounting.professional.annual_dashboard_tables": "accounting.professional.annual_dashboard_tables_legacy",
-    "accounting.professional.drilldown_wave4_base": "accounting.professional.drilldown_legacy",
-    "accounting.professional.drilldown": "accounting.professional.drilldown_wave4_base",
 }
 
 
@@ -19,21 +17,48 @@ def _inventory():
         return list(csv.DictReader(f))
 
 
-def test_remaining_facades_have_no_broad_dynamic_reexport():
-    paths = [
+def test_remaining_migration_facades_have_no_broad_dynamic_reexport() -> None:
+    for path in [
         Path("accounting/metrics/annual.py"),
         Path("accounting/professional/annual_dashboard_tables.py"),
-        Path("accounting/professional/drilldown_wave4_base.py"),
-        Path("accounting/professional/drilldown.py"),
-    ]
-    for path in paths:
+    ]:
         text = path.read_text(encoding="utf-8")
         assert "for _name in dir(" not in text, path
         assert "globals()[_name]" not in text, path
         assert "LEGACY_COMPAT_EXPORTS" in text, path
 
 
-def test_reunified_frontier_has_no_legacy_delegate():
+def test_professional_drilldown_is_reunified_without_wave_facade() -> None:
+    drilldown = Path("accounting/professional/drilldown.py")
+    text = drilldown.read_text(encoding="utf-8")
+
+    assert not Path("accounting/professional/drilldown_wave4_base.py").exists()
+    assert "drilldown_wave4_base" not in text
+    assert "drilldown_legacy as _legacy" in text
+    assert "resolve_annual_flow_membership_spec" in text
+    assert "execute_annual_funding_support" in text
+    assert "execute_monthly_debt_position" in text
+    assert "execute_monthly_debt_activity" in text
+    assert "execute_monthly_cash_position" in text
+    assert "resolve_fx_drilldown" in text
+
+    # Only the small renderer/formula compatibility seam remains public.
+    module = importlib.import_module("accounting.professional.drilldown")
+    assert set(module.LEGACY_COMPAT_EXPORTS) == {
+        "DEFAULT_TOLERANCE",
+        "INDEX_FILENAME",
+        "STATUS_OK",
+        "STATUS_UNSUPPORTED",
+        "_annual_formula_spec",
+        "_build_annual_formula_cell",
+        "_cash_bridge_line_spec",
+        "_safe_div",
+        "_semantic_filter_for_statement_line",
+        "row_context_id",
+    }
+
+
+def test_reunified_frontier_has_no_legacy_delegate() -> None:
     frontier = Path("accounting/metrics/frontier.py")
     text = frontier.read_text(encoding="utf-8")
 
@@ -44,42 +69,21 @@ def test_reunified_frontier_has_no_legacy_delegate():
     assert "iter_validated_monthly_cash_positions" in text
 
 
-def test_explicit_compat_exports_are_exactly_caller_inventory():
+def test_remaining_facade_exports_are_exactly_caller_inventory() -> None:
     rows = _inventory()
-    for facade_name, delegate_name in FACADES.items():
+    for facade_name, delegate_name in REMAINING_FACADES.items():
         facade = importlib.import_module(facade_name)
         delegate = importlib.import_module(delegate_name)
         expected = {
             row["symbol"]
             for row in rows
-            if row["facade"] == facade_name and row["ownership"] == "explicit_compat_export"
+            if row["facade"] == facade_name
+            and row["ownership"] == "explicit_compat_export"
         }
         assert set(facade.LEGACY_COMPAT_EXPORTS) == expected
         for symbol in expected:
             assert hasattr(facade, symbol), (facade_name, symbol)
-            assert getattr(facade, symbol) is getattr(delegate, symbol), (facade_name, symbol)
-
-
-def test_all_caller_inventory_symbols_remain_importable():
-    for row in _inventory():
-        facade = importlib.import_module(row["facade"])
-        assert hasattr(facade, row["symbol"]), row
-        assert int(row["caller_count"]) >= 1
-        assert row["callers"]
-
-
-def test_drilldown_deletion_map_has_explicit_blockers_and_removal_conditions():
-    path = Path("notes/accounting_simplification_phase4_drilldown_deletion_map_20260824.csv")
-    with path.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert len(rows) >= 10
-    for row in rows:
-        assert row["legacy_route_family"]
-        assert row["governed_replacement"]
-        assert row["legacy_reachable"]
-        assert row["blocker"]
-        assert row["removal_condition"]
-    blockers = " ".join(row["blocker"] for row in rows)
-    assert "FundingSupportSpec" in blockers
-    assert "FX grain" in blockers
-    assert "annual lineage" in blockers
+            assert getattr(facade, symbol) is getattr(delegate, symbol), (
+                facade_name,
+                symbol,
+            )

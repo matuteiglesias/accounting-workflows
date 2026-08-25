@@ -72,18 +72,6 @@ def test_opex_to_rent_uses_rent_not_total_operating_revenue() -> None:
     assert governed[1] == 0.25
     assert governed[3] == "governed_derived_formula"
 
-    legacy = professional._build_annual_formula_cell(
-        table_id="overview_balance_dashboard",
-        row=pd.Series({"Currency": "ARS", "metric": "OPEX / renta"}),
-        period="2026",
-        currency="ARS",
-        display_value=0.2,
-        annual=annual,
-        tolerance=1e-6,
-    )
-    assert legacy is not None
-    assert legacy[1] == 0.2
-
 
 def test_ratio_zero_denominator_is_not_applicable_not_false_zero() -> None:
     annual = _annual(
@@ -99,19 +87,6 @@ def test_ratio_zero_denominator_is_not_applicable_not_false_zero() -> None:
     )
     assert governed[0] == "unsupported"
     assert "zero_denominator:not_applicable" in governed[5]["selection_reason"]
-
-    legacy = professional._build_annual_formula_cell(
-        table_id="overview_balance_dashboard",
-        row=pd.Series({"Currency": "ARS", "metric": "Margen operativo"}),
-        period="2026",
-        currency="ARS",
-        display_value=0.0,
-        annual=annual,
-        tolerance=1e-6,
-    )
-    assert legacy is not None
-    assert legacy[0] == "ok"
-    assert legacy[1] == 0.0
 
 
 def test_missing_modern_component_fails_closed_instead_of_zero_default() -> None:
@@ -213,16 +188,6 @@ def test_diagnostic_uses_only_inferred_control_not_blank_party_validated_cash() 
     assert governed[1] == 20.0
     assert governed[3] == "governed_inferred_box_control_period_delta"
     assert governed[5]["validated_cash_fallback"] == "never"
-
-    legacy = professional._ORIGINAL_BUILD_DERIVED_CELL(
-        table_id="monthly_tables_diagnostic_box_level_matrix",
-        row=pd.Series({"Currency": "ARS", "Box": "Property Management", "metric": "diagnostic_box_level"}),
-        period="2026-02",
-        display_value=520.0,
-        split=pd.DataFrame(), audit=pd.DataFrame(), stmt=pd.DataFrame(), annual=pd.DataFrame(),
-        cash_close=cash, debt_activity=pd.DataFrame(), debt_position=pd.DataFrame(), tolerance=1e-6,
-    )
-    assert legacy[1] == 520.0
 
 
 def test_diagnostic_missing_previous_is_unavailable_not_zero_baseline() -> None:

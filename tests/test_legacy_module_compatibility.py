@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-"""Compatibility reachability for legacy facade modules.
+"""Architecture checks for the intentionally bounded compatibility remainder.
 
-These assertions do not define accounting meaning. They prevent cleanup from
-physically deleting compatibility modules while current facades still import
-them for supported historical/minimal-schema paths.
-
-Removal condition: delete this module and then the corresponding legacy modules
-when supported producers/artifacts no longer require these compatibility paths
-and a repository/notebook/caller usage census is zero.
+Compatibility is not accounting authority. The professional Wave-4 facade is
+retired; the remaining ``drilldown_legacy`` module is allowed only as the stable
+orchestration/rendering seam plus explicitly documented presentation routes.
 """
 
 from pathlib import Path
@@ -17,13 +13,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_legacy_facades_remain_explicit_dependencies_while_compatibility_is_supported() -> None:
-    drilldown = (ROOT / "accounting" / "professional" / "drilldown.py").read_text(
-        encoding="utf-8"
-    )
-    flow_base = (
-        ROOT / "accounting" / "professional" / "drilldown_wave4_base.py"
-    ).read_text(encoding="utf-8")
+def test_professional_wave_facade_is_gone_and_legacy_remainder_is_bounded() -> None:
+    drilldown_path = ROOT / "accounting" / "professional" / "drilldown.py"
+    legacy_path = ROOT / "accounting" / "professional" / "drilldown_legacy.py"
+    wave_path = ROOT / "accounting" / "professional" / "drilldown_wave4_base.py"
+
+    drilldown = drilldown_path.read_text(encoding="utf-8")
+    legacy = legacy_path.read_text(encoding="utf-8")
+
+    assert not wave_path.exists()
+    assert "drilldown_wave4_base" not in drilldown
+    assert "drilldown_legacy as _legacy" in drilldown
+    assert "Bounded compatibility runtime" in legacy
+
+    # Retired semantic authorities must not reappear in the compatibility file.
+    for retired in [
+        "def _build_cash_control_cell(",
+        "def _build_annual_cash_close_companion_cell(",
+        "def _build_debt_position_cell(",
+        "def _build_debt_activity_cell(",
+        "def _build_annual_debt_stock_companion_cell(",
+        "def _build_annual_debt_activity_companion_cell(",
+        "monthly_tables_diagnostic_box_level_matrix",
+    ]:
+        assert retired not in legacy
+
+
+def test_other_supported_facades_remain_explicit_while_their_compatibility_is_used() -> None:
     annual = (ROOT / "accounting" / "metrics" / "annual.py").read_text(
         encoding="utf-8"
     )
@@ -31,7 +47,5 @@ def test_legacy_facades_remain_explicit_dependencies_while_compatibility_is_supp
         ROOT / "accounting" / "professional" / "annual_dashboard_tables.py"
     ).read_text(encoding="utf-8")
 
-    assert "drilldown_wave4_base as _base" in drilldown
-    assert "drilldown_legacy as _legacy" in flow_base
     assert "annual_legacy as _legacy" in annual
     assert "annual_dashboard_tables_legacy as _legacy" in companion

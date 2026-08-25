@@ -3,11 +3,12 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from accounting.professional import drilldown, drilldown_legacy, drilldown_wave4_base
+from accounting.professional import drilldown
 from accounting.professional.drilldown import _fx_treasury_measure_for_row
 from accounting.professional.fx_drilldown_authority import (
     FX_MEASURES,
     FX_TREASURY_TABLE_IDS,
+    _fx_treasury_measure_for_row as authority_measure_for_row,
     resolve_fx_drilldown,
 )
 
@@ -41,7 +42,7 @@ def test_effective_fx_measure_resolution_is_characterized(
     assert _fx_treasury_measure_for_row(table_id, pd.Series(row, dtype=object)) == expected
 
 
-def test_explicit_measure_precedes_legacy_table_and_metric_fallbacks() -> None:
+def test_explicit_measure_precedes_table_and_metric_fallbacks() -> None:
     row = pd.Series(
         {
             "measure": "amount_abs",
@@ -111,9 +112,7 @@ def test_compact_row_without_measure_is_unsupported_not_net() -> None:
     assert "no explicit recognized measure" in resolution.unsupported_reason
 
 
-def test_all_live_fx_exports_share_one_runtime_authority() -> None:
-    assert drilldown._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
-    assert drilldown_wave4_base._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
-    assert drilldown_legacy._fx_treasury_measure_for_row is _fx_treasury_measure_for_row
+def test_public_drilldown_uses_the_single_fx_runtime_authority() -> None:
+    assert drilldown._fx_treasury_measure_for_row is authority_measure_for_row
     assert drilldown.FX_TREASURY_TABLE_IDS is FX_TREASURY_TABLE_IDS
     assert drilldown.FX_MEASURES is FX_MEASURES

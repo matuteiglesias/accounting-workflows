@@ -10,15 +10,15 @@ def _enrich(table_id: str, row: dict[str, object]) -> pd.Series:
     return enrich_professional_table(pd.DataFrame([row]), table_id).iloc[0]
 
 
-def test_unmigrated_atomic_families_are_explicitly_deferred() -> None:
-    """Funding-support and FX grain gaps stay explicit, not accidental legacy fallbacks."""
+def test_only_unmigrated_funding_dimensions_remain_deferred() -> None:
+    """Typed funding dimensions remain deferred; landed FX authority is active."""
 
     funding_id = "flow.funding_contribution.by_actor"
     fx_id = "flow.fx.conversion_outflow"
     migrated_id = "flow.property_opex.total"
 
     assert funding_id in drilldown._DEFERRED_FLOW_IDS
-    assert fx_id in drilldown._DEFERRED_FLOW_IDS
+    assert fx_id not in drilldown._DEFERRED_FLOW_IDS
     assert migrated_id not in drilldown._DEFERRED_FLOW_IDS
 
     funding = _enrich(
@@ -42,7 +42,10 @@ def test_unmigrated_atomic_families_are_explicitly_deferred() -> None:
     assert funding["drilldown_cell_id"] == funding_id
     assert fx["drilldown_cell_id"] == fx_id
     assert drilldown._governed_flow_resolution(funding) is None
-    assert drilldown._governed_flow_resolution(fx) is None
+    resolution = drilldown._governed_flow_resolution(fx)
+    assert resolution is not None
+    assert resolution[1] == "amount_out"
+    assert resolution[3] == ("Box",)
 
 
 def test_stable_governed_identity_keeps_derived_cell_dispatch_boundary() -> None:
