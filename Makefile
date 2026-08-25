@@ -52,8 +52,10 @@ USD_CCL_SMOKE_OUT ?= $(SMOKE_OUT)/usd_ccl_valuation
 USD_CCL_MANAGEMENT_SMOKE_OUT ?= $(SMOKE_OUT)/usd_ccl_management_flows
 
 RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+RUN_STAMP := $(RUN_STAMP)
 RUN_BASE := $(OUT)/run/accounting
 RUN_ID ?= $(RUN_STAMP)_$(SCOPE_TAG)
+RUN_ID := $(RUN_ID)
 RUN_OUT := $(RUN_BASE)/$(RUN_ID)
 RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_ID)
 RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_ID)
