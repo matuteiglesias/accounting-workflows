@@ -16,9 +16,20 @@ class ReportSource:
     rows: int | None = None
 
     @classmethod
-    def from_file(cls, path: str | Path, *, rows: int | None = None) -> "ReportSource":
+    def from_file(
+        cls,
+        path: str | Path,
+        *,
+        rows: int | None = None,
+        logical_path: str | None = None,
+    ) -> "ReportSource":
         source = Path(path)
-        return cls(name=source.name, path=str(source), sha256=sha256_file(source), rows=rows)
+        return cls(
+            name=source.name,
+            path=logical_path or source.name,
+            sha256=sha256_file(source),
+            rows=rows,
+        )
 
 
 @dataclass(frozen=True)
@@ -29,7 +40,9 @@ class ReportOutput:
     @classmethod
     def from_file(cls, path: str | Path, *, bundle_root: str | Path) -> "ReportOutput":
         file_path = Path(path)
-        rel = ensure_relative_bundle_path(str(file_path.resolve().relative_to(Path(bundle_root).resolve())))
+        rel = ensure_relative_bundle_path(
+            str(file_path.resolve().relative_to(Path(bundle_root).resolve()))
+        )
         return cls(path=rel, sha256=sha256_file(file_path))
 
 

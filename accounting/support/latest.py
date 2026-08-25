@@ -50,6 +50,13 @@ def update_primary_compatibility_latest(base: Path, target: str, scope_tag: str)
     return plain
 
 
+def assert_latest_targets_exist(bases: list[Path], target: str) -> None:
+    """Fail before mutating any pointer when one producer surface is incomplete."""
+    missing = [str(Path(base) / target) for base in bases if not (Path(base) / target).is_dir()]
+    if missing:
+        raise FileNotFoundError(f"Latest target(s) do not exist: {missing}")
+
+
 def cutoff_for_latest_target(bases: list[Path], target: str):
     """Return a Stage A cutoff found among target surfaces, before mutating pointers."""
     for base in bases:
@@ -88,6 +95,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     tag = args.scope_tag or canonical_scope_tag(parse_box_scope(args.boxes))
+    assert_latest_targets_exist(args.base, args.target)
     assert_latest_target_publishable(
         args.base,
         args.target,

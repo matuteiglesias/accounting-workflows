@@ -12,16 +12,20 @@ authority:
   status: proposed
   owns:
   - canonical ledger transformation and reporting workflow
+  - governed annual and treasury human-report rendering
+  - report bundle/catalog generation and document publication
   - professional pack and drilldown artifacts
   - accounting business-rule implementation
   does_not_own:
   - raw document intake
-  - viewer-specific presentation
+  - viewer-specific navigation or presentation
   - public documentation authority
 interfaces:
   consumes:
   - artifact:acct.document-candidate@1
   produces:
+  - artifact:acct.report-bundle@1
+  - artifact:acct.report-catalog@1
   - artifact:acct.professional-pack@1
   - artifact:acct.drilldowns@1
   - artifact:acct.docs-input@1
@@ -33,16 +37,20 @@ downstream:
 canonical_commands:
 - make run-canonical
 - make run-metrics
+- make run-reports
 - make run-full
 generated_paths:
 - out/
+- public/accounting/
+- public/reports/
 verification:
   status: partial
   last_verified: '2026-08-25'
   command: make validate
   unknowns:
-  - full live execution depends on local accounting inputs
+  - full live execution depends on local accounting inputs and an available Chromium/Chrome binary for PDF rendering
   - overlapping same-scope runs remain unsupported until concurrency issue #44 is resolved
+  - viewer deployment privacy/access control is governed downstream and is not inferred from repository visibility
 maintenance:
   cadence: quarterly
   next_review: '2026-11-01'
