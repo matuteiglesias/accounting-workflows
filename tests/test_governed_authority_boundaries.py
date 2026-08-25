@@ -3,7 +3,6 @@ from __future__ import annotations
 import pandas as pd
 
 from accounting.professional import drilldown as professional
-from accounting.professional.drilldown_wave4_base import _ORIGINAL_SPEC_FOR_CELL
 from accounting.professional.table_contracts import enrich_professional_table
 
 
@@ -38,7 +37,7 @@ def test_proven_dead_atomic_cellspec_routes_stay_physically_pruned() -> None:
     for table_id, raw, governed_id in cases:
         row = enrich_professional_table(pd.DataFrame([raw]), table_id).iloc[0]
         assert row["drilldown_cell_id"] == governed_id
-        assert _ORIGINAL_SPEC_FOR_CELL(table_id, row) is None
+        assert professional._ORIGINAL_SPEC_FOR_CELL(table_id, row) is None
 
 
 def test_governed_identity_cannot_fall_back_to_legacy_execution(monkeypatch) -> None:
@@ -59,8 +58,8 @@ def test_governed_identity_cannot_fall_back_to_legacy_execution(monkeypatch) -> 
     ).iloc[0]
     assert atomic_row["drilldown_cell_id"] == "flow.property_opex.total"
 
-    monkeypatch.setattr(professional._base, "_ORIGINAL_BUILD_DERIVED_CELL", explode)
-    atomic_result = professional._base._build_derived_cell(
+    monkeypatch.setattr(professional, "_ORIGINAL_BUILD_DERIVED_CELL", explode)
+    atomic_result = professional._build_derived_cell(
         table_id="monthly_tables_operating_statement_matrix",
         row=atomic_row,
         period="2026-01",
@@ -91,7 +90,6 @@ def test_governed_identity_cannot_fall_back_to_legacy_execution(monkeypatch) -> 
     assert atomic_result[0] == "ok"
     assert str(atomic_result[3]).startswith("governed_atomic_flow")
 
-    monkeypatch.setattr(professional, "_ORIGINAL_BUILD_DERIVED_CELL", explode)
     annual = pd.DataFrame(
         [
             {
