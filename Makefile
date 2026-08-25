@@ -1,11 +1,14 @@
 # Accounting backend control plane
-# Official path:
-#   run-ingest -> run-materialize -> run-debt-views -> run-metrics -> run-reports -> publish
+# Official live path:
+#   run-canonical -> run-debt -> run-metrics -> run-reports -> publication
 #
+# Only run-ingest/run-canonical/run-full pull live source inputs. Downstream stage
+# targets operate on the exact RUN_ID selected by the caller and are replayable.
 # Materialization owns the canonical monthly semantic and cash artifacts.
 # Reports consume governed artifacts and do not introduce accounting authority.
-# There is no separate generic views stage and no parallel metric_values engine.
+# There is no generic views stage, parallel metric_values engine, or command alias layer.
 
+.DEFAULT_GOAL := help
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 MAKEFLAGS += --no-print-directory
@@ -50,20 +53,12 @@ USD_CCL_MANAGEMENT_SMOKE_OUT ?= $(SMOKE_OUT)/usd_ccl_management_flows
 
 RUN_STAMP ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 RUN_BASE := $(OUT)/run/accounting
-RUN_OUT := $(RUN_BASE)/$(RUN_STAMP)_$(SCOPE_TAG)
-RUN_REL := $(notdir $(RUN_OUT))
-RUN_RUN_ID := $(RUN_REL)
-
-RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_RUN_ID)
-METRICS_LATEST := $(OUT)/metrics/latest_$(SCOPE_TAG)
-
-RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_RUN_ID)
-RUN_DEBT_BALANCE_DIR := $(RUN_DEBT_DIR)
-DEBT_LATEST := $(OUT)/debt_resolution/latest_$(SCOPE_TAG)
-
+RUN_ID ?= $(RUN_STAMP)_$(SCOPE_TAG)
+RUN_OUT := $(RUN_BASE)/$(RUN_ID)
+RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_ID)
+RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_ID)
 RUN_REPORTS_BASE := $(OUT)/reports
-RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_RUN_ID)
-REPORTS_LATEST := $(RUN_REPORTS_BASE)/latest_$(SCOPE_TAG)
+RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_ID)
 REPORT_BROWSER_BIN ?=
 
 DEBT_CURRENCIES ?= USD
@@ -82,7 +77,7 @@ endef
 
 
 # ---------------------------------------------------------------------------
-# Help / validation / aliases
+# Help / validation
 # ---------------------------------------------------------------------------
 
 .PHONY: help
@@ -95,18 +90,19 @@ help:
 	@echo "  make smoke-full         # smoke-core + validate + publish dry-run"
 	@echo "  make validate           # compile + contracts + regression suite"
 	@echo ""
-	@echo "Live canonical path:"
+	@echo "Live operations:"
 	@echo "  make run-canonical      # live ingest -> governed materialization"
-	@echo "  make run-debt-views     # canonical -> debt resolution/position/activity"
-	@echo "  make run-metrics        # governed frontier + annual metrics from RUN_OUT"
-	@echo "  make run-metrics-live   # live canonical/debt then governed metrics"
-	@echo "  make run-dashboard      # assert governed annual dashboard artifacts"
-	@echo "  make run-reports        # exact-run annual + treasury HTML/PDF report bundle"
-	@echo "  make run-full           # full live path -> reports -> publish -> release-check"
+	@echo "  make run-full           # ordered full live path -> reports -> publication"
+	@echo "  make run-env            # load ENV_FILE, then run-full"
 	@echo ""
-	@echo "Existing-run / sidecar operations:"
-	@echo "  make metrics-from-run RUN_STAMP=<existing stamp>"
-	@echo "  make reports-from-run RUN_STAMP=<existing stamp>"
+	@echo "Exact-run stage replay (set RUN_ID=<existing run id>):"
+	@echo "  make run-materialize    # canonical ledger -> governed materialization"
+	@echo "  make run-debt           # debt resolution -> position/activity + treasury"
+	@echo "  make run-metrics        # governed frontier + annual metrics"
+	@echo "  make run-reports        # annual + treasury HTML/PDF report bundle"
+	@echo ""
+	@echo "Focused source / sidecar operations:"
+	@echo "  make run-ingest"
 	@echo "  make run-usd-ccl-valuation RUN_ROOT=<exact-run> CCL_RATES=<local.csv>"
 	@echo "  make run-usd-ccl-management-flows RUN_ROOT=<exact-run> CCL_RATES=<local.csv>"
 	@echo ""
@@ -117,19 +113,12 @@ help:
 	@echo "  make professional-drilldowns"
 	@echo "  make professional-linked-digest"
 	@echo ""
-	@echo "Compatibility aliases:"
-	@echo "  make ledger | materialize | debt | debt-views | metrics | publish | build-all"
-	@echo "  make run-accounting | run-accounting-full | run-debt-balance"
-	@echo ""
-	@echo "Key vars: OUT=out RUN_STAMP=<timestamp> BOXES='Family Business,Property Management' REPORT_BROWSER_BIN=<chromium>"
+	@echo "Key vars: OUT=out RUN_ID=<exact-run-id> BOXES='Family Business,Property Management' REPORT_BROWSER_BIN=<chromium>"
 	@echo ""
 
-.PHONY: run-env smoke-env
+.PHONY: run-env
 run-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-accounting'
-
-smoke-env:
-	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) smoke-accounting'
+	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-full'
 
 .PHONY: doctor validate clean-derived
 doctor:
@@ -146,35 +135,16 @@ validate: doctor
 clean-derived:
 	rm -rf "$(OUT)/smoke/accounting" "$(OUT)/run/accounting" "$(OUT)/metrics" "$(OUT)/debt_resolution" "$(OUT)/reports" "$(ROOT)/public/accounting/latest" "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)" "$(ROOT)/public/reports/latest" "$(ROOT)/public/reports/latest_$(SCOPE_TAG)"
 
-.PHONY: ledger materialize debt debt-views metrics publish build-all
-ledger: run-ingest
-materialize: run-materialize
-debt: run-debt
-debt-views: run-debt-views
-metrics: run-metrics
-publish: publish-latest
-build-all: run-full
-
 
 # ---------------------------------------------------------------------------
 # Latest pointers / publication
 # ---------------------------------------------------------------------------
 
-.PHONY: _update_latest _update_latest_core update-latest-light
+.PHONY: _update_latest
 _update_latest:
-	@echo "[RUN][LATEST] run=$(RUN_REL) including governed reports"
-	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
+	@echo "[RUN][LATEST] run=$(RUN_ID) including governed reports"
+	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_ID)" \
 		--base "$(RUN_BASE)" --base "$(OUT)/debt_resolution" --base "$(OUT)/metrics" --base "$(RUN_REPORTS_BASE)"
-
-_update_latest_core:
-	@echo "[RUN][LATEST-CORE] run=$(RUN_REL)"
-	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
-		--base "$(RUN_BASE)" --base "$(OUT)/debt_resolution" --base "$(OUT)/metrics"
-
-update-latest-light:
-	@echo "[RUN][LATEST-LIGHT] run=$(RUN_REL)"
-	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_REL)" \
-		--base "$(RUN_BASE)" --base "$(OUT)/metrics"
 
 .PHONY: publish-latest publish-reports release-check
 publish-latest:
@@ -199,7 +169,7 @@ release-check:
 # Fixture / smoke path
 # ---------------------------------------------------------------------------
 
-.PHONY: smoke-ingest smoke-materialize smoke-core smoke-full smoke smoke-accounting
+.PHONY: smoke-ingest smoke-materialize smoke-core smoke-full
 smoke-ingest:
 	@$(call _guard_out_dir,$(SMOKE_OUT))
 	@mkdir -p "$(SMOKE_OUT)"
@@ -234,9 +204,6 @@ smoke-core: smoke-materialize
 smoke-full: smoke-core validate
 	@$(PY) -m accounting.publish.latest --project-root "$(ROOT)" --dry-run >/dev/null
 	@echo "smoke-full partial: fixture core + validation + publish dry-run passed"
-
-smoke: smoke-core
-smoke-accounting: smoke-core
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +276,7 @@ run-usd-ccl-management-flows:
 
 
 # ---------------------------------------------------------------------------
-# Live canonical path
+# Canonical ledger / materialization
 # ---------------------------------------------------------------------------
 
 .PHONY: run-ingest run-materialize _run_materialize_action run-canonical
@@ -320,14 +287,14 @@ run-ingest:
 	@$(PY) -m accounting.ledger.ingest \
 		--mode run \
 		--out-dir "$(RUN_OUT)" \
-		--run-id "$(RUN_RUN_ID)" \
+		--run-id "$(RUN_ID)" \
 		--service-account "$(ACCOUNT_SA)" \
 		--sheet-url "$(ACCOUNT_SHEET_URL)" \
 		--sheet-name "$(ACCOUNT_SHEET_NAME)" \
 		--boxes "$(BOXES)"
 	@$(MAKE) _check_ingest OUT_DIR="$(RUN_OUT)" MODE="run"
 
-run-materialize: run-ingest _run_materialize_action
+run-materialize: _run_materialize_action
 
 _run_materialize_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -337,7 +304,7 @@ _run_materialize_action:
 		--freq "$(FREQ)" \
 		--force 0 \
 		--mode run \
-		--run-id "$(RUN_RUN_ID)"
+		--run-id "$(RUN_ID)"
 	@$(MAKE) _check_materialize OUT_DIR="$(RUN_OUT)" MODE="run" FREQ="$(FREQ)"
 	@test -s "$(RUN_OUT)/classification_audit.csv"
 	@test -s "$(RUN_OUT)/classification_audit_summary.csv"
@@ -348,17 +315,19 @@ _run_materialize_action:
 	@test -s "$(RUN_OUT)/monthly_cash_close.csv"
 	@test -s "$(RUN_OUT)/monthly_cash_close_qa.csv"
 
-run-canonical: run-materialize
+run-canonical: run-ingest
+	@$(MAKE) run-materialize RUN_ID="$(RUN_ID)" OUT="$(OUT)" FREQ="$(FREQ)" BOXES="$(BOXES)"
 
 
 # ---------------------------------------------------------------------------
-# Debt stock/activity path
+# Debt position/activity + treasury
 # ---------------------------------------------------------------------------
 
-.PHONY: run-debt _run_debt_action run-debt-views run-debt-balance _run_debt_balance_action
-run-debt: run-canonical _run_debt_action
+.PHONY: run-debt _run_debt_resolution_action _run_debt_products_action
+run-debt: _run_debt_resolution_action
+	@$(MAKE) _run_debt_products_action RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 
-_run_debt_action:
+_run_debt_resolution_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_OUT)/ledger_canonical_all_status.csv" || (echo "ERROR: missing scoped all-status debt evidence at $(RUN_OUT)"; exit 2)
 	@mkdir -p "$(RUN_DEBT_DIR)"
@@ -377,22 +346,19 @@ _run_debt_action:
 		test -s "$(RUN_DEBT_DIR)/debt_resolution_timeline.csv"; \
 	'
 
-run-debt-views: run-debt _run_debt_balance_action
-run-debt-balance: run-debt-views
-
-_run_debt_balance_action:
+_run_debt_products_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_DEBT_DIR)/debt_open_items.csv" || (echo "ERROR: missing debt_open_items.csv at $(RUN_DEBT_DIR)"; exit 2)
 	@bash -eu -o pipefail -c '\
 		$(PY) -m accounting.debt.balance_views \
 			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
-			--write-dir "$(RUN_DEBT_BALANCE_DIR)"; \
-		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_daily.csv"; \
-		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_monthly.csv"; \
-		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_quarterly.csv"; \
-		test -s "$(RUN_DEBT_BALANCE_DIR)/debt_balance_yearly.csv"; \
+			--write-dir "$(RUN_DEBT_DIR)"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_daily.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_monthly.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_quarterly.csv"; \
+		test -s "$(RUN_DEBT_DIR)/debt_balance_yearly.csv"; \
 		$(PY) -m accounting.marts.debt \
-			--debt-dir "$(RUN_DEBT_BALANCE_DIR)" \
+			--debt-dir "$(RUN_DEBT_DIR)" \
 			--write-dir "$(RUN_OUT)"; \
 		test -s "$(RUN_OUT)/monthly_debt_position.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_position_qa.csv"; \
@@ -408,10 +374,8 @@ _run_debt_balance_action:
 # Governed metrics / annual dashboard
 # ---------------------------------------------------------------------------
 
-.PHONY: run-metrics metrics-from-run run-metrics-live _run_metrics_action run-dashboard
-run-metrics: metrics-from-run
-metrics-from-run: _run_metrics_action
-run-metrics-live: run-debt-views _run_metrics_action _update_latest_core
+.PHONY: run-metrics _run_metrics_action
+run-metrics: _run_metrics_action
 
 _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
@@ -434,19 +398,13 @@ _run_metrics_action:
 	@test -s "$(RUN_METRICS_DIR)/artifact_contracts.csv"
 	@test -s "$(RUN_METRICS_DIR)/source_contract_qa.csv"
 
-run-dashboard: run-metrics
-	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_metrics.csv"
-	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_contract.csv"
-	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_qa.csv"
-
 
 # ---------------------------------------------------------------------------
 # Governed human reports
 # ---------------------------------------------------------------------------
 
-.PHONY: run-reports reports-from-run _run_reports_action
-run-reports: run-dashboard _run_reports_action
-reports-from-run: _run_reports_action
+.PHONY: run-reports _run_reports_action
+run-reports: _run_reports_action
 
 _run_reports_action:
 	@$(call _guard_out_dir,$(RUN_REPORTS_DIR))
@@ -473,40 +431,19 @@ _run_reports_action:
 
 
 # ---------------------------------------------------------------------------
-# Composite operations
+# Ordered live composite
 # ---------------------------------------------------------------------------
 
-.PHONY: run-full run-accounting run-accounting-full run-downstream-from-ledger run-live-light assert-live-light-no-debt
-run-full: run-debt-views run-reports _update_latest publish-latest publish-reports release-check
-
-run-accounting: run-accounting-full
-run-accounting-full: run-full
-
-run-downstream-from-ledger:
-	@$(call _guard_out_dir,$(RUN_OUT))
-	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing ledger_canonical.csv at $(RUN_OUT)"; exit 2)
-	@$(MAKE) _run_materialize_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)" FREQ="$(FREQ)"
-	@$(MAKE) _run_debt_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _run_debt_balance_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _run_reports_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@$(MAKE) _update_latest RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-
-run-live-light: run-materialize
-	@$(MAKE) _run_metrics_action RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@test -s "$(RUN_METRICS_DIR)/annual_balance_dashboard_metrics.csv"
-	@$(MAKE) update-latest-light RUN_STAMP="$(RUN_STAMP)" OUT="$(OUT)"
-	@echo "[LIVE-LIGHT] refreshed governed non-debt outputs"
-
-assert-live-light-no-debt:
-	@before=$$(find "$(OUT)/debt_resolution" -maxdepth 1 -type d -name 'LIVE_*' 2>/dev/null | wc -l); \
-	$(MAKE) run-live-light; \
-	after=$$(find "$(OUT)/debt_resolution" -maxdepth 1 -type d -name 'LIVE_*' 2>/dev/null | wc -l); \
-	if [ "$$before" != "$$after" ]; then \
-		echo "ERROR: run-live-light created debt artifacts: before=$$before after=$$after"; \
-		exit 2; \
-	fi; \
-	echo "OK: run-live-light did not create debt artifacts"
+.PHONY: run-full
+run-full: run-canonical
+	@$(MAKE) run-debt RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
+	@$(MAKE) run-metrics RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
+	@$(MAKE) run-reports RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)"
+	@$(MAKE) _update_latest RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
+	@$(MAKE) publish-latest OUT="$(OUT)" BOXES="$(BOXES)"
+	@$(MAKE) publish-reports OUT="$(OUT)" BOXES="$(BOXES)"
+	@$(MAKE) release-check OUT="$(OUT)" BOXES="$(BOXES)"
+	@echo "[RUN] done. latest -> $(RUN_ID)"
 
 
 # ---------------------------------------------------------------------------
@@ -538,8 +475,3 @@ professional-linked-digest:
 	@$(PY) -m accounting.professional.render_linked_digest \
 		--repo-root "$(ROOT)" \
 		--pack "$(ROOT)/out/professional_pack/latest_FBPM"
-
-.PHONY: run run-all
-run: run-accounting
-run-all: run-accounting
-	@echo "[RUN] done. latest -> $(RUN_REL)"
