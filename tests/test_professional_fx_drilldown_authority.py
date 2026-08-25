@@ -98,11 +98,6 @@ def test_fx_drilldown_authority_reconciles_explicit_measure_and_grain(tmp_path: 
     assert absolute["status"] == "ok"
     assert float(absolute["matched_value_sum"]) == 275.0
 
-    governed_box = _row(
-        index,
-        "monthly_tables_fx_treasury_all_measures",
-        contains="flow.fx.conversion_proceeds",
-    )
     governed_candidates = index[
         index["table_id"].eq("monthly_tables_fx_treasury_all_measures")
         & index["row_context_json"].fillna("").str.contains("flow.fx.conversion_proceeds", regex=False)
