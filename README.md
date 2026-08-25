@@ -14,7 +14,7 @@ make smoke-full
 make validate
 ```
 
-- `smoke-core` exercises fixture ingest and materialization with semantic and cash checks.
+- `smoke-core` exercises fixture ingest and governed materialization with semantic and cash checks.
 - `smoke-full` adds repository validation and a publication dry-run.
 - `validate` runs compilation, contract checks, and the regression suite without private credentials.
 
@@ -24,7 +24,7 @@ make validate
 make run-canonical
 ```
 
-`run-canonical` resolves to `run-marts`, whose dependency chain performs live ingest, materialization, and semantic-mart generation for one timestamped run.
+`run-canonical` resolves directly to live ingest plus governed materialization. Materialization emits the semantic split, monthly operating statement, semantic QA, and governed cash-close artifacts. There is no separate generic views stage.
 
 ### Full live and publication path
 
@@ -32,7 +32,20 @@ make run-canonical
 make run-full
 ```
 
-`run-full` runs the canonical core, debt views, governed metrics, annual-dashboard assertions, artifact publication, and the release-readiness check.  The retired `accounting.human` report stack is not a live pipeline stage.
+`run-full` runs canonical materialization, debt resolution/position/activity, governed frontier and annual metrics, artifact publication, and the release-readiness check.
+
+The current spine is:
+
+```text
+ledger ingest
+  -> materialization / semantic + cash facts
+  -> debt position + activity / treasury
+  -> governed frontier + annual dashboard
+  -> publication
+  -> professional reports / drilldowns
+```
+
+The retired generic `metric_values`/registry engine and the old `accounting.marts.build` views layer are not live pipeline stages.
 
 `make run-accounting` and `make run-accounting-full` are compatibility aliases for `run-full`.
 
@@ -40,7 +53,7 @@ For bounded operation on an existing run, use the focused targets exposed by `ma
 
 ### Human-facing / professional presentation
 
-The repository no longer owns a standalone Flask/front application or a parallel `human_reports` producer. Human-facing work is layered over governed artifacts:
+The repository does not own a parallel human-report accounting engine. Human-facing work is layered over governed artifacts:
 
 ```bash
 make professional-drilldowns
