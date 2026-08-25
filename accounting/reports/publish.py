@@ -25,9 +25,16 @@ def _catalog(path: Path) -> dict[str, Any]:
 
 
 def _public_files(catalog: dict[str, Any]) -> list[str]:
+    """Return the document-only viewer publication surface.
+
+    Internal report manifests may exist in an exact-run catalog for provenance,
+    but they are never part of ``public/reports``.  The downstream viewer only
+    receives the discovery catalog plus finished HTML/PDF documents.
+    """
+
     files = ["report_catalog.json"]
     for report in catalog.get("reports", []):
-        for key in ("html", "pdf", "manifest"):
+        for key in ("html", "pdf"):
             value = report.get(key)
             if value:
                 files.append(ensure_relative_bundle_path(str(value)))
@@ -89,7 +96,12 @@ def publish_report_bundle(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
 
-    validate_catalog_files(_catalog(target_root / "report_catalog.json"), bundle_root=target_root)
+    # Validate the published document set without requiring any internal
+    # manifest path that may have been present in the exact-run catalog.
+    published_catalog = _catalog(target_root / "report_catalog.json")
+    for report in published_catalog.get("reports", []):
+        report["manifest"] = None
+    validate_catalog_files(published_catalog, bundle_root=target_root)
     return target_root
 
 
