@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from accounting.professional.annual_dashboard_tables import (
     build_annual_cash_close_by_box,
-    build_annual_debt_activity_by_pair,
-    build_annual_debt_stock_by_pair,
     build_annual_funding_by_actor_channel,
-    write_annual_long_and_wide,
 )
 
 
@@ -115,60 +110,3 @@ def test_annual_funding_produces_required_metric_views_and_value_rules() -> None
     assert direct["value"] == 30
     assert direct["cash_effect"] == "no_cash_in_box_direct_payment"
     assert "amount_in for cash-to-box" in direct["calculation_rule"]
-
-
-def test_annual_debt_stock_uses_latest_month_by_pair_not_sum() -> None:
-    debt_pos = pd.DataFrame([
-        {"period": "2025-01", "as_of_date": "2025-01-31", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "open_principal": 100, "open_interest": 5, "open_total": 105},
-        {"period": "2025-12", "as_of_date": "2025-12-15", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "open_principal": 200, "open_interest": 20, "open_total": 220},
-        {"period": "2025-12", "as_of_date": "2025-12-31", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "open_principal": 70, "open_interest": 7, "open_total": 77},
-    ])
-
-    long_df, wide_df = build_annual_debt_stock_by_pair(debt_pos)
-
-    total = long_df[long_df["component"].eq("open_total")].iloc[0]
-    assert total["value"] == 77
-    assert total["selected_month"] == "2025-12"
-    assert total["selected_as_of_date"] == "2025-12-31"
-    assert total["metric_id"] == "DEBT.STOCK.BY_PAIR.OPEN_TOTAL"
-    assert "latest as_of_date" in total["calculation_rule"]
-    assert wide_df.loc[wide_df["component"].eq("open_total"), "2025"].iloc[0] == 77
-
-
-def test_annual_debt_activity_sums_flows_by_pair_and_activity_type() -> None:
-    debt_act = pd.DataFrame([
-        {"period": "2025-01", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "repayments": 10, "new_principal": 0, "interest_accrued": 1, "adjustments": 0, "net_change": -9},
-        {"period": "2025-02", "Currency": "USD", "debtor": "PM", "creditor": "Matías", "pair": "PM → Matías", "repayments": 15, "new_principal": 5, "interest_accrued": 1, "adjustments": 0, "net_change": -9},
-    ])
-
-    long_df, wide_df = build_annual_debt_activity_by_pair(debt_act)
-
-    required_metrics = {
-        "DEBT.ACTIVITY.REPAYMENT.BY_PAIR",
-        "DEBT.ACTIVITY.INCREASE.BY_PAIR",
-        "DEBT.ACTIVITY.NET_MOVEMENT.BY_PAIR",
-        "DEBT.ACTIVITY.SETTLEMENT.BY_PAIR",
-    }
-    assert required_metrics.issubset(set(long_df["metric_id"]))
-
-    repay = long_df[long_df["activity_type"].eq("repayments")].iloc[0]
-    assert repay["value"] == 25
-    assert repay["metric_id"] == "DEBT.ACTIVITY.REPAYMENT.BY_PAIR"
-
-    settlement = long_df[long_df["activity_type"].eq("settlements")].iloc[0]
-    assert settlement["value"] == 25
-    assert settlement["metric_id"] == "DEBT.ACTIVITY.SETTLEMENT.BY_PAIR"
-    assert "repayment view" in settlement["source_filter"]
-    assert wide_df.loc[wide_df["activity_type"].eq("repayments"), "2025"].iloc[0] == 25
-
-
-def test_write_annual_long_and_wide(tmp_path: Path) -> None:
-    long_df = pd.DataFrame([{"metric_id": "X", "period": "2026", "Currency": "ARS", "value": 1}])
-    wide_df = pd.DataFrame([{"metric_id": "X", "Currency": "ARS", "2026": 1}])
-
-    paths = write_annual_long_and_wide(long_df, wide_df, tmp_path, "annual_example")
-
-    assert paths["long"] == tmp_path / "annual_example_long.csv"
-    assert paths["wide"] == tmp_path / "annual_example_wide.csv"
-    assert (tmp_path / "annual_example_long.csv").exists()
-    assert (tmp_path / "annual_example_wide.csv").exists()

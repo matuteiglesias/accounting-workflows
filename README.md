@@ -1,10 +1,10 @@
 # Accounting workflows
 
-Python pipeline for ledger ingestion, canonicalization, materialization, semantic marts, debt resolution, governed metrics/dashboards, human report rendering, professional-pack drilldowns, and artifact publication.
+Python pipeline for ledger ingestion, canonicalization, materialization, semantic marts, debt resolution, governed metrics, human report rendering, professional-pack drilldowns, and artifact publication.
 
 ## Official command surface
 
-Run commands from the repository root.
+Run commands from the repository root. `make help` is the executable command authority; the repository deliberately has no compatibility-alias command layer.
 
 ### Fixture and validation path
 
@@ -18,13 +18,26 @@ make validate
 - `smoke-full` adds repository validation and a publication dry-run.
 - `validate` runs compilation, contract checks, and the regression suite without private credentials.
 
-### Live canonical core
+### Live source path
 
 ```bash
 make run-canonical
 ```
 
-`run-canonical` resolves directly to live ingest plus governed materialization. Materialization emits the semantic split, monthly operating statement, semantic QA, and governed cash-close artifacts. There is no separate generic views stage.
+`run-canonical` is the explicit live source operation: it performs live ingest and then governed materialization for one generated `RUN_ID`. Materialization emits the semantic split, monthly operating statement, semantic QA, and governed cash-close artifacts. There is no separate generic views stage.
+
+### Exact-run stage replay
+
+Downstream stages do not silently re-ingest live inputs. Select an existing exact run and execute only the required stage:
+
+```bash
+make run-materialize RUN_ID=<exact-run-id>
+make run-debt       RUN_ID=<exact-run-id>
+make run-metrics    RUN_ID=<exact-run-id>
+make run-reports    RUN_ID=<exact-run-id>
+```
+
+`run-debt` owns the complete debt stage: resolution, balance views, monthly position/activity marts, and treasury accountability. `run-metrics` also asserts the governed annual dashboard outputs; there is no separate dashboard command. `run-reports` consumes the already-produced treasury and metrics artifacts for that exact run.
 
 ### Full live and publication path
 
@@ -32,25 +45,21 @@ make run-canonical
 make run-full
 ```
 
-`run-full` runs canonical materialization, debt resolution/position/activity and treasury, governed frontier and annual metrics, governed human reports, latest alignment, machine-artifact publication, human-report publication, and the release-readiness check.
-
-The current spine is:
+`run-full` is the ordered live composite:
 
 ```text
-ledger ingest
-  -> materialization / semantic + cash facts
-  -> debt position + activity / treasury
-  -> governed frontier + annual dashboard
-  -> governed human reports (HTML -> PDF)
-  -> publication
-  -> professional evidence / drilldowns
+run-canonical
+  -> run-debt
+  -> run-metrics
+  -> run-reports
+  -> atomic latest alignment
+  -> publish-latest + publish-reports
+  -> release-check
 ```
 
-The retired generic `metric_values`/registry engine and the old `accounting.marts.build` views layer are not live pipeline stages.
+For automation that keeps credentials in an env file, `make run-env` loads `ENV_FILE` (default `private/accounting.env`) and delegates to `run-full`.
 
-`make run-accounting` and `make run-accounting-full` are compatibility aliases for `run-full`.
-
-For bounded operation on an existing run, use the focused targets exposed by `make help`, including `metrics-from-run`, `reports-from-run`, `run-dashboard`, `publish-latest`, and `publish-reports`.
+The retired generic `metric_values`/registry engine, old `accounting.marts.build` views layer, notebook report stack, and historical Make aliases are not live pipeline stages.
 
 ### Governed human reports
 
@@ -66,18 +75,6 @@ The current product bundle contains:
 - `treasury_accountability/report.html` and `report.pdf`, rendered from the governed monthly cash-accountability mart;
 - `report_catalog.json`, which exposes document-discovery metadata only.
 
-Build the reports for the selected run with:
-
-```bash
-make run-reports
-```
-
-or, when the exact run and metrics artifacts already exist:
-
-```bash
-make reports-from-run RUN_STAMP=<existing stamp>
-```
-
 PDF is derived from the same HTML using headless Chromium/Chrome. Set `REPORT_BROWSER_BIN=/path/to/chromium` when browser auto-discovery is insufficient.
 
 Publish only the finished document surface with:
@@ -92,14 +89,20 @@ See `notes/report_bundle_contract.md` for the exact report boundary and provenan
 
 ### Professional evidence / drilldowns
 
-The repository does not own a parallel human-report accounting engine. Professional evidence remains layered over governed artifacts:
+Professional evidence remains layered over governed artifacts:
 
 ```bash
 make professional-drilldowns
 make professional-linked-digest
 ```
 
-These operate on an existing professional pack. The linked digest is presentation-only and does not recalculate accounting semantics. Report and notebook consumers must likewise read governed metric/debt/treasury artifacts rather than introducing a second accounting engine.
+These operate on an existing professional pack. The linked digest is presentation-only and does not recalculate accounting semantics.
+
+## Source-tree contract
+
+The import root is intentionally the top-level `accounting/` package. This wave does **not** introduce a parallel `src/accounting` tree. Runtime Python belongs under `accounting/`; fixtures, reference policies, scripts, tests, documentation, and historical diagnostics stay in their dedicated top-level roots. Notebook/report presentation artifacts do not belong inside the runtime package.
+
+See `notes/repository_tree_contract.md` for the governed root/path classification.
 
 ## Runbook
 See `notes/accounting_spine_runbook.md` for the per-stage outputs and smoke checklist.
@@ -113,7 +116,8 @@ Use `notes/documentation_compass.md` as the role-based guide to current docs.
 ## Repo hygiene
 - Generated outputs are not tracked (`out/`, `accounting/out/`, etc.).
 - Local secrets are kept in `private/` and never committed.
-- Historical audits may mention retired module paths; they are evidence, not live command authority.
+- Historical audits may mention retired module paths or commands; they are evidence, not live authority.
+- New compatibility aliases require a concrete external caller and an explicit removal condition; otherwise use the canonical target or module directly.
 
 ## Logging convention
 Operational Python entrypoints use `YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message`. Keep `journalctl` as the operational log source of truth and retain per-run CSV/JSON/HTML/PDF artifacts under the governed run, metrics, reports, professional-pack, drilldown, and publication roots rather than duplicating logs into source-controlled artifacts.

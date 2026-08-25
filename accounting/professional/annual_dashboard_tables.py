@@ -21,20 +21,6 @@ from accounting.contracts.funding_support import (
 from accounting.professional import annual_dashboard_tables_legacy as _legacy
 
 
-# Explicit compatibility surface derived from repository caller census.
-# Do not broaden this list: every retained legacy symbol must have a caller
-# or an independently documented compatibility contract/removal condition.
-LEGACY_COMPAT_EXPORTS = (
-    "build_annual_debt_activity_by_pair",
-    "build_annual_debt_stock_by_pair",
-    "write_annual_long_and_wide",
-)
-
-build_annual_debt_activity_by_pair = _legacy.build_annual_debt_activity_by_pair
-build_annual_debt_stock_by_pair = _legacy.build_annual_debt_stock_by_pair
-write_annual_long_and_wide = _legacy.write_annual_long_and_wide
-
-
 _MODERN_FUNDING_COLUMNS = {
     "period",
     "Currency",

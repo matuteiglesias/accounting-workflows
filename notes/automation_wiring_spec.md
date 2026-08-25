@@ -1,192 +1,97 @@
 ---
 id: notes/automation_wiring_spec
-title: "Automation Wiring Spec (Wave 2)"
-sidebar_label: "Automation Wiring Spec (Wave 2)"
+title: "Automation Wiring Spec"
+sidebar_label: "Automation Wiring Spec"
 ---
 
-# Automation Wiring Spec (Wave 2)
+# Automation Wiring Spec
 
-Status: authority draft
-Last reviewed: 2026-05-22
+Status: current repository wiring contract
+Last reviewed: 2026-08-25
 Audience: operators, automation stewards, coding agents
 
-## Purpose
+## Scope
 
-Define the authoritative wiring for periodic automated reporting so scheduler failures are easy to diagnose and do not silently diverge from the canonical command surface.
+This page defines the command contract a scheduler may invoke. It does **not** assert that cron, systemd, or any other scheduler is currently deployed on a host; deployment state must be established from host evidence separately.
 
-## Source-of-truth anchors
+## Canonical automation command
 
-- `Makefile` canonical targets and env wrappers
-- `README.md` operations + `journalctl` guidance
-- `notes/frontend_snapshot_contract.md` publish contract and consumer boundary
-- `notes/entrypoints.md` command taxonomy and canonical layering
-
-## Canonical scheduled commands
-
-Primary scheduled command (full pipeline + publish):
-
-```bash
-make build-all
-```
-
-Equivalent expanded path (for debugging/partial replay):
-
-```bash
-make ledger
-make materialize
-make debt
-make debt-views
-make metrics
-make human-report
-make publish-latest
-```
-
-Environment-file wrapper path (recommended for automation):
+For a complete live run using an environment file:
 
 ```bash
 make run-env
 ```
 
-`run-env` loads `ENV_FILE` (default `private/accounting.env`) and delegates to `run-accounting`.
+`run-env` loads `ENV_FILE` (default `private/accounting.env`) and delegates exactly once to `run-full`. `run-full` already performs canonical ingest/materialization, debt/treasury, metrics, reports, latest alignment, machine/report publication, and `release-check`. Automation must not append a second `publish-latest` or recreate the historical `build-all` / `run-accounting` aliases.
 
-## Working directory and environment contract
+For an interactive live run where the environment is already loaded:
 
-### Working directory
-
-Scheduler jobs must execute from repository root:
-
-```text
-/workspace/accounting-workflows
+```bash
+make run-full
 ```
 
-Reason:
-- Makefile assumes relative paths for `fixtures/`, `private/`, and output directories under `out/`.
+## Partial replay contract
 
-### Environment file contract
+Downstream recovery should use an existing exact run identity and the smallest required stage:
 
-Default env file path:
+```bash
+make run-materialize RUN_ID=<exact-run-id>
+make run-debt        RUN_ID=<exact-run-id>
+make run-metrics     RUN_ID=<exact-run-id>
+make run-reports     RUN_ID=<exact-run-id>
+```
+
+These targets do not pull live inputs or move latest pointers. After a repaired run has all required stage products, publication/latest movement is a separate deliberate operation; do not silently promote a partial replay.
+
+## Working directory and environment
+
+Scheduler jobs must execute from the repository root. The default environment file is:
 
 ```text
 private/accounting.env
 ```
 
-Required keys for live ingest/reporting:
-- `ACCOUNT_SA`
-- `ACCOUNT_SHEET_URL`
-- `ACCOUNT_SHEET_NAME` (defaults to `C. Long Ledger` if omitted)
+Live ingest requires `ACCOUNT_SHEET_URL`; `ACCOUNT_SA` is passed to the ingest entrypoint and `ACCOUNT_SHEET_NAME` defaults to `C. Long Ledger` when omitted. Operational overrides such as `OUT`, `FREQ`, `BOXES`, and `REPORT_BROWSER_BIN` remain explicit Make variables.
 
-Optional/operational keys:
-- `OUT`
-- `FREQ`
-- `METRIC_MONTHS`
-- `FIXTURE` (mainly for smoke mode)
+## Concurrency
 
-## systemd template (recommended)
+Overlapping same-scope live runs are unsupported until concurrency issue #44 is resolved. A scheduler must therefore serialize same-scope invocations rather than assuming `run-full` is safe under overlap. This repository does not claim a particular host-level locking implementation.
 
-### User service unit example
+## Failure routing
 
-`~/.config/systemd/user/accounting-spine-live.service`
-
-```ini
-[Unit]
-Description=Accounting spine periodic build and publish
-After=network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/workspace/accounting-workflows
-Environment=ENV_FILE=private/accounting.env
-ExecStart=/usr/bin/bash -lc 'set -euo pipefail; make run-env && make publish-latest'
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=default.target
-```
-
-### User timer example
-
-`~/.config/systemd/user/accounting-spine-live.timer`
-
-```ini
-[Unit]
-Description=Run accounting spine periodically
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-Unit=accounting-spine-live.service
-
-[Install]
-WantedBy=timers.target
-```
-
-### Activation commands
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now accounting-spine-live.timer
-systemctl --user list-timers | rg accounting-spine-live
-```
-
-## Cron fallback (if systemd user timers are unavailable)
-
-```cron
-# Run at minute 5 every hour
-5 * * * * cd /workspace/accounting-workflows && ENV_FILE=private/accounting.env /usr/bin/bash -lc 'make run-env && make publish-latest' >> /tmp/accounting-spine-live.log 2>&1
-```
-
-Note:
-- Cron fallback is acceptable but weaker than systemd for structured logs and retry semantics.
-
-## Failure routing and first response
-
-Primary operational log source:
-
-```bash
-journalctl --user -u accounting-spine-live.service -n 200 --no-pager
-journalctl --user -u accounting-spine-live.service --since "1 hour ago"
-```
-
-First-response sequence:
+Start with fixture/static evidence before touching live state:
 
 ```bash
 make help
 make doctor
-make smoke
+make smoke-full
 ```
 
-Failure taxonomy:
-- Missing module/env var -> runtime/bootstrap wiring issue
-- Stage crash or contract output missing -> pipeline regression or data-shape issue
-- Service/timer not firing -> scheduler wiring issue
+Then identify the failed exact `RUN_ID` and replay only the first incomplete downstream stage. Preserve the run identity across `out/run/accounting`, `out/debt_resolution`, `out/metrics`, and `out/reports`.
 
-## Publish boundary rule
+Typical failure classes:
 
-Automated workflows should treat `public/accounting/latest/*` as the consumer handoff surface.
+- missing module or environment variable: bootstrap/wiring issue;
+- stage crash or contract output missing: pipeline/data-shape issue;
+- browser/PDF failure: report-rendering environment issue;
+- scheduler did not fire: host scheduler issue, outside repository evidence unless inspected directly;
+- overlapping same-scope invocations: unsupported concurrency, not a retry-safe condition.
 
-Consumer applications should not read producer internals under:
-- `out/run/...`
-- `out/metrics/...`
-- `out/debt_resolution/...`
-- `out/human_reports/...`
+## Publication boundary
 
-## Evidence map
+Automated live execution may publish only through the canonical `run-full` sequence. Consumer applications read the publication handoffs, not producer internals:
 
-### Commands validated (2026-05-22)
+```text
+public/accounting/latest_<SCOPE>/
+public/reports/latest_<SCOPE>/
+```
 
-- `make help` -> pass
-- `make doctor` -> pass
-- `make smoke` -> fails in current environment when `pandas` is missing
+They must not depend on `out/run`, `out/debt_resolution`, `out/metrics`, or `out/reports` as runtime APIs.
 
-### Code anchors
+## Verification anchors
 
-- `Makefile` (`build-all`, `publish-latest`, layered targets, `run-env`, `ENV_FILE`)
-- `README.md` (`journalctl` usage and logging convention)
-- `notes/frontend_snapshot_contract.md` (publish contract)
-- `notes/entrypoints.md` (canonical command layering)
-
-### Known assumptions
-
-- Example service/timer paths assume Linux user-level systemd.
-- Cron fallback uses `/tmp` log path by convention; adapt to host policy.
+- `Makefile` — executable command graph;
+- `notes/canonical_commands.md` — operator command contract;
+- `notes/pipeline_dag_contract.md` — stage ordering and exact-run semantics;
+- `notes/report_bundle_contract.md` and `notes/public_bundle_contract.md` — publication boundaries;
+- issue #44 — same-scope concurrency limitation.

@@ -1,6 +1,7 @@
 # Human report bundle contract
 
 Status: current implementation contract for the report product boundary.
+Last reviewed: 2026-08-25.
 
 ## Purpose
 
@@ -72,7 +73,7 @@ Exact-run product root:
 out/reports/<RUN_ID>/
 ```
 
-Full-run latest pointers include the report surface only after the exact-run report bundle exists and all producer targets have been preflighted:
+A complete live run aligns these pointers only after all exact-run products exist:
 
 ```text
 out/run/accounting/latest_<SCOPE>
@@ -81,7 +82,7 @@ out/metrics/latest_<SCOPE>
 out/reports/latest_<SCOPE>
 ```
 
-`accounting.support.latest` must preflight every requested target before moving the first pointer. Focused metric-only/light commands retain their narrower latest contracts and do not require reports.
+`accounting.support.latest` must preflight every requested target before moving the first pointer. Focused exact-run stage commands do not move latest pointers.
 
 Generated reports are evidence from a run and must not be hand-edited or committed as a substitute for fixing code or source artifacts.
 
@@ -106,21 +107,28 @@ Publication requires a PDF for every cataloged report. The downstream viewer sho
 
 ## Commands
 
+Build reports from the selected exact run and its already-built metrics/treasury artifacts:
+
 ```bash
-make run-reports
-make reports-from-run RUN_STAMP=<existing stamp>
-make publish-reports
+make run-reports RUN_ID=<exact-run-id>
 ```
 
 PDF rendering uses a local Chromium/Chrome executable. `REPORT_BROWSER_BIN` can explicitly select it when auto-discovery is insufficient.
 
-The full live path is:
+Publish the aligned latest report bundle with:
+
+```bash
+make publish-reports
+```
+
+The ordered full live path is:
 
 ```text
-run-debt-views
-  -> run-dashboard
+run-canonical
+  -> run-debt
+  -> run-metrics
   -> run-reports
-  -> latest preflight/alignment including reports
+  -> atomic latest preflight/alignment including reports
   -> publish-latest
   -> publish-reports
   -> release-check

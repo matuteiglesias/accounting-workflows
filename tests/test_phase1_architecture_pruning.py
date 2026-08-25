@@ -8,7 +8,7 @@ from accounting.publish.manifest import SCHEMA_NAME, build_public_bundle_manifes
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_retired_empty_and_alternate_modules_are_absent() -> None:
+def test_retired_empty_alternate_and_presentation_modules_are_absent() -> None:
     for rel in [
         "accounting/publish/snapshot.py",
         "accounting/debt/models.py",
@@ -17,11 +17,16 @@ def test_retired_empty_and_alternate_modules_are_absent() -> None:
         "accounting/contracts/models.py",
         "accounting/human",
         "accounting/viz",
+        "accounting/notebooks",
+        "src/accounting",
+        "scripts/audit_accounting_report_notebooks.py",
     ]:
         assert not (REPO_ROOT / rel).exists(), rel
 
+    assert not list((REPO_ROOT / "accounting").rglob("*.ipynb"))
 
-def test_makefile_has_no_live_human_or_front_report_pipeline() -> None:
+
+def test_makefile_has_no_live_human_front_report_or_compatibility_pipeline() -> None:
     make = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     for retired in [
         "accounting.human",
@@ -31,10 +36,15 @@ def test_makefile_has_no_live_human_or_front_report_pipeline() -> None:
         "front-report",
         "build-report",
         "build-front",
-        "_run_human_balance_action",
+        "run-dashboard",
+        "run-debt-views",
+        "metrics-from-run",
+        "reports-from-run",
+        "run-live-light",
     ]:
         assert retired not in make
-    assert "run-dashboard: run-metrics" in make
+    assert "run-metrics: _run_metrics_action" in make
+    assert "run-reports: _run_reports_action" in make
     assert "professional-drilldowns:" in make
     assert "professional-linked-digest:" in make
 

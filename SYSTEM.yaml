@@ -36,6 +36,7 @@ downstream:
 - repo.accounting-viewer
 canonical_commands:
 - make run-canonical
+- make run-debt
 - make run-metrics
 - make run-reports
 - make run-full

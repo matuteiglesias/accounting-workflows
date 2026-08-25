@@ -26,7 +26,6 @@ def test_professional_wave_facade_is_gone_and_legacy_remainder_is_bounded() -> N
     assert "drilldown_legacy as _legacy" in drilldown
     assert "Bounded compatibility runtime" in legacy
 
-    # Retired semantic authorities must not reappear in the compatibility file.
     for retired in [
         "def _build_cash_control_cell(",
         "def _build_annual_cash_close_companion_cell(",
@@ -39,7 +38,7 @@ def test_professional_wave_facade_is_gone_and_legacy_remainder_is_bounded() -> N
         assert retired not in legacy
 
 
-def test_other_supported_facades_remain_explicit_while_their_compatibility_is_used() -> None:
+def test_remaining_legacy_delegates_are_not_automatically_public_compatibility() -> None:
     annual = (ROOT / "accounting" / "metrics" / "annual.py").read_text(
         encoding="utf-8"
     )
@@ -48,4 +47,6 @@ def test_other_supported_facades_remain_explicit_while_their_compatibility_is_us
     ).read_text(encoding="utf-8")
 
     assert "annual_legacy as _legacy" in annual
+    assert "LEGACY_COMPAT_EXPORTS" in annual
     assert "annual_dashboard_tables_legacy as _legacy" in companion
+    assert "LEGACY_COMPAT_EXPORTS" not in companion

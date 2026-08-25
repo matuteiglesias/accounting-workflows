@@ -1,23 +1,26 @@
-target,category,stage,requires_env,requires_live_sheet,requires_fixture,primary_inputs,primary_outputs,qa_outputs,safe_for_ci,safe_for_local,status,recommended_action,notes
-doctor,doctor,environment/static,no,no,no,python modules,compile status,,yes,yes,active,keep,No private credentials required
-validate,validate,static/contracts,no,no,no,source files and contract vocabularies,validation status,temp contract QA,yes,yes,active,keep,Runs doctor plus contract/schema smoke checks
-smoke-core,smoke,fixture core,no,no,yes,fixtures/ledger_fixture.csv,smoke ledger stage_d semantic/cash wrappers,semantic/cash artifact presence checks,yes,yes,active,keep,Offline core through semantic/cash mart outputs
-smoke-full,smoke,fixture product,no,no,yes,fixture core artifacts,publish dry-run manifest,contract validation output,yes,yes,partial,investigate,Fixture debt/human publish remains follow-up until fixture debt is available
-run-canonical,canonical,live backend,yes,yes,no,Google Sheet ledger,canonical run root and debt wrappers,materialize QA views sanity debt QA,no,yes,active,keep,Stops before metrics/human/publish
-metrics-from-run,metrics,existing run metrics,no,no,no,RUN_OUT canonical artifacts,out/metrics/RUN_STAMP,metrics QA source contract QA,no,yes,active,keep,Does not force live upstream
-run-metrics,metrics,alias existing run metrics,no,no,no,RUN_OUT canonical artifacts,out/metrics/RUN_STAMP,metrics QA source contract QA,no,yes,active,alias_to_new_target,Alias for metrics-from-run
-run-metrics-live,metrics,live orchestration,yes,yes,no,Google Sheet ledger,out/metrics/RUN_STAMP,metrics QA,no,yes,active,keep,Runs live upstream before metrics
-run-dashboard,dashboard,annual dashboard,no,no,no,out/metrics/RUN_STAMP,annual dashboard csvs,annual dashboard QA,no,yes,active,keep,Checks annual dashboard outputs produced by metrics build
-run-human,human,human report,no,no,no,RUN_OUT and metrics dir,out/human_reports/RUN_STAMP,story manifest,no,yes,active,keep,Does not recompute semantics
-publish-latest,publish,packaging,no,no,no,out latest symlinks,public/accounting/latest,publish_contract_qa,no,yes,active,keep,Packaging only; not readiness
-release-check,release,readiness,no,no,no,public/accounting/latest,release status,printed checks,no,yes,active,keep,Dashboard/public readiness gate
-run-full,live,full live pipeline,yes,yes,no,Google Sheet ledger,public bundle,release-check,no,yes,active,keep,run-canonical to release-check
-ledger,legacy,ingest,yes,yes,no,Google Sheet ledger,ledger_canonical.csv,ingest check,no,yes,compat,alias_to_new_target,Legacy alias to run-ingest
-materialize,legacy,stage_d,yes,yes,no,ledger,stage_d artifacts,materialize check,no,yes,compat,alias_to_new_target,Legacy alias to run-materialize
-debt,legacy,debt,yes,yes,no,run marts and live sheet,debt resolution artifacts,debt checks,no,yes,compat,alias_to_new_target,Legacy alias to run-debt
-metrics,legacy,metrics,no,no,no,RUN_OUT canonical artifacts,out/metrics/RUN_STAMP,metrics QA,no,yes,compat,alias_to_new_target,Legacy alias to run-metrics
-human-report,legacy,human,no,no,no,RUN_OUT and metrics,human report,story manifest,no,yes,compat,alias_to_new_target,Legacy alias to run-human-report
-publish,legacy,publish,no,no,no,out latest symlinks,public bundle,publish QA,no,yes,compat,alias_to_new_target,Alias to publish-latest
-build-all,legacy,composite,depends,depends,no,producer artifacts,public bundle,release-check,no,yes,compat,alias_to_new_target,Now includes release-check
-clean-derived,cleanup,cleanup,no,no,no,out dirs,removed outputs,,no,yes,active,keep,Deletes derived artifacts
-front-report,diagnostic,presentation,no,no,no,metrics dir,out/front,,no,yes,experimental,document_only,Not canonical backend run
+target,category,input_mode,live_source_access,moves_latest,publication,status,notes
+help,governance,source,no,no,no,active,Default goal and human-readable command authority
+run-env,live_wrapper,env_file,yes,yes,yes,active,Loads ENV_FILE then delegates to run-full
+doctor,validation,source,no,no,no,active,Compile/import check
+validate,validation,source,no,no,no,active,Doctor plus contracts and pytest
+clean-derived,maintenance,generated_paths,no,no,no,active,Destructive generated-output cleanup
+smoke-ingest,smoke,fixture,no,no,no,active,Fixture ledger ingest
+smoke-materialize,smoke,fixture,no,no,no,active,Fixture governed materialization
+smoke-core,smoke,fixture,no,no,no,active,Offline core smoke
+smoke-full,smoke,fixture,no,no,dry-run,active,Smoke core plus validation and publication dry-run
+smoke-usd-ccl-valuation,smoke,fixture,no,no,no,active,Isolated valuation fixture
+smoke-usd-ccl-management-flows,smoke,fixture,no,no,no,active,Isolated management-flow fixture
+run-ingest,live_source,generated_run_id,yes,no,no,active,Focused live canonical ledger ingest
+run-materialize,stage,exact_run_id,no,no,no,active,Existing canonical ledger to governed semantic/cash outputs
+run-canonical,live_composite,generated_run_id,yes,no,no,active,Ordered run-ingest then run-materialize
+run-debt,stage,exact_run_id,no,no,no,active,Resolution balances monthly debt marts and treasury
+run-metrics,stage,exact_run_id,no,no,no,active,Governed frontier and annual dashboard
+run-reports,stage,exact_run_id,no,no,no,active,Finished HTML/PDF report bundle
+run-full,live_composite,generated_run_id,yes,yes,yes,active,Ordered canonical debt metrics reports latest publication release check
+run-usd-ccl-valuation,sidecar,exact_run_root,no,no,no,active,Offline valuation sidecar
+run-usd-ccl-management-flows,sidecar,exact_run_root,no,no,no,active,Offline management-flow sidecar
+publish-latest,publication,aligned_latest,no,no,yes,active,Governed machine-artifact publication
+publish-reports,publication,aligned_latest,no,no,yes,active,Finished document publication
+release-check,release,public_bundle,no,no,no,active,Release-readiness checks
+professional-drilldowns,presentation,existing_professional_pack,no,no,no,active,Traceable drilldown presentation
+professional-linked-digest,presentation,existing_professional_pack,no,no,no,active,Linked professional digest
