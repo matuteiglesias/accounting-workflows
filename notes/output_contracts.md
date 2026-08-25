@@ -6,200 +6,84 @@ sidebar_label: "Accounting Backend Output Contracts"
 
 # Accounting Backend Output Contracts
 
-Status: authority draft
-Last reviewed: 2026-05-10
+Status: current authority
+Last reviewed: 2026-08-25
 
 ## Purpose
 
-This document names the stable and emerging output contracts in the accounting backend. Downstream consumers should depend on these artifacts instead of arbitrary intermediate files.
-
-## Stability vocabulary
-
-| Stability | Meaning |
-|---|---|
-| stable | Safe for downstream modules to depend on |
-| current | Used today but still evolving |
-| experimental | Future-facing or incomplete |
-| legacy | Historical; avoid new dependencies |
-| unknown | Needs runtime verification |
+Downstream consumers should depend on governed accounting artifacts rather than arbitrary intermediates, legacy report files, or a second metric-classification engine.
 
 ## Contract summary
 
-| Contract | Level | Stability | Producer | Typical path |
-|---|---:|---|---|---|
-| `ledger_canonical` | 1 | stable candidate | `accounting.ledger.ingest` | `out/run/accounting/<run_id>/ledger_canonical.csv` |
-| `stage_d_materialized_views` | 2 | current/stable candidate | `accounting.stage_d.materialize` | `out/run/accounting/<run_id>/*.csv` |
-| `metric_values` | 3 | stable | `accounting.metrics.build` | `out/metrics/<run_id>/metric_values.csv` |
-| `metric_registry` | 3 | stable | `accounting.metrics.registry` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_registry.csv` |
-| `validation_report` | 3 | stable candidate | `accounting.metrics.validate` via `accounting.metrics.build` | `out/metrics/<run_id>/validation_report.csv` |
-| `metric_views` | 3 | current | `accounting.metrics.views` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_views/*` |
-| `metric_drilldown` | 3/4 | current | `accounting.metrics.drilldown` via `accounting.metrics.build` | `out/metrics/<run_id>/metric_drilldown/*` |
-| `debt_open_items` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_open_items.csv` |
-| `debt_allocations` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_allocations.csv` |
-| `debt_repayment_events` | 3 | current/canonical | `accounting.debt.resolve` | `out/debt_resolution/<run_id>/debt_repayment_events.csv` |
-| `debt_balance_views` | 3 | current | `accounting.debt.balance_views` | `out/debt_resolution/<run_id>/debt_balance_*.csv` |
-| `human_table_specs` | 4 | current/stable seam | `accounting.human.tables` | generated in human/front report outputs |
-| `human_balance_report` | 4 | current/canonical | `accounting.human.document` | `out/human_reports/<run_id>/balance_human_v2/*` |
-| `frontend_snapshot_manifest` | 5 | current | `accounting.publish.latest` | `public/accounting/latest/manifest.json` |
+| Contract | Authority | Typical path | Consumer role |
+|---|---|---|---|
+| canonical ledger | `accounting.ledger.ingest` | `out/run/accounting/<run_id>/ledger_canonical.csv` | transaction evidence |
+| semantic monthly facts | `accounting.marts.semantic` via materialization | `monthly_flow_semantic_split.csv`, `monthly_operating_statement.csv` | operating/funding/distribution/FX truth |
+| governed cash close | cash mart/authority via materialization | `monthly_cash_close.csv` | validated cash only |
+| debt position/activity | `accounting.marts.debt` + debt authorities | `monthly_debt_position.csv`, `monthly_debt_activity.csv` | debt stock and movement truth |
+| metric frontier | `accounting.metrics.frontier` | `out/metrics/<run_id>/metric_contract_frontier.csv`, `frontend_metric_series.csv` | current monthly frontend contract |
+| annual dashboard | `accounting.metrics.annual` | `annual_balance_dashboard_metrics.csv`, `annual_balance_dashboard_contract.csv` | annual governed facts |
+| annual flow membership | annual membership contract | `annual_flow_membership.csv` | drilldown/lineage evidence |
+| public bundle | `accounting.publish.latest` | `public/accounting/latest_<scope>/` | packaged downstream handoff |
+| professional drilldowns | `accounting.professional.drilldown` | professional/drilldown output roots | human traceability |
 
-## `ledger_canonical`
+The retired `metric_values.csv`, `metric_registry.csv`, generic Q/Y statements, generic metric views and generic marts/views outputs are not current contracts.
+
+## Canonical ledger
 
 Producer: `accounting.ledger.ingest`.
 
-Consumers: `accounting.stage_d.materialize`, debt resolution, metric/drilldown builders, report evidence loaders.
-
-Required columns:
-
-```text
-tx_id
-Date
-amount
-Currency
-payer
-receiver
-Flujo
-Tipo
-status
-Box
-source_file
-source_row
-ingest_ts
-notes
-```
-
-Common optional columns:
-
-```text
-amount_cents
-base_amount
-Detalle
-Lugar
-medio
-tag
-```
+Required accounting fields include stable transaction identity, date, amount, native `Currency`, parties, status, `Box`, source provenance and the ledger classification inputs. The canonical ledger is evidence, not permission for downstream report code to invent new classifications.
 
 Validation expectations:
 
-- Required accounting fields exist before materialization.
-- `Date` parses as date/datetime.
-- `amount` parses as numeric.
-- `Currency` is non-empty.
-- `tx_id` is stable and non-empty when required.
-- Ingest anomalies are visible and not silently ignored.
+- required accounting fields exist;
+- dates and amounts parse;
+- native currency is explicit;
+- source provenance is retained;
+- requested Box scope is preserved;
+- anomalies are visible rather than silently coerced.
 
-## `stage_d_materialized_views`
+## Semantic monthly facts
 
-Producer: `accounting.stage_d.materialize`.
-
-Consumers: `accounting.views`, metrics, human tables, report factories.
-
-Required representative artifacts:
+Primary artifacts:
 
 ```text
-per_flow_time_long.freq=*.csv
-per_party_time_long.freq=*.csv
-daily_cash_position.csv
-box_balance_time_long.freq=*.csv
-box_flow_balance_time_long.freq=*.csv
+monthly_flow_semantic_split.csv
+monthly_operating_statement.csv
+monthly_operating_statement_qa.csv
+semantic_leakage_qa.csv
+classification_audit.csv
+classification_audit_summary.csv
 ```
 
-Validation expectations:
+These artifacts own the current operating/funding/distribution/treasury semantic split. Stage-D `per_*`, box-balance and daily-position artifacts may remain useful diagnostic/materialized evidence, but they are not frontend truth and must not be used to reclassify flows in reports.
 
-- Required Stage D files exist for the requested frequency.
-- Period/date columns parse cleanly.
-- Amount columns remain numeric and currency-aware.
-- View/report layers treat these as authoritative over legacy report files.
+Core invariants:
 
-## `metric_values`
+- operating revenue excludes family funding;
+- property OPEX excludes Household/personal/distribution semantics;
+- funding remains distinct from operating revenue;
+- personal draws/distributions remain distinct from OPEX;
+- treasury FX remains outside operating income/funding;
+- native currencies are never silently summed together.
 
-Producer: `accounting.metrics.build`.
+## Governed cash close
 
-Consumers: human tables, report factories, validation, statement views, and frontend surfaces.
-
-Required columns:
+Primary artifacts:
 
 ```text
-metric_id
-period_grain
-period
-currency
-value
-run_id
-as_of_date
-source_layer
-build_status
-build_detail
+monthly_cash_close.csv
+monthly_cash_close_qa.csv
 ```
 
-Validation expectations:
+Cash reporting uses validated account snapshots only when the governed cash schema supports them. Internal party balances and inferred box-control balances are separate evidence populations and are never a headline fallback.
 
-- Schema is normalized by the metrics I/O layer.
-- Duplicate keys are checked across metric, period, currency, run, and as-of dimensions.
-- `metric_id` exists in `metric_registry.csv`.
-- `value` is numeric.
-- `build_status` defaults to `ok` when not set.
-
-## `metric_registry`
-
-Producer: `accounting.metrics.registry` via `accounting.metrics.build`.
-
-Consumers: metric validation, labels, ordering, grouping, statement views, reports, and frontend display.
-
-Required columns:
-
-```text
-metric_id
-statement
-section
-label
-agg_rule
-is_leaf
-source_layer
-builder_key
-parent_metric_id
-display_code
-sort_key
-currency_mode
-status
-notes
-```
-
-Validation expectations:
-
-- `metric_id` is unique.
-- Active leaf metrics have a `builder_key`.
-- Derived metrics have enough metadata to explain construction.
-- `status` defaults to active.
-- `currency_mode` defaults to by-currency behavior unless specified otherwise.
-
-## `validation_report`
-
-Producer: `accounting.metrics.validate` via `accounting.metrics.build`.
-
-Consumers: human report, QA, support checks, and future release gates.
-
-Required columns:
-
-```text
-level
-check_name
-message
-n_rows
-```
-
-Validation expectations:
-
-- The file may be empty or have zero rows when clean.
-- `level` distinguishes warnings and errors.
-- Error rows should fail or degrade the build unless explicitly waived.
+Annual cash is a closing stock: select the last governed period in the year and apply the same validated-account snapshot primitive. Never sum monthly cash positions.
 
 ## Debt contracts
 
-Producer: `accounting.debt.resolve`.
-
-Consumers: `accounting.debt.balance_views`, metrics, human tables, reports, and frontend snapshot packaging.
-
-Required primary artifacts:
+Resolution evidence under `out/debt_resolution/<run_id>/` includes:
 
 ```text
 debt_open_items.csv
@@ -209,130 +93,84 @@ debt_resolution_timeline.csv
 debt_status_reconciliation.csv
 ```
 
-Important `debt_open_items.csv` columns:
+Canonical downstream debt facts in the accounting run root include:
 
 ```text
-debt_id
-source_tx_id
-opened_at
-debtor
-creditor
-currency
-item_type
-original_amount
-open_amount
-detalle
-lugar
-issuer
-ledger_status
-engine_status
-closed_at
+monthly_debt_position.csv
+monthly_debt_position_qa.csv
+monthly_debt_activity.csv
+monthly_debt_activity_qa.csv
 ```
 
-Validation expectations:
+`monthly_debt_position` is stock authority. `monthly_debt_activity` is additive movement authority. Annual debt stock selects the latest valid closing position; it is not a sum of monthly positions. Invalid or incomplete position grain fails closed under the debt position authority.
 
-- `opened_at` parses as a date.
-- Parties, currency, and item type are non-empty.
-- Amounts parse as numeric.
-- `engine_status` is explicit.
-- Reconciliation output is inspected when ledger status and engine status diverge.
+## Metric frontier
 
-## `debt_balance_views`
+Producer: `accounting.metrics.frontier`.
 
-Producer: `accounting.debt.balance_views`.
-
-Consumers: metrics and human reports.
-
-Required artifacts:
+Primary outputs:
 
 ```text
-debt_balance_daily.csv
-debt_balance_monthly.csv
-debt_balance_quarterly.csv
-debt_balance_yearly.csv
+metric_contract_frontier.csv
+frontend_metric_series.csv
+metrics_frontier_qa.csv
+frontier_source_qa.csv
 ```
 
-Validation expectations:
+The frontier consumes only the governed monthly semantic/cash/debt artifacts. It does not load a generic metric registry or `metric_values.csv` compatibility universe.
 
-- Inputs come from `debt_open_items.csv` or an equivalent resolved debt contract.
-- Period/date fields parse cleanly.
-- Open balances remain numeric and currency-aware.
+Expected checks include:
 
-## `human_table_specs`
+- current metric IDs are present or explicitly unavailable;
+- all money rows carry native `Currency`;
+- only canonical frontier sources are used;
+- no legacy-only series are injected;
+- validated cash has no inferred/internal fallback;
+- FX metrics remain explicit treasury facts.
 
-Producer: `accounting.human.tables`.
+## Annual dashboard
 
-Consumers: current human document factory and future front report factory.
+Producer: `accounting.metrics.annual`.
 
-Expected structure:
+Primary outputs:
 
 ```text
-slug
-title
-builder_key
-group
-notes
-enabled_by_default
+annual_balance_dashboard_metrics.csv
+annual_balance_dashboard_contract.csv
+annual_balance_dashboard_qa.csv
+annual_flow_membership.csv
 ```
 
-Validation expectations:
+Flows aggregate monthly governed facts by year and native currency. Stocks select governed closing positions. Ratios are computed from annual aggregates rather than averaged monthly ratios unless an explicit contract says otherwise.
 
-- Every generated table has a corresponding spec.
-- Empty tables are hidden, marked partial, or included with an explicit note.
-- Report factories do not invent new accounting semantics outside table builders/contracts.
-- Table slugs remain stable because report blocks depend on them.
+The annual dashboard exposes current operating, property OPEX, funding/support, distribution, coverage, validated cash, debt stock/activity, data-quality and treasury FX families. Historical mixed metrics such as funding-inclusive `IS.INCOME.TOTAL` are not targets for parity.
 
-## `human_balance_report`
-
-Producer: `accounting.human.document`.
-
-Consumers: humans and `accounting.publish.latest`.
-
-Required representative artifacts:
-
-```text
-balance_humano_v2.html
-story_manifest.json
-report.css
-```
-
-Validation expectations:
-
-- The report is built from metric, debt, drilldown, and human-table contracts.
-- The story manifest identifies report items and provenance.
-- Missing/partial upstream data is visible rather than silently hidden.
-
-## `frontend_snapshot_manifest`
+## Publication contract
 
 Producer: `accounting.publish.latest`.
 
-Consumer: accounting viewer/static frontend.
+The public bundle is a packaging boundary, not a calculation layer. Current classes are:
 
-Required representative location:
+- `public_contract` — explicit frontend contracts;
+- `canonical_dashboard` — governed/report-safe facts;
+- `internal_diagnostic` — internal evidence and QA;
+- `unsafe_for_frontend` — evidence that must not be displayed as dashboard fact.
 
-```text
-public/accounting/latest/manifest.json
-```
+Retired generic metric statements are not published. Release QA checks that they remain absent.
 
-Expected v1 manifest fields include:
+## Professional presentation / drilldowns
 
-```text
-schema_name
-built_at
-source_run_id
-status
-source_paths
-files
-metrics
-debt
-reports
-```
+Professional tables and linked drilldowns are downstream projections of governed facts. They may format, select and explain; they may not silently decide accounting membership.
 
-Compatibility fields such as `surface_id`, `published_at_utc`, `publish_mode`, `run_id`, `as_of_date`, `months`, `include_statuses`, `report`, and `navigation` may also be present for older consumers.
+Required invariants when a backend change touches their source families:
 
-Governance expectations:
+- displayed value reconciles to drilldown membership;
+- explicit currency and Box grain are preserved;
+- FX cells use explicit measure/grain authority;
+- validated cash shows the selected validated population and does not add inferred/internal evidence;
+- debt stock and debt activity remain distinct;
+- unsupported or ambiguous rows fail closed rather than defaulting to another measure.
 
-- Snapshot exposes only frontend-safe artifacts.
-- Snapshot does not expose credentials or private local source paths.
-- Snapshot contains enough provenance to trace back to the source run.
-- Frontend reads this snapshot instead of arbitrary producer internals.
+## Compatibility rule
+
+Historical audits and old file names may remain in repository documentation as evidence of migration history. They do not create a current runtime contract. A removed convenience output should only be recreated if a real consumer needs it and the projection is best owned at the report layer; it is not a reason to restore a generic backend views or metric engine.
