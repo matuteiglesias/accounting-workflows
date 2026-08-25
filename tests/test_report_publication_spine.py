@@ -123,6 +123,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
         "treasury_accountability",
     ]
     assert all(row["pdf"].endswith("report.pdf") for row in catalog["reports"])
+    assert all(row["manifest"] is None for row in catalog["reports"])
 
     annual_manifest = json.loads(outputs["annual_manifest"].read_text(encoding="utf-8"))
     assert annual_manifest["source_run_id"] == run_id
@@ -135,12 +136,31 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert Path(outputs["annual_pdf"]).read_bytes().startswith(b"%PDF-")
 
 
-def test_report_bundle_rejects_mixed_run_inputs(tmp_path: Path) -> None:
+def test_report_bundle_rejects_mixed_run_directories(tmp_path: Path) -> None:
     run_root = tmp_path / "out" / "run" / "accounting" / "run_A"
     metrics_dir = tmp_path / "out" / "metrics" / "run_B"
     run_root.mkdir(parents=True)
     metrics_dir.mkdir(parents=True)
     with pytest.raises(ValueError, match="mix accounting runs"):
+        build_report_bundle(
+            run_root=run_root,
+            metrics_dir=metrics_dir,
+            out_dir=tmp_path / "reports",
+            scope_tag="FBPM",
+            require_pdf=False,
+        )
+
+
+def test_report_bundle_rejects_metrics_with_wrong_embedded_run_id(tmp_path: Path) -> None:
+    run_id = "20260825T190000Z_FBPM"
+    run_root = tmp_path / "out" / "run" / "accounting" / run_id
+    metrics_dir = tmp_path / "out" / "metrics" / run_id
+    _write_sources(run_root, metrics_dir)
+    metrics = pd.read_csv(metrics_dir / "annual_balance_dashboard_metrics.csv")
+    metrics["run_id"] = "different_run"
+    metrics.to_csv(metrics_dir / "annual_balance_dashboard_metrics.csv", index=False)
+
+    with pytest.raises(ValueError, match="run_id does not match"):
         build_report_bundle(
             run_root=run_root,
             metrics_dir=metrics_dir,
@@ -166,7 +186,7 @@ def test_pdf_adapter_accepts_explicit_fake_browser(tmp_path: Path) -> None:
     assert pdf.read_bytes().startswith(b"%PDF-")
 
 
-def test_report_publication_copies_only_document_surface(tmp_path: Path) -> None:
+def test_report_publication_copies_only_catalog_html_and_pdf(tmp_path: Path) -> None:
     project = tmp_path
     reports = project / "out" / "reports" / "run_FBPM"
     annual = reports / "annual_management"
@@ -195,7 +215,7 @@ def test_report_publication_copies_only_document_surface(tmp_path: Path) -> None
                 "sort_order": 10,
                 "html": "annual_management/report.html",
                 "pdf": "annual_management/report.pdf",
-                "manifest": "annual_management/report_manifest.json",
+                "manifest": None,
             },
             {
                 "report_id": "treasury_accountability",
@@ -205,7 +225,7 @@ def test_report_publication_copies_only_document_surface(tmp_path: Path) -> None
                 "sort_order": 20,
                 "html": "treasury_accountability/report.html",
                 "pdf": "treasury_accountability/report.pdf",
-                "manifest": "treasury_accountability/report_manifest.json",
+                "manifest": None,
             },
         ],
     }
@@ -222,13 +242,12 @@ def test_report_publication_copies_only_document_surface(tmp_path: Path) -> None
     assert published == [
         "annual_management/report.html",
         "annual_management/report.pdf",
-        "annual_management/report_manifest.json",
         "report_catalog.json",
         "treasury_accountability/report.html",
         "treasury_accountability/report.pdf",
-        "treasury_accountability/report_manifest.json",
     ]
     assert not any(path.endswith(".csv") for path in published)
+    assert not any(path.endswith("report_manifest.json") for path in published)
 
 
 def test_latest_preflight_leaves_existing_pointer_unchanged_when_later_target_missing(tmp_path: Path) -> None:
@@ -245,3 +264,21 @@ def test_latest_preflight_leaves_existing_pointer_unchanged_when_later_target_mi
 
     assert (base_a / "latest_FBPM").resolve() == base_a / "old"
     assert (base_b / "latest_FBPM").resolve() == base_b / "old"
+
+
+def test_makefile_wires_full_reports_without_expanding_focused_metric_latest() -> None:
+    makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
+    assert "RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_RUN_ID)" in makefile
+    assert ".PHONY: run-reports reports-from-run _run_reports_action" in makefile
+    assert "publish-reports:" in makefile
+    assert (
+        "run-full: run-debt-views run-reports _update_latest publish-latest "
+        "publish-reports release-check"
+    ) in makefile
+
+    full_latest = makefile.split("_update_latest:\n", 1)[1].split("\n\n_update_latest_core:", 1)[0]
+    assert '--base "$(RUN_REPORTS_BASE)"' in full_latest
+
+    core_latest = makefile.split("_update_latest_core:\n", 1)[1].split("\n\nupdate-latest-light:", 1)[0]
+    assert '--base "$(RUN_REPORTS_BASE)"' not in core_latest
+    assert "run-metrics-live: run-debt-views _run_metrics_action _update_latest_core" in makefile
