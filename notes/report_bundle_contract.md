@@ -22,7 +22,7 @@ governed marts / debt / treasury / annual metrics
 
 HTML is the canonical presentation render. PDF must be derived from that same HTML rather than rendered independently from accounting CSVs.
 
-The viewer boundary is document discovery and delivery. Accounting CSV schemas must not become a viewer runtime API.
+The viewer boundary is document discovery and delivery. Accounting CSV schemas and internal report provenance must not become viewer runtime APIs.
 
 ## Current reports
 
@@ -34,7 +34,7 @@ Inputs:
 - `annual_balance_dashboard_contract.csv`
 - `annual_balance_dashboard_qa.csv`
 
-Outputs:
+Outputs under the exact-run report bundle:
 
 - `annual_management/report.html`
 - `annual_management/report.pdf`
@@ -50,7 +50,7 @@ Inputs:
 - `monthly_cash_accountability.csv`
 - `monthly_cash_accountability_qa.csv`
 
-Outputs:
+Outputs under the exact-run report bundle:
 
 - `treasury_accountability/report.html`
 - `treasury_accountability/report.pdf`
@@ -61,8 +61,8 @@ The renderer presents the governed zero-origin cash control and physical movemen
 
 ## Schemas
 
-- `accounting_report_manifest.v1`: provenance for one rendered report, including source run, scope, as-of date, logical source fingerprints, output fingerprints, and validation status.
-- `accounting_report_catalog.v1`: document-discovery metadata only. It contains report IDs, titles, descriptions, period labels, ordering, and relative HTML/PDF/manifest paths. It contains no metric IDs or accounting values.
+- `accounting_report_manifest.v1`: internal provenance for one rendered report, including source run, scope, as-of date, logical source fingerprints, output fingerprints, and validation status.
+- `accounting_report_catalog.v1`: downstream document-discovery metadata only. It contains report IDs, titles, descriptions, period labels, ordering, and relative HTML/PDF paths. It contains no metric IDs or accounting values.
 
 ## Generated paths
 
@@ -91,10 +91,16 @@ Machine accounting artifacts and finished human documents are separate publicati
 
 ```text
 public/accounting/latest_<SCOPE>/   # governed machine artifact handoff
-public/reports/latest_<SCOPE>/      # finished report documents
+public/reports/latest_<SCOPE>/      # viewer-facing finished documents
 ```
 
-`public/reports` contains only `report_catalog.json` plus catalog-referenced HTML, PDF, and report manifests. Source accounting CSVs, report trace CSVs, caches, and confidential raw evidence must not be copied into the viewer-facing document surface.
+`public/reports` contains only:
+
+- `report_catalog.json`;
+- catalog-referenced `report.html` documents;
+- catalog-referenced `report.pdf` documents.
+
+Source accounting CSVs, report trace/validation CSVs, caches, raw evidence, and internal `report_manifest.json` provenance stay outside the viewer-facing publication surface.
 
 Publication requires a PDF for every cataloged report. The downstream viewer should consume `report_catalog.json` and the finished documents only.
 
@@ -127,10 +133,11 @@ Historical cutoff runs remain protected by the existing latest guard: building a
 - report paths are relative and cannot escape their bundle root;
 - report IDs are unique inside a catalog;
 - report inputs for one bundle must share one exact run identity;
-- reports preserve source run/scope/as-of provenance;
+- embedded annual metric `run_id` provenance must match the exact-run directory;
+- reports preserve source run/scope/as-of provenance internally;
 - unavailable values remain distinguishable from zero;
 - ARS and USD remain separate native-currency books unless a separately governed valuation artifact is explicitly selected;
 - report generation does not mutate governed source artifacts or the machine `public/accounting` publication contract;
 - PDF is derived from the rendered HTML;
-- viewer-facing report publication contains no accounting CSVs;
+- viewer-facing report publication contains no accounting CSVs or internal provenance manifests;
 - latest pointers are not mutated until all requested producer targets exist.
