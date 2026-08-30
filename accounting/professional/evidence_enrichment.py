@@ -19,7 +19,7 @@ from accounting.evidence.relations import (
     load_transaction_evidence,
     prepare_evidence_html_frame,
 )
-from accounting.professional.drilldown import INDEX_FILENAME, MANIFEST_FILENAME
+from accounting.professional.drilldown_legacy import INDEX_FILENAME, MANIFEST_FILENAME
 
 
 _SECTION_START = "<!-- acct-transaction-evidence:start -->"
