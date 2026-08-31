@@ -18,11 +18,13 @@ authority:
   - accounting business-rule implementation
   does_not_own:
   - raw document intake
+  - document parsing or OCR
   - viewer-specific navigation or presentation
   - public documentation authority
 interfaces:
   consumes:
   - artifact:acct.document-candidate@1
+  - artifact:acct.transaction-evidence@1
   produces:
   - artifact:acct.report-bundle@1
   - artifact:acct.report-catalog@1
@@ -50,6 +52,7 @@ verification:
   command: make validate
   unknowns:
   - full live execution depends on local accounting inputs and an available Chromium/Chrome binary for PDF rendering
+  - transaction evidence is optional enrichment and does not alter ledger/accounting calculations
   - overlapping same-scope runs remain unsupported until concurrency issue #44 is resolved
   - viewer deployment privacy/access control is governed downstream and is not inferred from repository visibility
 maintenance:
