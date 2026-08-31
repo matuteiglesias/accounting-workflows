@@ -14,6 +14,7 @@ from accounting.evidence.relations import (
 from accounting.professional.drilldown import build_professional_flow_drilldowns
 from accounting.professional.evidence_enrichment import (
     enrich_professional_drilldowns_with_evidence,
+    evidence_coverage,
 )
 
 
@@ -70,16 +71,21 @@ def test_transaction_evidence_is_optional_and_supports_pdf_and_image() -> None:
     assert index.links_for_tx("tx-approved")[0].short_label == "PDF"
     assert index.has_candidate_for_tx("tx-review") is True
 
-    frame, replacements = prepare_evidence_html_frame(
-        pd.DataFrame(
-            [
-                {"tx_id": "tx-approved", "amount": 10},
-                {"tx_id": "tx-review", "amount": 20},
-                {"tx_id": "tx-missing", "amount": 30},
-            ]
-        ),
-        index,
+    source = pd.DataFrame(
+        [
+            {"tx_id": "tx-approved", "amount": 10},
+            {"tx_id": "tx-review", "amount": 20},
+            {"tx_id": "tx-missing", "amount": 30},
+        ]
     )
+    coverage = evidence_coverage(source, index)
+    assert coverage.transaction_rows == 3
+    assert coverage.linked_rows == 1
+    assert coverage.review_rows == 1
+    assert coverage.missing_rows == 1
+    assert coverage.coverage_pct == 33.3
+
+    frame, replacements = prepare_evidence_html_frame(source, index)
     assert frame.columns[-1] == "Evidence"
     rendered = frame.to_html(index=False, escape=True)
     for token, replacement in replacements.items():
@@ -97,7 +103,6 @@ def test_transaction_evidence_rejects_unsafe_or_partial_contracts(tmp_path: Path
         TransactionEvidenceIndex.from_frames(bad_documents, _relations())
 
     run = tmp_path / "run"
-    _documents().to_csv(run / "evidence_documents.csv") if False else None
     run.mkdir(parents=True)
     _documents().to_csv(run / "evidence_documents.csv", index=False)
     pack = tmp_path / "pack"
@@ -105,7 +110,7 @@ def test_transaction_evidence_rejects_unsafe_or_partial_contracts(tmp_path: Path
         enrich_professional_drilldowns_with_evidence(pack_dir=pack, run_root=run)
 
 
-def test_professional_drilldown_can_be_enriched_without_changing_accounting_rows(
+def test_professional_tax_drilldown_exposes_link_review_missing_and_coverage_without_changing_accounting_rows(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path
@@ -123,11 +128,11 @@ def test_professional_drilldown_can_be_enriched_without_changing_accounting_rows
                 "semantic_bucket": "property_opex",
                 "semantic_subbucket": "taxes",
                 "amount_in": 0,
-                "amount_out": 100,
-                "net_amount": -100,
-                "amount_abs": 100,
-                "n_tx": 1,
-                "source_tx_ids_sample": "tx-approved",
+                "amount_out": 600,
+                "net_amount": -600,
+                "amount_abs": 600,
+                "n_tx": 3,
+                "source_tx_ids_sample": "tx-approved;tx-review;tx-missing",
             }
         ],
     )
@@ -142,7 +147,25 @@ def test_professional_drilldown_can_be_enriched_without_changing_accounting_rows
                 "Box": "Property Management",
                 "semantic_bucket": "property_opex",
                 "semantic_subbucket": "taxes",
-            }
+            },
+            {
+                "tx_id": "tx-review",
+                "period": "2026-01",
+                "Currency": "ARS",
+                "amount": 200,
+                "Box": "Property Management",
+                "semantic_bucket": "property_opex",
+                "semantic_subbucket": "taxes",
+            },
+            {
+                "tx_id": "tx-missing",
+                "period": "2026-01",
+                "Currency": "ARS",
+                "amount": 300,
+                "Box": "Property Management",
+                "semantic_bucket": "property_opex",
+                "semantic_subbucket": "taxes",
+            },
         ],
     )
     _write(
@@ -154,12 +177,12 @@ def test_professional_drilldown_can_be_enriched_without_changing_accounting_rows
                 "Box": "Property Management",
                 "semantic_bucket": "property_opex",
                 "semantic_subbucket": "taxes",
-                "2026-01": 100,
+                "2026-01": 600,
             }
         ],
     )
-    _documents().iloc[[0]].to_csv(run / "evidence_documents.csv", index=False)
-    _relations().iloc[[0]].to_csv(run / "transaction_evidence.csv", index=False)
+    _documents().to_csv(run / "evidence_documents.csv", index=False)
+    _relations().to_csv(run / "transaction_evidence.csv", index=False)
 
     paths = build_professional_flow_drilldowns(repo, pack, run)
     index_before = pd.read_csv(paths["index"])
@@ -173,21 +196,34 @@ def test_professional_drilldown_can_be_enriched_without_changing_accounting_rows
     )
     assert result["evidence_loaded"] is True
     assert result["approved_relations"] == 1
-    assert result["linked_transaction_rows"] >= 1
+    assert result["transaction_rows"] == 3
+    assert result["linked_transaction_rows"] == 1
+    assert result["review_transaction_rows"] == 1
+    assert result["missing_transaction_rows"] == 1
+    assert result["coverage_pct"] == 33.3
 
-    # Evidence projection is passive: numeric/detail CSV accounting evidence is untouched.
+    # Evidence is a passive projection over governed accounting evidence.
     assert detail_csv.read_bytes() == detail_before
     index_after = pd.read_csv(paths["index"])
     pd.testing.assert_frame_equal(index_after, index_before)
 
     detail_html = (pack / row["detail_html_relpath"]).read_text(encoding="utf-8")
     assert "Transaction evidence" in detail_html
+    assert "1/3</strong> transaction rows linked (33.3%)" in detail_html
+    assert "Review: 1. Missing: 1." in detail_html
     assert "evidence/synthetic-payment-proof.pdf" in detail_html
     assert ">PDF</a>" in detail_html
+    assert ">Evidence<" in detail_html
+    assert "Review" in detail_html
+    assert "—" in detail_html
 
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
-    assert manifest["transaction_evidence"]["approved_relations"] == 1
-    assert manifest["transaction_evidence"]["accounting_authority_changed"] is False
+    evidence_manifest = manifest["transaction_evidence"]
+    assert evidence_manifest["approved_relations"] == 1
+    assert evidence_manifest["coverage_pct"] == 33.3
+    assert evidence_manifest["accounting_authority_changed"] is False
+    assert evidence_manifest["private_evidence_publication_implied"] is False
+    assert "not transaction validity" in evidence_manifest["coverage_semantics"]
 
     # Rerun is idempotent: the bounded evidence section is replaced, not duplicated.
     enrich_professional_drilldowns_with_evidence(pack_dir=pack, run_root=run)
@@ -203,7 +239,11 @@ def test_missing_evidence_sidecar_is_a_noop(tmp_path: Path) -> None:
     assert result == {
         "evidence_loaded": False,
         "enriched_pages": 0,
+        "transaction_rows": 0,
         "linked_transaction_rows": 0,
+        "review_transaction_rows": 0,
+        "missing_transaction_rows": 0,
+        "coverage_pct": 0.0,
         "documents": 0,
         "relations": 0,
         "approved_relations": 0,
