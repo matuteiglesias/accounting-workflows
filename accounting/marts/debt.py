@@ -11,6 +11,7 @@ from accounting.debt.position_authority import (
     selected_debt_position_rows,
 )
 from accounting.debt.resolve import RULE_VERSION
+from accounting.cutoff import load_run_cutoff_if_present
 
 DEBT_POSITION_COLUMNS = [
     "period",
@@ -573,6 +574,12 @@ def _build_monthly_debt_activity(
             "severity": "error",
         },
         {
+            "check": "no_material_unexplained_adjustments",
+            "status": "pass" if activity_base["adjustments"].abs().le(0.01).all() else "fail",
+            "detail": f"material_rows={int(activity_base['adjustments'].abs().gt(0.01).sum())}; max_abs={float(activity_base['adjustments'].abs().max()) if not activity_base.empty else 0.0}",
+            "severity": "error",
+        },
+        {
             "check": "no_cross_currency_debt_activity_sum",
             "status": "pass",
             "detail": "monthly_debt_activity remains debtor/creditor/currency grained and emits no ARS/USD aggregate",
@@ -589,6 +596,52 @@ def _empty_debt_position() -> pd.DataFrame:
 
 def _qa(rows: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=DEBT_QA_COLUMNS)
+
+
+def _append_cost_gap_debt_exclusion_qa(*, debt_dir: Path, write_dir: Path) -> None:
+    """Cross-check the semantic non-debt projection without owning it."""
+    gap_path = write_dir / "cost_allocation_gaps.csv"
+    qa_path = write_dir / "cost_allocation_gaps_qa.csv"
+    if not gap_path.exists() or not qa_path.exists():
+        return
+    gaps = pd.read_csv(gap_path)
+    gap_ids = set(gaps.get("source_tx_id", pd.Series(dtype=str)).astype(str))
+    checks: list[tuple[str, bool, str]] = []
+    open_items_path = debt_dir / "debt_open_items.csv"
+    open_overlap: set[str] = set()
+    if open_items_path.exists():
+        items = pd.read_csv(open_items_path)
+        open_overlap = gap_ids & set(items.get("source_tx_id", pd.Series(dtype=str)).astype(str))
+    checks.append(("zero_overlap_with_debt_open_items", not open_overlap, f"overlap={len(open_overlap)}"))
+
+    def pair_overlap(path: Path) -> int:
+        if not path.exists() or gaps.empty:
+            return 0
+        frame = pd.read_csv(path)
+        if not {"debtor", "creditor", "Currency"}.issubset(frame.columns):
+            return 0
+        mask = (
+            frame["debtor"].astype(str).str.casefold().eq("costos")
+            & frame["creditor"].astype(str).str.casefold().eq("pm")
+            & frame["Currency"].astype(str).str.upper().isin(set(gaps["Currency"].astype(str).str.upper()))
+        )
+        return int(mask.sum())
+
+    position_overlap = pair_overlap(write_dir / "monthly_debt_position.csv")
+    activity_overlap = pair_overlap(write_dir / "monthly_debt_activity.csv")
+    checks.append(("zero_overlap_with_debt_position_activity", position_overlap == 0 and activity_overlap == 0, f"position_rows={position_overlap}; activity_rows={activity_overlap}"))
+    allocation_path = debt_dir / "debt_allocations.csv"
+    allocation_overlap: set[str] = set()
+    if allocation_path.exists():
+        allocations = pd.read_csv(allocation_path)
+        allocation_overlap = gap_ids & set(allocations.get("target_source_tx_id", pd.Series(dtype=str)).astype(str))
+    checks.append(("zero_repayment_allocations_targeting_gaps", not allocation_overlap, f"overlap={len(allocation_overlap)}"))
+    qa = pd.read_csv(qa_path)
+    extra = pd.DataFrame([
+        {"check": name, "status": "pass" if ok else "fail", "detail": detail, "severity": "error"}
+        for name, ok, detail in checks
+    ])
+    pd.concat([qa.loc[~qa["check"].isin(extra["check"])], extra], ignore_index=True).to_csv(qa_path, index=False)
 
 
 def _period_end(period: pd.Series) -> pd.Series:
@@ -719,6 +772,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     counts = pd.DataFrame(
         columns=["period", "debtor", "creditor", "Currency", "n_open_items"]
     )
+    items_for_qa = pd.DataFrame()
     if open_items_path.exists():
         items = pd.read_csv(open_items_path)
         item_required = ["opened_at", "debtor", "creditor", "currency"]
@@ -728,6 +782,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             items = items[items["opened_at"].notna()].copy()
             items["period"] = items["opened_at"].dt.to_period("M").astype(str)
             items["Currency"] = items["currency"].astype(str).str.upper()
+            items_for_qa = items.copy()
             counts = (
                 items.groupby(
                     ["period", "debtor", "creditor", "Currency"], dropna=False
@@ -790,6 +845,34 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
         if not out.empty
         else 0.0
     )
+    cutoff = load_run_cutoff_if_present(write_dir)
+    selected_available = unique.loc[unique["position_status"].astype(str).eq("available")].copy()
+    selected_dates = pd.to_datetime(selected_available["as_of_date"], errors="coerce")
+    expected_dates = pd.to_datetime(selected_available["period_end"], errors="coerce")
+    if cutoff is not None:
+        cutoff_ts = pd.Timestamp(cutoff.date)
+        expected_dates = expected_dates.where(expected_dates.le(cutoff_ts), cutoff_ts)
+    close_dates_ok = selected_dates.eq(expected_dates).all()
+    zero_stock_mismatches = 0
+    if not items_for_qa.empty:
+        closed_source = (
+            items_for_qa["closed_at"]
+            if "closed_at" in items_for_qa.columns
+            else pd.Series(pd.NaT, index=items_for_qa.index)
+        )
+        closed = pd.to_datetime(closed_source, errors="coerce")
+        opened = pd.to_datetime(items_for_qa["opened_at"], errors="coerce")
+        for _, selected in selected_available.iterrows():
+            as_of = pd.Timestamp(selected["as_of_date"])
+            pair = (
+                items_for_qa["debtor"].astype(str).eq(str(selected["debtor"]))
+                & items_for_qa["creditor"].astype(str).eq(str(selected["creditor"]))
+                & items_for_qa["Currency"].astype(str).eq(str(selected["Currency"]))
+            )
+            active = pair & opened.le(as_of) & (closed.isna() | closed.gt(as_of))
+            expected_open = pd.to_numeric(items_for_qa.loc[active, "original_amount"], errors="coerce").fillna(0.0).sum()
+            if abs(float(selected["open_total"]) - float(expected_open)) > 0.01:
+                zero_stock_mismatches += 1
     qa_rows = [
         {
             "check": "monthly_debt_position_exists",
@@ -873,6 +956,18 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
             "severity": "error",
         },
         {
+            "check": "selected_as_of_is_governed_month_close",
+            "status": "pass" if close_dates_ok else "fail",
+            "detail": f"rows={len(selected_available)}; mismatches={int((~selected_dates.eq(expected_dates)).sum())}",
+            "severity": "error",
+        },
+        {
+            "check": "reported_position_equals_open_obligations_at_as_of",
+            "status": "pass" if zero_stock_mismatches == 0 else "fail",
+            "detail": f"rows={len(selected_available)}; mismatches={zero_stock_mismatches}; zero-open positions remain explicit zero",
+            "severity": "error",
+        },
+        {
             "check": "invalid_as_of_fails_closed",
             "status": (
                 "pass"
@@ -921,6 +1016,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     activity_paths = _build_monthly_debt_activity(
         debt_dir=debt_dir, write_dir=write_dir, position=out
     )
+    _append_cost_gap_debt_exclusion_qa(debt_dir=debt_dir, write_dir=write_dir)
     return {
         "monthly_debt_position": out_path,
         "monthly_debt_position_qa": qa_path,

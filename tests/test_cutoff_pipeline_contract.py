@@ -86,6 +86,45 @@ def test_debt_open_stock_is_carried_through_cutoff_without_new_events(tmp_path):
     assert july["open_total"].max() == 100.0
 
 
+def test_debt_stock_emits_zero_after_close_and_supports_reopening():
+    items = pd.DataFrame([
+        {"opened_at": "2026-08-10", "closed_at": "2026-08-20", "debtor": "PM", "creditor": "Primos", "currency": "USD", "item_type": "Prestamo", "original_amount": 897},
+        {"opened_at": "2026-08-10", "closed_at": "2026-08-18", "debtor": "PM", "creditor": "Primos", "currency": "USD", "item_type": "Interes", "original_amount": 3},
+        {"opened_at": "2026-09-05", "closed_at": "", "debtor": "PM", "creditor": "Primos", "currency": "USD", "item_type": "Prestamo", "original_amount": 50},
+    ])
+    daily = build_debt_balance_daily(items, start_date="2026-08-01", end_date="2026-09-30")
+    assert daily["as_of_date"].min() == "2026-08-10"
+    aug19 = daily[daily["as_of_date"].eq("2026-08-19")]
+    assert set(aug19.loc[aug19["item_type"].eq("Interes"), "open_amount"]) == {0.0}
+    assert set(aug19["open_total"]) == {897.0}
+    aug20 = daily[daily["as_of_date"].eq("2026-08-20")]
+    assert set(aug20["open_amount"]) == {0.0}
+    assert set(aug20["open_total"]) == {0.0}
+    assert set(daily.loc[daily["as_of_date"].eq("2026-08-31"), "open_total"]) == {0.0}
+    assert set(daily.loc[daily["as_of_date"].eq("2026-09-04"), "open_total"]) == {0.0}
+    assert set(daily.loc[daily["as_of_date"].eq("2026-09-05"), "open_total"]) == {50.0}
+
+    monthly = _last_snapshot_by_period(daily, "M", "M")
+    august = monthly[monthly["period"].eq("2026-08")]
+    assert set(august["as_of_date"].dt.date.astype(str)) == {"2026-08-31"}
+    assert set(august["open_total"]) == {0.0}
+    yearly = _last_snapshot_by_period(daily, "Y", "Y")
+    assert set(yearly["as_of_date"].dt.date.astype(str)) == {"2026-09-30"}
+    assert set(yearly["open_total"]) == {50.0}
+
+
+def test_fully_closed_relation_defaults_to_month_end_zero_without_explicit_cutoff():
+    items = pd.DataFrame([
+        {"opened_at": "2026-08-19", "closed_at": "2026-08-20", "debtor": "PM", "creditor": "Primos", "currency": "USD", "item_type": "Prestamo", "original_amount": 897},
+    ])
+    daily = build_debt_balance_daily(items)
+    assert daily["as_of_date"].max() == "2026-08-31"
+    assert daily.loc[daily["as_of_date"].eq("2026-08-31"), "open_total"].iloc[0] == 0.0
+    yearly = _last_snapshot_by_period(daily, "Y", "Y")
+    assert yearly.iloc[0]["as_of_date"].date().isoformat() == "2026-08-31"
+    assert yearly.iloc[0]["open_total"] == 0.0
+
+
 def _validated_cash_row(as_of_date: str) -> dict[str, object]:
     period = as_of_date[:7]
     period_end = pd.Period(period, freq="M").end_time.date().isoformat()

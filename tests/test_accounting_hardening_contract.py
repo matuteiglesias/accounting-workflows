@@ -15,7 +15,7 @@ from accounting.marts.accountability import (
     build_household_monthly_control,
     cycle_bounds,
 )
-from accounting.marts.semantic import build_semantic_outputs
+from accounting.marts.semantic import build_cost_allocation_gap_outputs, build_semantic_outputs
 from accounting.stage_d.materialize import _analytical_ledger
 
 
@@ -51,6 +51,22 @@ def test_costos_pm_is_gap_not_debt_or_cash(tmp_path: Path) -> None:
     assert treasury.iloc[0]["amount_in"] == 0
     debt_input = frame.assign(Lugar="", Issuer="")
     assert build_open_items(debt_input) == []
+
+
+def test_governed_cost_gap_projection_includes_open_but_excludes_x(tmp_path: Path) -> None:
+    frame = pd.DataFrame([
+        _ledger_row(tx_id="gap", payer="Costos", receiver="PM", Tipo="Prestamo", status="abierto", Box="Property Management", Currency="usd", Lugar="CABA", Detalle="Costo pendiente"),
+        _ledger_row(tx_id="gap-x", payer="Costos", receiver="PM", Tipo="Prestamo", status="X", Box="Property Management", Currency="USD"),
+    ])
+    paths = build_cost_allocation_gap_outputs(frame, tmp_path)
+    gaps = pd.read_csv(paths["cost_allocation_gaps"])
+    assert list(gaps["source_tx_id"]) == ["gap"]
+    assert gaps.iloc[0]["Currency"] == "USD"
+    assert gaps.iloc[0]["accounting_nature"] == "unresolved_cost_allocation"
+    assert gaps.iloc[0]["debt_effect"] == "none"
+    assert gaps.iloc[0]["economic_scope"] == "Property Management"
+    assert "legal_debtor" not in gaps.columns
+    assert pd.read_csv(paths["cost_allocation_gaps_qa"])["status"].eq("pass").all()
 
 
 def test_legacy_inferred_net_is_audit_only(tmp_path: Path) -> None:

@@ -669,6 +669,18 @@ def main() -> int:
         freq=freq,
         force=force_flag,
     )
+    all_status_path = out_dir / "ledger_canonical_all_status.csv"
+    if all_status_path.exists():
+        from accounting.marts.semantic import build_cost_allocation_gap_outputs
+
+        all_status = pd.read_csv(all_status_path, dtype=str)
+        gap_paths = build_cost_allocation_gap_outputs(all_status, out_dir)
+        for name, path in gap_paths.items():
+            result.setdefault("aggregates", {})[path.name] = {
+                "path": str(path),
+                "rows": len(pd.read_csv(path)),
+                "sha256": _safe_sha256(path),
+            }
     aggregate_rows = {k: v.get("rows") for k, v in result.get("aggregates", {}).items() if isinstance(v, dict) and "rows" in v}
 
     meta_dir = out_dir / "meta"

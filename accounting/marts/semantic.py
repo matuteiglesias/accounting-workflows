@@ -68,6 +68,11 @@ OPERATING_STATEMENT_COLUMNS = [
 ]
 OPERATING_STATEMENT_QA_COLUMNS = ["check", "status", "detail", "severity"]
 SEMANTIC_LEAKAGE_QA_COLUMNS = ["tx_id", "period", "Currency", "amount", "Box", "Lugar", "Flujo", "Tipo", "Detalle", "payer", "receiver", "semantic_bucket", "semantic_subbucket", "rule_id", "leakage_pattern", "severity", "recommended_bucket", "notes"]
+COST_ALLOCATION_GAP_COLUMNS = [
+    "source_tx_id", "Date", "period", "Currency", "amount", "Lugar",
+    "description", "status", "source_file", "source_row", "economic_scope",
+    "accounting_nature", "debt_effect", "allocation_status", "asserted_bearer",
+]
 
 
 def _norm(value: Any) -> str:
@@ -295,6 +300,61 @@ def _prepare_ledger(ledger: pd.DataFrame, freq: str = "M") -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
     return df
+
+
+def build_cost_allocation_gap_outputs(ledger_all_status: pd.DataFrame, out_dir: Path) -> Dict[str, Path]:
+    """Project unresolved PM cost allocation from semantic source evidence.
+
+    This is deliberately not a debt-resolver output.  X rows are retained in
+    the source ledger for provenance but are universally outside analysis.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df = _prepare_ledger(ledger_all_status, freq="M")
+    status_x = df["status"].astype(str).str.strip().str.casefold().eq("x")
+    classified = df.apply(_classify_row, axis=1, result_type="expand")
+    classified.columns = ["semantic_bucket", "semantic_subbucket", "rule_id", "confidence", "review_required", "classification_status", "warning"]
+    work = pd.concat([df, classified], axis=1)
+    members = work.loc[~status_x & work["semantic_bucket"].eq("cost_allocation_gap")].copy()
+    gaps = pd.DataFrame({
+        "source_tx_id": members["tx_id"],
+        "Date": members["Date"].dt.date.astype(str),
+        "period": members["period"],
+        "Currency": members["Currency"].astype(str).str.upper(),
+        "amount": members["amount"],
+        "Lugar": members["Lugar"],
+        "description": members["Detalle"],
+        "status": members["status"],
+        "source_file": members["source_file"],
+        "source_row": members["source_row"],
+        "economic_scope": "Property Management",
+        "accounting_nature": "unresolved_cost_allocation",
+        "debt_effect": "none",
+        "allocation_status": "unresolved",
+        "asserted_bearer": "",
+    }, columns=COST_ALLOCATION_GAP_COLUMNS)
+    gap_path = out_dir / "cost_allocation_gaps.csv"
+    qa_path = out_dir / "cost_allocation_gaps_qa.csv"
+    gaps.to_csv(gap_path, index=False)
+    source_members = work.loc[work["semantic_bucket"].eq("cost_allocation_gap") & ~status_x]
+    provenance_ok = gaps.empty or (
+        gaps["source_tx_id"].astype(str).str.strip().ne("").all()
+        and gaps["source_file"].astype(str).str.strip().ne("").all()
+        and gaps["source_row"].astype(str).str.strip().ne("").all()
+    )
+    checks = [
+        ("source_provenance_present", provenance_ok, f"rows={len(gaps)}"),
+        ("native_currency_present", gaps.empty or gaps["Currency"].astype(str).str.strip().ne("").all(), f"currencies={','.join(sorted(gaps['Currency'].astype(str).unique()))}"),
+        ("classified_source_membership_reconciles", len(gaps) == len(source_members) and abs(gaps["amount"].sum() - source_members["amount"].sum()) <= 0.01, f"rows={len(gaps)}; amount={gaps['amount'].sum()}"),
+        ("debt_effect_none", gaps.empty or gaps["debt_effect"].eq("none").all(), "semantic contract"),
+        ("no_status_x_membership", gaps.empty or ~gaps["status"].astype(str).str.strip().str.casefold().eq("x").any(), "status=X excluded before projection"),
+        ("no_inferred_legal_parties", "legal_debtor" not in gaps.columns and "legal_creditor" not in gaps.columns and (gaps.empty or gaps["asserted_bearer"].astype(str).str.strip().eq("").all()), "no debtor/creditor/bearer inferred"),
+    ]
+    pd.DataFrame([
+        {"check": name, "status": "pass" if ok else "fail", "detail": detail, "severity": "error"}
+        for name, ok, detail in checks
+    ], columns=OPERATING_STATEMENT_QA_COLUMNS).to_csv(qa_path, index=False)
+    return {"cost_allocation_gaps": gap_path, "cost_allocation_gaps_qa": qa_path}
 
 
 def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M") -> Dict[str, Path]:

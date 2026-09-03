@@ -67,12 +67,11 @@ def _date_span(df: pd.DataFrame, start_date: str | None, end_date: str | None) -
     if end_date:
         end = pd.to_datetime(end_date).normalize()
     else:
-        # If there are open debts, run through today-like max open horizon from data:
-        # use latest closed_at if all closed, else latest opened_at among still-open items
-        if df["closed_at"].isna().any():
-            end = max(df.loc[df["closed_at"].isna(), "opened_at"].max(), max_close if pd.notna(max_close) else pd.Timestamp.min)
-        else:
-            end = max_close
+        # In fixture/legacy use without a governed cutoff, complete the final
+        # observed month.  Otherwise a closure on (say) the 20th would leave a
+        # stale 19th snapshot as the apparent month close.
+        last_event = max(df["opened_at"].max(), max_close if pd.notna(max_close) else pd.Timestamp.min)
+        end = last_event.to_period("M").end_time.normalize()
 
     if pd.isna(end):
         end = start
@@ -97,6 +96,9 @@ def build_debt_balance_daily(
     rows: list[dict] = []
 
     for as_of_date in days:
+        known = df.loc[df["opened_at"] <= as_of_date].copy()
+        if known.empty:
+            continue
         active = df.loc[
             (df["opened_at"] <= as_of_date)
             & (
@@ -105,15 +107,19 @@ def build_debt_balance_daily(
             )
         ].copy()
 
-        if active.empty:
-            continue
-
-        grouped = (
+        active_grouped = (
             active.groupby(["debtor", "creditor", "currency", "item_type"], dropna=False)["original_amount"]
             .sum()
             .reset_index()
             .rename(columns={"original_amount": "open_amount"})
         )
+        known_keys = known[["debtor", "creditor", "currency", "item_type"]].drop_duplicates()
+        grouped = known_keys.merge(
+            active_grouped,
+            on=["debtor", "creditor", "currency", "item_type"],
+            how="left",
+        )
+        grouped["open_amount"] = pd.to_numeric(grouped["open_amount"], errors="coerce").fillna(0.0)
 
         for _, row in grouped.iterrows():
             rows.append(
