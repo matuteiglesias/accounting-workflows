@@ -15,7 +15,7 @@ def _sources(root: Path) -> dict[str, Path]:
     activity=[]
     for kind, values in [("opening_balance",{}),("new_claim",{"new_principal":150}),("interest_accrual",{"interest_accrued":10}),("repayment",{"repayments":60}),("adjustment",{"adjustments":0}),("closing_balance",{}),("net_change",{})]:
         activity.append({"period":"2026-08","period_end":"2026-08-31","Currency":"USD","debtor":"A","creditor":"PM","activity_type":kind,"new_principal":0,"interest_accrued":0,"repayments":0,"adjustments":0,"opening_total":0,"closing_total":100,"net_change":100,**values})
-    detail=pd.DataFrame([{"period":"2026-08","repayment_tx_id":"r1","repayment_date":"2026-08-20","debtor":"A","creditor":"PM","Currency":"USD","repayment_amount":60,"allocated_amount":60,"leftover_amount":0,"allocation_status":"resolved","target_debt_id":"d1","target_source_tx_id":"s1","target_opened_at":"2026-08-01","target_detail":"Obligación","balance_before":60,"balance_after":0}])
+    detail=pd.DataFrame([{"period":"2026-08","repayment_tx_id":"r1","repayment_date":"2026-08-20","debtor":"A","creditor":"PM","Currency":"USD","repayment_amount":60,"allocated_amount":60,"leftover_amount":0,"allocation_status":"resolved","target_debt_id":"d1","target_source_tx_id":"s1","target_opened_at":"2026-08-01","target_original_amount":60,"target_detail":"Obligación","target_lugar":pd.NA,"target_item_type":"Prestamo","balance_before":60,"balance_after":0}])
     gaps=pd.DataFrame([{"source_tx_id":"g1","Date":"2023-01-01","period":"2023-01","Currency":"USD","amount":20,"Lugar":"CABA","description":"Costo","status":"abierto","economic_scope":"Property Management","accounting_nature":"unresolved_cost_allocation","debt_effect":"none","allocation_status":"unresolved","asserted_bearer":""}])
     paths={}
     for name, frame in [("position",position),("activity",pd.DataFrame(activity)),("detail",detail),("gaps",gaps)]:
@@ -31,7 +31,9 @@ def test_debt_report_renders_governed_sections_and_details(tmp_path: Path) -> No
     outputs=render_report(position_path=p["position"],position_qa_path=p["position_qa"],activity_path=p["activity"],activity_qa_path=p["activity_qa"],repayment_detail_path=p["detail"],gaps_path=p["gaps"],gaps_qa_path=p["gaps_qa"],out_dir=tmp_path/"out",as_of_date="2026-08-31")
     document=outputs["html"].read_text()
     assert "Posición actual" in document and "Cómo cambió" in document
-    assert "<details>" in document and "Fuera de deuda" in document
+    assert "<details open>" in document and "Fuera de deuda" in document
+    assert "USD 60,00 · abierta 01/08/2026 · Obligación · Prestamo" in document
+    assert "· nan ·" not in document.casefold()
     assert pd.read_csv(outputs["validation"])["status"].eq("pass").all()
 
 

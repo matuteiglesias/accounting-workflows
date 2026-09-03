@@ -13,7 +13,7 @@ VALID_DEBT_TYPES = {"Prestamo", "Interes"}
 VALID_REPAYMENT_TYPE = "Repago"
 DEFAULT_REPAYMENT_STATUSES = "pagado"
 INVALID_ANALYSIS_STATUSES = {"x"}
-RULE_VERSION = "interest_first_fifo_eligible_date_full_only_skip_if_insufficient_v3"
+RULE_VERSION = "interest_first_fifo_eligible_date_partial_v4"
 
 
 
@@ -53,7 +53,9 @@ class Allocation:
     target_source_tx_id: str
     target_item_type: str
     target_opened_at: str
+    target_original_amount: float
     target_detail: str
+    target_lugar: str
     balance_before: float
     allocated_amount: float
     balance_after: float
@@ -324,7 +326,7 @@ def build_repayments(df: pd.DataFrame, repayment_statuses: Optional[List[str]]) 
 def resolve_repayments(
     open_items: List[OpenItem],
     repayments: pd.DataFrame,
-    full_only: bool = True,
+    full_only: bool = False,
     rule_version: str = RULE_VERSION,
     verbose: bool = False,
     trace: bool = False,
@@ -564,7 +566,9 @@ def resolve_repayments(
                     target_source_tx_id=item.source_tx_id,
                     target_item_type=item.item_type,
                     target_opened_at=item.opened_at,
+                    target_original_amount=item.original_amount,
                     target_detail=item.detalle,
+                    target_lugar=item.lugar,
                     balance_before=balance_before,
                     allocated_amount=alloc_amt,
                     balance_after=float(item.open_amount),
@@ -574,7 +578,7 @@ def resolve_repayments(
                     repayment_source_file=str(rep.get("source_file", "")),
                     repayment_source_row=str(rep.get("source_row", "")),
                     rule_version=rule_version,
-                    note="full cancellation" if full_only else "partial or full cancellation",
+                    note="compatibility full cancellation" if full_only else "governed partial or full allocation",
                 )
             )
             timeline.append(
@@ -724,7 +728,7 @@ def parse_args() -> argparse.Namespace:
         help="Statuses that count as effective repayment events, default: pagado",
     )
     p.add_argument("--exclude-household", action="store_true")
-    p.add_argument("--full-only", action="store_true", help="Require full cancellation of each matched item")
+    p.add_argument("--full-only", action="store_true", help="Non-authoritative compatibility/debug mode: require full cancellation of each matched item")
     p.add_argument(
         "--currencies",
         default="USD",

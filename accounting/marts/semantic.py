@@ -9,6 +9,7 @@ import pandas as pd
 from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.marts.treasury import build_monthly_box_treasury_flow
+from accounting.scope import load_run_scope_if_present
 
 RULE_VERSION = "semantic_accounting_hardening_2026-09-03"
 RULE_REGISTRY_COLUMNS = [
@@ -405,7 +406,14 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
     audit = audit[AUDIT_COLUMNS]
     legacy_mask = audit["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
-    analysis_audit = audit.loc[~legacy_mask].copy()
+    analysis_mask = ~legacy_mask
+    scope = load_run_scope_if_present(out_dir)
+    if scope is not None and "Household" not in scope.boxes:
+        analysis_mask &= ~(
+            audit["funding_actor"].astype(str).str.casefold().eq("household")
+            | audit["funding_channel"].astype(str).str.casefold().eq("household_to_pm")
+        )
+    analysis_audit = audit.loc[analysis_mask].copy()
     treasury_paths = build_monthly_box_treasury_flow(
         analysis_audit, out_dir=out_dir, freq=freq
     )

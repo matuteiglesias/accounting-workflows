@@ -39,12 +39,21 @@ from accounting.support.partitions import load_partitions_json, save_partitions_
 LOG = get_logger("materialize")
 
 
-def _analytical_ledger(ledger: pd.DataFrame) -> pd.DataFrame:
+def _analytical_ledger(ledger: pd.DataFrame, *, include_household: bool = True, exclude_legacy: bool = True) -> pd.DataFrame:
     """Exclude audit-only inferred residuals from every analytical motor."""
-    if "tag" not in ledger.columns:
-        return ledger.copy()
-    legacy = ledger["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
-    out = ledger.loc[~legacy].copy()
+    legacy = (
+        ledger["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
+        if "tag" in ledger.columns
+        else pd.Series(False, index=ledger.index)
+    )
+    eligible = ~legacy if exclude_legacy else pd.Series(True, index=ledger.index)
+    if not include_household:
+        household_party = pd.Series(False, index=ledger.index)
+        for col in ("payer", "receiver"):
+            if col in ledger.columns:
+                household_party |= ledger[col].astype(str).str.strip().str.casefold().isin({"hh", "household"})
+        eligible &= ~household_party
+    out = ledger.loc[eligible].copy()
     if "anomalies" in ledger.attrs:
         out.attrs["anomalies"] = ledger.attrs["anomalies"]
     return out
@@ -463,8 +472,11 @@ def materialize_all(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     source_ledger_df = _ensure_amount_float(ledger_df)
-    ledger_df = _analytical_ledger(source_ledger_df)
     run_scope = load_run_scope_if_present(out_dir)
+    ledger_df = _analytical_ledger(
+        source_ledger_df,
+        include_household=run_scope is None or "Household" in run_scope.boxes,
+    )
     if run_scope is not None:
         assert_frame_within_scope(
             ledger_df, run_scope, source="ledger_canonical.csv", require_box=True
@@ -560,7 +572,12 @@ def materialize_all(
 
     # 4.5) conservative semantic classification mart and monthly operating statement
     try:
-        semantic_paths = build_semantic_outputs(source_ledger_df, out_dir=out_dir, freq="M")
+        semantic_source = _analytical_ledger(
+            source_ledger_df,
+            include_household=run_scope is None or "Household" in run_scope.boxes,
+            exclude_legacy=False,
+        )
+        semantic_paths = build_semantic_outputs(semantic_source, out_dir=out_dir, freq="M")
         operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir)
         for name, path in {**semantic_paths, **operating_statement_paths}.items():
             aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _safe_sha256(path)}

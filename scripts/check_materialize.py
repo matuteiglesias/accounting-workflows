@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from accounting.artifacts.manifest import artifact_from_path, append_artifacts
+from accounting.scope import load_run_scope_if_present
+from accounting.stage_d.materialize import _analytical_ledger
 
 REQUIRED_LEDGER_DIMENSIONS = ["Box", "Currency", "Flujo", "Tipo"]
 
@@ -149,7 +151,12 @@ def main() -> int:
         # sum consistency if amount column is present
         try:
             if ledger is not None and "amount" in ledger.columns and "amount" in per_flow.columns:
-                ledger_sum = pd.to_numeric(ledger["amount"], errors="coerce").fillna(0).sum()
+                scope = load_run_scope_if_present(out_dir)
+                eligible_ledger = _analytical_ledger(
+                    ledger,
+                    include_household=scope is None or "Household" in scope.boxes,
+                )
+                ledger_sum = pd.to_numeric(eligible_ledger["amount"], errors="coerce").fillna(0).sum()
                 flow_sum = pd.to_numeric(per_flow["amount"], errors="coerce").fillna(0).sum()
                 diff = float(ledger_sum - flow_sum)
                 checks.append({"name": "sum_match_ledger_vs_per_flow", "ok": abs(diff) < 1e-6, "details": {"diff": diff}})

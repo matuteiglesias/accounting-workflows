@@ -65,7 +65,7 @@ DEBT_REPAYMENT_DETAIL_COLUMNS = [
     "period", "repayment_tx_id", "repayment_date", "debtor", "creditor",
     "Currency", "repayment_amount", "allocated_amount", "leftover_amount",
     "allocation_status", "target_debt_id", "target_source_tx_id",
-    "target_item_type", "target_opened_at", "target_detail",
+    "target_item_type", "target_opened_at", "target_original_amount", "target_detail", "target_lugar",
     "balance_before", "balance_after", "repayment_detail", "repayment_tag",
     "repayment_debt_family", "repayment_source_file", "repayment_source_row",
     "source_table", "source_rule_version",
@@ -862,6 +862,10 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
         )
         closed = pd.to_datetime(closed_source, errors="coerce")
         opened = pd.to_datetime(items_for_qa["opened_at"], errors="coerce")
+        allocations_for_qa = pd.read_csv(debt_dir / "debt_allocations.csv") if (debt_dir / "debt_allocations.csv").exists() else pd.DataFrame()
+        if not allocations_for_qa.empty:
+            allocations_for_qa["allocation_date"] = pd.to_datetime(allocations_for_qa["allocation_date"], errors="coerce")
+            allocations_for_qa["allocated_amount"] = pd.to_numeric(allocations_for_qa["allocated_amount"], errors="coerce").fillna(0.0)
         for _, selected in selected_available.iterrows():
             as_of = pd.Timestamp(selected["as_of_date"])
             pair = (
@@ -869,8 +873,19 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
                 & items_for_qa["creditor"].astype(str).eq(str(selected["creditor"]))
                 & items_for_qa["Currency"].astype(str).eq(str(selected["Currency"]))
             )
-            active = pair & opened.le(as_of) & (closed.isna() | closed.gt(as_of))
-            expected_open = pd.to_numeric(items_for_qa.loc[active, "original_amount"], errors="coerce").fillna(0.0).sum()
+            known = pair & opened.le(as_of)
+            expected_open = pd.to_numeric(items_for_qa.loc[known, "original_amount"], errors="coerce").fillna(0.0).sum()
+            if not allocations_for_qa.empty and "debt_id" in items_for_qa.columns:
+                known_ids = set(items_for_qa.loc[known, "debt_id"].astype(str))
+                applied = allocations_for_qa.loc[
+                    allocations_for_qa["target_debt_id"].astype(str).isin(known_ids)
+                    & allocations_for_qa["allocation_date"].le(as_of),
+                    "allocated_amount",
+                ].sum()
+                expected_open -= float(applied)
+            else:
+                active = known & (closed.isna() | closed.gt(as_of))
+                expected_open = pd.to_numeric(items_for_qa.loc[active, "original_amount"], errors="coerce").fillna(0.0).sum()
             if abs(float(selected["open_total"]) - float(expected_open)) > 0.01:
                 zero_stock_mismatches += 1
     qa_rows = [

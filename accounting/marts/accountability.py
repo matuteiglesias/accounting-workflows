@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from accounting.cutoff import load_run_cutoff_if_present
 
 
 CYCLE_FREQUENCY_MONTHS = 6
@@ -167,7 +168,9 @@ def build_household_monthly_control(monthly: pd.DataFrame) -> pd.DataFrame:
 def build_accountability_views(run_root: Path, *, as_of_date: str | None = None) -> dict[str, Path]:
     run_root = Path(run_root)
     monthly = pd.read_csv(run_root / "monthly_cash_accountability.csv")
-    fb = build_family_business_accountability_cycles(monthly, as_of_date=as_of_date)
+    governed = load_run_cutoff_if_present(run_root)
+    effective_as_of = governed.date if governed is not None else as_of_date
+    fb = build_family_business_accountability_cycles(monthly, as_of_date=effective_as_of)
     hh = build_household_monthly_control(monthly)
     fb_path = run_root / "family_business_accountability_cycles.csv"
     hh_path = run_root / "household_monthly_control.csv"

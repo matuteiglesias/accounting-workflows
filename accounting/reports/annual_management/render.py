@@ -39,6 +39,11 @@ def _esc(value: Any) -> str:
     return html.escape(str(value))
 
 
+def _display_date(value: Any) -> str:
+    parsed = pd.to_datetime(value, errors="coerce")
+    return parsed.strftime("%d/%m/%Y") if pd.notna(parsed) else _text(value)
+
+
 @dataclass(frozen=True)
 class Cell:
     value: float | None
@@ -291,7 +296,7 @@ def _page_header(meta: dict[str, Any], number: int, title: str, question: str) -
         '<section class="report-page"><header class="page-header"><div>'
         f'<div class="brand">{_esc(meta["title"])}</div>'
         f'<div class="subtitle">{_esc(meta["subtitle"])}</div></div>'
-        f'<div class="period-box"><strong>Estado al {_esc(meta["as_of_date"] or "No disponible")}</strong>'
+        f'<div class="period-box"><strong>Corte contable: {_esc(_display_date(meta["as_of_date"]) if meta["as_of_date"] else "No disponible")}</strong>'
         f'<span>{_esc(periods)}</span></div></header><div class="page-body">'
         f'<div class="section-title">{number}. {_esc(title)}</div>'
         f'<div class="section-question">{_esc(question)}</div>'
@@ -416,14 +421,8 @@ def _render_html(model: dict[str, Any], css: str) -> str:
             compact=True,
         )
         + '<p class="caveat">Stock y actividad se presentan por separado: los saldos no se obtienen sumando meses.</p></div>'
-        + '<div class="span-12">'
-        + _table(
-            "Trazabilidad de repagos · " + meta["last_period_label"],
-            ["Relación", "Importe", "Obligación(es) y saldo antes → después", "Estado"],
-            model["debt"]["repayment_rows"],
-            compact=True,
-        )
-        + '<p class="caveat">Cada obligación proviene de la asignación gobernada del repago; una etiqueta contextual no se convierte por sí sola en identidad de deuda.</p></div></div>'
+        + '<div class="span-12"><div class="panel"><h2>Trazabilidad detallada</h2>'
+        + '<p class="caveat">La imputación repago → obligación se presenta en “Posición y movimientos de deuda”. Este resumen conserva posición y actividad de la misma autoridad gobernada.</p></div></div></div>'
         + _page_footer(meta, 5)
     )
 
@@ -611,7 +610,7 @@ def build_report_model(
         {"label": "Posición neta PM", "metric_id": "ID.DEBT.NET_PM_POSITION", "currency": "USD", "format": "usd", "role": "major"},
     ])
     activity_map = [
-        ("Nuevos claims", "ID.DEBT.ACTIVITY.NEW_CLAIMS"),
+        ("Nuevas obligaciones registradas", "ID.DEBT.ACTIVITY.NEW_CLAIMS"),
         ("Interés", "ID.DEBT.ACTIVITY.INTEREST_ACCRUED"),
         ("Repagos", "ID.DEBT.ACTIVITY.REPAYMENTS"),
         ("Ajustes", "ID.DEBT.ACTIVITY.ADJUSTMENTS"),

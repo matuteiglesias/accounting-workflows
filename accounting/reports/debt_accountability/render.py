@@ -24,20 +24,52 @@ def _money(value: Any, currency: str = "USD") -> str:
     return f"{'−' if number < 0 else ''}{currency} {rendered}"
 
 
+def _date(value: Any) -> str:
+    parsed = pd.to_datetime(value, errors="coerce")
+    return parsed.strftime("%d/%m/%Y") if pd.notna(parsed) else "fecha no disponible"
+
+
+def _present_text(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _obligation_labels(detail: pd.DataFrame) -> dict[str, str]:
+    targets = detail.loc[detail["target_debt_id"].fillna("").astype(str).str.strip().ne("")].drop_duplicates("target_debt_id").copy()
+    bases = []
+    for _, row in targets.iterrows():
+        parts = [f'{_money(row.get("target_original_amount"), row.get("Currency"))} · abierta {_date(row.get("target_opened_at"))}']
+        for field in ("target_detail", "target_lugar", "target_item_type"):
+            value = _present_text(row.get(field))
+            if value:
+                parts.append(value)
+        bases.append(" · ".join(parts))
+    targets["base"] = bases
+    labels = {}
+    for base, group in targets.groupby("base", sort=False):
+        ordered = group.sort_values(["target_opened_at", "target_debt_id"])
+        for ordinal, (_, row) in enumerate(ordered.iterrows(), 1):
+            labels[str(row["target_debt_id"])] = base if len(ordered) == 1 else f"{base} · obligación {ordinal} de {len(ordered)}"
+    return labels
+
+
 def _event_table(detail: pd.DataFrame, year: str) -> tuple[str, pd.DataFrame]:
     current = detail.loc[detail["period"].astype(str).str.startswith(year)].copy()
     blocks = []
     events = []
+    labels = _obligation_labels(current)
     for tx_id, group in current.groupby("repayment_tx_id", sort=False):
         first = group.iloc[0]
         repayment, remainder = _n(first["repayment_amount"]), _n(first["leftover_amount"])
         allocated = pd.to_numeric(group["allocated_amount"], errors="coerce").fillna(0).sum()
         events.append({"repayment_tx_id": tx_id, "repayment_date": first["repayment_date"], "debtor": first["debtor"], "creditor": first["creditor"], "Currency": first["Currency"], "repayment_amount": repayment, "allocated_amount": allocated, "leftover_amount": remainder, "allocation_rows": int(group["target_debt_id"].fillna("").astype(str).str.strip().ne("").sum())})
         allocations = "".join(
-            f'<div class="allocation-row"><span>{_h(row.get("target_detail") or row.get("target_debt_id"))}</span><span>{_money(row.get("balance_before"), first["Currency"])}</span><span>{_money(row.get("allocated_amount"), first["Currency"])}</span><span>{_money(row.get("balance_after"), first["Currency"])}</span></div>'
+            f'<div class="allocation-row" data-debt-id="{_h(row.get("target_debt_id"))}"><span>{_h(labels.get(str(row.get("target_debt_id")), "Obligación sin detalle adicional"))}</span><span>{_money(row.get("balance_before"), first["Currency"])}</span><span>{_money(row.get("allocated_amount"), first["Currency"])}</span><span>{_money(row.get("balance_after"), first["Currency"])}</span></div>'
             for _, row in group.iterrows() if str(row.get("target_debt_id", "")).strip()
         )
-        blocks.append(f'<tr><td>{_h(first["repayment_date"])}</td><td>{_h(first["debtor"])} → {_h(first["creditor"])}</td><td class="num">{_money(repayment, first["Currency"])}</td><td class="num">{_money(allocated, first["Currency"])}</td><td class="num">{_money(remainder, first["Currency"])}</td><td>{_h(first["allocation_status"])}</td></tr><tr><td colspan="6"><details><summary>Ver obligaciones aplicadas</summary><div class="allocation"><div class="allocation-row"><strong>Obligación</strong><strong>Antes</strong><strong>Aplicado</strong><strong>Después</strong></div>{allocations}</div></details></td></tr>')
+        human_status = "Imputado completamente" if remainder <= TOLERANCE else "Con remanente sin imputar"
+        blocks.append(f'<tr><td>{_date(first["repayment_date"])}</td><td>{_h(first["debtor"])} → {_h(first["creditor"])}</td><td class="num">{_money(repayment, first["Currency"])}</td><td class="num">{_money(allocated, first["Currency"])}</td><td class="num">{_money(remainder, first["Currency"])}</td><td>{human_status}</td></tr><tr><td colspan="6"><details open><summary>Ver obligaciones aplicadas</summary><div class="allocation"><div class="allocation-row"><strong>Obligación</strong><strong>Antes</strong><strong>Aplicado</strong><strong>Después</strong></div>{allocations}</div></details></td></tr>')
     return "".join(blocks), pd.DataFrame(events)
 
 
@@ -123,8 +155,8 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
     gap_rows="".join(f'<div class="card outside"><strong>{_money(r.amount,r.Currency)}</strong><div>{_h(r.description)} · {_h(r.Lugar)}</div><div>Ámbito económico: Property Management</div><div>Estado: Pendiente de asignación</div><div>Deudor jurídico: No determinado</div></div>' for r in gaps.itertuples())
     qa_html="".join(f'<div><strong class="status-{_h(r.status)}">{_h(r.status.upper())}</strong> · {_h(r.check)}</div>' for r in validation.itertuples())
     css=Path(__file__).with_name("report.css").read_text()
-    doc=f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{TITLE}</title><style>{css}</style></head><body><main class="report"><header class="hero"><div class="eyebrow">Informe contable gobernado</div><h1>{TITLE}</h1><div class="subtitle">{SUBTITLE}</div><div class="meta"><span>Corte: {as_of_date}</span><span>Período actual: {year} YTD</span><span>Monedas sin mezclar</span></div></header>
-    <section class="page"><div class="section-head"><h2>1. Posición actual</h2><div class="note">¿Quién debe a quién y cuánto permanece abierto?</div></div><div class="grid"><div class="kpi"><span>Deuda abierta bruta</span><strong>{_money(gross)}</strong></div><div class="kpi"><span>Principal</span><strong>{_money(principal)}</strong></div><div class="kpi"><span>Interés</span><strong>{_money(interest)}</strong></div><div class="kpi"><span>Repagos aplicados {year}</span><strong>{_money(applied)}</strong></div></div><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Principal</th><th class="num">Interés</th><th class="num">Total</th></tr></thead><tbody>{relation_rows}</tbody></table><div class="card outside"><span>Costos pendientes de asignación</span><strong>{' · '.join(_money(v,k) for k,v in gap_total.items())}</strong><div>No integran deuda registrada.</div></div></section>
+    doc=f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{TITLE}</title><style>{css}\n@media print{{thead{{display:table-row-group}}tr,.allocation{{break-inside:avoid}}}}</style></head><body><main class="report"><header class="hero"><div class="eyebrow">Informe contable gobernado</div><h1>{TITLE}</h1><div class="subtitle">{SUBTITLE}</div><div class="meta"><span>Corte contable: {_date(as_of_date)}</span><span>Período actual: {year} YTD</span><span>Monedas sin mezclar</span></div><p>Property Management (PM) es un ámbito contable y de administración, no una persona jurídica. Las relaciones PM → persona o persona → PM describen posiciones económicas registradas y no determinan por sí solas legitimación, acreedor o deudor jurídico.</p></header>
+    <section class="page"><div class="section-head"><h2>1. Posición actual</h2><div class="note">¿Quién debe a quién y cuánto permanece abierto?</div></div><div class="grid"><div class="kpi"><span>Deuda abierta bruta</span><strong>{_money(gross)}</strong></div><div class="kpi"><span>Principal</span><strong>{_money(principal)}</strong></div><div class="kpi"><span>Interés</span><strong>{_money(interest)}</strong></div><div class="kpi"><span>Repagos aplicados {year}</span><strong>{_money(applied)}</strong></div></div><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Principal</th><th class="num">Interés</th><th class="num">Total</th></tr></thead><tbody>{relation_rows}</tbody></table><div class="card outside"><div>Costos pendientes de asignación</div><strong>{' · '.join(_money(v,k) for k,v in gap_total.items())}</strong><div>No integran deuda registrada.</div></div></section>
     <section class="page"><h2>2. Cómo cambió</h2><div class="equation">Apertura + nuevas obligaciones + interés − repagos aplicados ± ajustes = cierre</div><table><thead><tr><th>Año</th><th class="num">Apertura</th><th class="num">Nuevas obligaciones</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{''.join(yearly)}</tbody></table><p><strong>Los movimientos se suman. Los saldos se observan al cierre.</strong></p></section>
     <section class="page"><h2>3. Actividad por relación · {year} YTD</h2><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Apertura</th><th class="num">Nueva</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{activity_rows}</tbody></table></section>
     <section class="page"><h2>4. Repagos y trazabilidad</h2><div class="grid"><div class="kpi"><span>Eventos</span><strong>{len(events)}</strong></div><div class="kpi"><span>Monto de eventos</span><strong>{_money(event_amount)}</strong></div><div class="kpi"><span>Aplicado</span><strong>{_money(applied)}</strong></div><div class="kpi"><span>Remanente</span><strong>{_money(remainder)}</strong><small>{allocation_rows} asignaciones</small></div></div><table><thead><tr><th>Fecha</th><th>Relación</th><th class="num">Evento</th><th class="num">Aplicado</th><th class="num">Sin asignar</th><th>Estado</th></tr></thead><tbody>{events_html}</tbody></table><p class="note">El remanente es un repago registrado aún no imputado completamente bajo la regla vigente; no es deuda adicional ni dinero faltante.</p></section>

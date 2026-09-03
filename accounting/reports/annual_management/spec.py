@@ -18,7 +18,7 @@ SUMMARY_ROWS = [
     {"label": "Resultado operativo", "metric_id": "IS.NET.OPERATING", "currency": "ARS", "role": "major"},
     {"label": "Funding / aportes", "metric_id": "FUND.CONTRIB.TOTAL", "currency": "ARS"},
     {"label": "Retiros personales", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS", "role": "major"},
-    {"label": "Dividendos", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
+    {"label": "Distribuciones registradas", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
     {"label": "Resultado post-retiros", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS", "role": "major"},
     {"label": "Tasa de ahorro / retención", "metric_id": "COV.SAVINGS_RATE", "currency": "ARS", "format": "ratio"},
     {"label": "Caja validada ARS", "metric_id": "BS.CASH.TOTAL", "currency": "ARS"},
@@ -30,7 +30,7 @@ KPI_SPECS = [
     {"label": "RENTA", "metric_id": "IS.RENT.TOTAL", "currency": "ARS"},
     {"label": "RESULTADO OPERATIVO", "metric_id": "IS.NET.OPERATING", "currency": "ARS"},
     {"label": "RETIROS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
-    {"label": "DIVIDENDOS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
+    {"label": "DISTRIBUCIONES REGISTRADAS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
     {"label": "POST-RETIROS", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS"},
 ]
 
@@ -57,7 +57,7 @@ OPERATING_USD_ROWS = [
     {"label": "Resultado operativo USD", "metric_id": "IS.NET.OPERATING", "currency": "USD", "format": "usd", "missing_policy": "zero", "role": "major"},
 ]
 
-FUNDING_ACTORS = ["Matías", "Inquilino", "Household", "Alejandro", "Primos", "Héctor"]
+FUNDING_ACTORS = ["Matías", "Inquilino", "Alejandro", "Primos", "Héctor"]
 DEBT_RELATIONS = ["PM -> MI", "PM -> Primos", "Alejandro -> PM", "Alejandro -> MI", "Hector -> MI"]
 
 QUALITY_METRICS = [

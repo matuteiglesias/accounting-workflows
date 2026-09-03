@@ -82,6 +82,14 @@ def test_legacy_inferred_net_is_audit_only(tmp_path: Path) -> None:
     assert split["amount_out"].sum() == 20
 
 
+def test_fbpm_analytical_ledger_excludes_household_links_even_without_tag_column() -> None:
+    frame = pd.DataFrame([
+        _ledger_row(tx_id="fb", payer="FB", receiver="PM"),
+        _ledger_row(tx_id="hh", payer="HH", receiver="PM"),
+    ]).drop(columns="tag")
+    assert list(_analytical_ledger(frame, include_household=False)["tx_id"]) == ["fb"]
+
+
 def _accountability_rows(box: str = "Family Business") -> pd.DataFrame:
     rows = []
     for period, cash_in, draws, uses in [

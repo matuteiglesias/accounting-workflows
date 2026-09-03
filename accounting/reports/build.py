@@ -105,6 +105,37 @@ def _manifest_outputs(
     }
 
 
+def _build_pack_validation(*, run_id: str, scope_tag: str, as_of_date: str, annual_metrics: Path, debt_position: Path, source_paths: list[Path], report_html: list[Path]) -> pd.DataFrame:
+    cutoff = pd.Timestamp(as_of_date)
+    rows: list[dict[str, str]] = []
+    def add(check: str, ok: bool, detail: str) -> None:
+        rows.append({"check": check, "status": "pass" if ok else "fail", "severity": "error", "detail": detail})
+    add("exact_release_identity", scope_tag == "FBPM" and run_id.endswith("_FBPM") and as_of_date == "2026-08-31", f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}")
+    future_periods, household_rows = [], 0
+    for path in source_paths:
+        frame = pd.read_csv(path)
+        for col in ("period", "cycle_start", "Date", "as_of_date"):
+            if col not in frame.columns: continue
+            dates = pd.to_datetime(frame[col], errors="coerce") if col != "period" else pd.to_datetime(frame[col].astype(str)+"-01", errors="coerce")
+            future_periods.extend(f"{path.name}:{value}" for value in frame.loc[dates.gt(cutoff), col].astype(str).unique())
+        household_rows += int(frame.astype(str).apply(lambda col: col.str.contains("Household", case=False, regex=False)).any(axis=1).sum())
+    add("no_period_after_cutoff", not future_periods, f"future={future_periods[:10]}")
+    add("no_household_source_membership", household_rows == 0, f"rows={household_rows}")
+    position = pd.read_csv(debt_position); latest = position["period"].astype(str).max()
+    debt_total = pd.to_numeric(position.loc[(position.period.astype(str)==latest)&position.component.eq("total"),"open_amount"],errors="coerce").sum()
+    metrics = pd.read_csv(annual_metrics); year=as_of_date[:4]
+    metric_period = metrics.period.astype(str).str.removesuffix(".0")
+    annual_rows=metrics.loc[(metrics.metric_id.eq("ID.DEBT.TOTAL.OPEN"))&metric_period.eq(year)&(metrics.Currency.eq("USD"))]
+    annual_total=pd.to_numeric(annual_rows["value"],errors="coerce").sum()
+    add("annual_debt_equals_debt_report", len(annual_rows)==1 and abs(float(annual_total)-float(debt_total))<=0.01, f"annual={annual_total}; debt={debt_total}")
+    pm_primos=position.loc[(position.period.astype(str)==latest)&position.debtor.eq("PM")&position.creditor.eq("Primos")&position.component.eq("total"),"open_amount"]
+    add("pm_primos_closes_zero", len(pm_primos)==1 and abs(float(pm_primos.iloc[0]))<=0.01, f"rows={len(pm_primos)}; close={pm_primos.tolist()}")
+    visible="\n".join(path.read_text(encoding="utf-8") for path in report_html)
+    add("no_household_report_text", "household" not in visible.casefold(), "searched all report HTML")
+    add("no_visible_raw_debt_hash", not bool(__import__("re").search(r">\s*(?:prestamo|interes)::[0-9a-f]+\s*<", visible, flags=__import__("re").I)), "visible text nodes checked")
+    return pd.DataFrame(rows)
+
+
 def build_report_bundle(
     *,
     run_root: Path,
@@ -270,6 +301,17 @@ def build_report_bundle(
     debt_manifest_path = debt_dir / "report_manifest.json"
     write_report_manifest(debt_manifest_path, debt_manifest)
 
+    pack_validation = _build_pack_validation(
+        run_id=source_run_id, scope_tag=scope_tag, as_of_date=as_of_date,
+        annual_metrics=annual_metrics, debt_position=debt_position,
+        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, debt_position, debt_activity, repayment_detail, cost_gaps],
+        report_html=[annual_outputs["html"], treasury_outputs["html"], debt_outputs["html"]],
+    )
+    pack_validation_path = out_dir / "report_pack_validation.csv"
+    pack_validation.to_csv(pack_validation_path, index=False)
+    if pack_validation["status"].eq("fail").any():
+        raise ValueError(f"report pack validation failed; inspect {pack_validation_path}")
+
     # The catalog is the viewer boundary. Internal provenance manifests and
     # trace/validation CSVs remain under out/reports and are deliberately not
     # part of the public document-discovery contract.
@@ -332,6 +374,7 @@ def build_report_bundle(
         "debt_html": debt_outputs["html"],
         "debt_pdf": debt_outputs.get("pdf", Path()),
         "debt_manifest": debt_manifest_path,
+        "pack_validation": pack_validation_path,
     }
 
 

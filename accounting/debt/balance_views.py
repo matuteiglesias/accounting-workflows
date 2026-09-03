@@ -85,6 +85,7 @@ def _date_span(df: pd.DataFrame, start_date: str | None, end_date: str | None) -
 def build_debt_balance_daily(
     open_items: pd.DataFrame,
     *,
+    allocations: pd.DataFrame | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
@@ -92,6 +93,13 @@ def build_debt_balance_daily(
     if df.empty:
         return pd.DataFrame(columns=BALANCE_COLUMNS)
     days = _date_span(df, start_date, end_date)
+    alloc = allocations.copy() if allocations is not None else pd.DataFrame()
+    if not alloc.empty:
+        required_alloc = {"target_debt_id", "allocation_date", "allocated_amount"}
+        if not required_alloc.issubset(alloc.columns) or "debt_id" not in df.columns:
+            raise ValueError("allocations require target_debt_id/allocation_date/allocated_amount and open items debt_id")
+        alloc["allocation_date"] = pd.to_datetime(alloc["allocation_date"], errors="coerce").dt.normalize()
+        alloc["allocated_amount"] = pd.to_numeric(alloc["allocated_amount"], errors="coerce").fillna(0.0)
 
     rows: list[dict] = []
 
@@ -99,19 +107,21 @@ def build_debt_balance_daily(
         known = df.loc[df["opened_at"] <= as_of_date].copy()
         if known.empty:
             continue
-        active = df.loc[
-            (df["opened_at"] <= as_of_date)
-            & (
-                df["closed_at"].isna()
-                | (df["closed_at"] > as_of_date)
+        active = known.copy()
+        if not alloc.empty:
+            applied = alloc.loc[alloc["allocation_date"].le(as_of_date)].groupby("target_debt_id")["allocated_amount"].sum()
+            active["current_amount"] = active["original_amount"] - active["debt_id"].map(applied).fillna(0.0)
+        else:
+            active["current_amount"] = active["original_amount"].where(
+                active["closed_at"].isna() | active["closed_at"].gt(as_of_date), 0.0
             )
-        ].copy()
+        active["current_amount"] = active["current_amount"].clip(lower=0.0)
 
         active_grouped = (
-            active.groupby(["debtor", "creditor", "currency", "item_type"], dropna=False)["original_amount"]
+            active.groupby(["debtor", "creditor", "currency", "item_type"], dropna=False)["current_amount"]
             .sum()
             .reset_index()
-            .rename(columns={"original_amount": "open_amount"})
+            .rename(columns={"current_amount": "open_amount"})
         )
         known_keys = known[["debtor", "creditor", "currency", "item_type"]].drop_duplicates()
         grouped = known_keys.merge(
@@ -259,6 +269,7 @@ def resolve_effective_end_date(write_dir: Path, requested: str | None) -> str | 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build canonical debt balance views from debt_open_items.csv")
     p.add_argument("--open-items", required=True, help="Path to debt_open_items.csv")
+    p.add_argument("--allocations", help="Path to debt_allocations.csv for partial-balance chronology")
     p.add_argument("--write-dir", required=True, help="Directory where debt balance CSVs will be written")
     p.add_argument("--start-date", default=None, help="Optional YYYY-MM-DD")
     p.add_argument("--end-date", default=os.getenv("CUTOFF_DATE") or None, help="Optional YYYY-MM-DD; Stage A cutoff is authoritative when present")
@@ -272,8 +283,10 @@ def main() -> None:
     end_date = resolve_effective_end_date(write_dir, args.end_date)
 
     open_items = pd.read_csv(open_items_path)
+    allocations = pd.read_csv(args.allocations) if args.allocations else None
     daily = build_debt_balance_daily(
         open_items,
+        allocations=allocations,
         start_date=args.start_date,
         end_date=end_date,
     )

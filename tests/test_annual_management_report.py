@@ -100,10 +100,10 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     assert "2026 YTD" in html
     assert "Operación en USD" in html
     assert "No disponible" in html
-    assert "Trazabilidad de repagos" in html
-    assert "repay-1" in html
-    assert "prestamo::debt-1" in html
-    assert "Synthetic obligation" in html
+    assert "Trazabilidad detallada" in html
+    assert "Posición y movimientos de deuda" in html
+    assert "repay-1" not in html
+    assert "prestamo::debt-1" not in html
     assert not (validation["status"] == "fail").any()
     assert not (
         (cells["page_id"] == "summary")

@@ -65,7 +65,6 @@ REPORT_BROWSER_BIN ?=
 
 DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
-DEBT_FULL_ONLY ?= 1
 DRY_RUN ?= 0
 
 
@@ -340,7 +339,6 @@ _run_debt_resolution_action:
 			--currencies "$(DEBT_CURRENCIES)" \
 			--repayment-statuses "$(DEBT_REPAYMENT_STATUSES)" \
 		); \
-		if [ "$(DEBT_FULL_ONLY)" = "1" ]; then args+=( --full-only ); fi; \
 		$(PY) -m accounting.debt.resolve "$${args[@]}"; \
 		test -s "$(RUN_DEBT_DIR)/debt_open_items.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_allocations.csv"; \
@@ -354,6 +352,7 @@ _run_debt_products_action:
 	@bash -eu -o pipefail -c '\
 		$(PY) -m accounting.debt.balance_views \
 			--open-items "$(RUN_DEBT_DIR)/debt_open_items.csv" \
+			--allocations "$(RUN_DEBT_DIR)/debt_allocations.csv" \
 			--write-dir "$(RUN_DEBT_DIR)"; \
 		test -s "$(RUN_DEBT_DIR)/debt_balance_daily.csv"; \
 		test -s "$(RUN_DEBT_DIR)/debt_balance_monthly.csv"; \

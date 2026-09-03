@@ -134,6 +134,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     monkeypatch.setattr("accounting.reports.build.render_treasury", _fake_reporter("treasury"))
     monkeypatch.setattr("accounting.reports.build.render_debt", _fake_reporter("debt"))
     monkeypatch.setattr("accounting.reports.build.render_pdf", _fake_pdf)
+    monkeypatch.setattr("accounting.reports.build._build_pack_validation", lambda **kwargs: pd.DataFrame([{"check":"pack","status":"pass","severity":"error","detail":"synthetic"}]))
 
     outputs = build_report_bundle(
         run_root=run_root,

@@ -285,7 +285,7 @@ def _series_html(group: pd.DataFrame) -> str:
     return f'''<section class="series-section" id="{_h(slug)}">
       <div class="series-title-row"><div class="series-title">{_h(currency)}</div><div class="series-range">{_h(period_range)}</div></div>
       <div class="kpis">
-        <div class="kpi"><div class="kpi-label">Control actual</div><div class="kpi-value navy">{_h(_compact(latest["closing_control"]))}</div><div class="kpi-note">base 0 desde 2022-01</div></div>
+        <div class="kpi"><div class="kpi-label">Control contable acumulado</div><div class="kpi-value navy">{_h(_compact(latest["closing_control"]))}</div><div class="kpi-note">No equivale a caja validada.</div></div>
         <div class="kpi"><div class="kpi-label">Último flujo neto</div><div class="kpi-value">{_h(_compact(latest["net_cash_flow"]))}</div><div class="kpi-note">{_h(latest["period"])}</div></div>
         <div class="kpi"><div class="kpi-label">Entradas acumuladas</div><div class="kpi-value">{_h(_compact(total_in))}</div><div class="kpi-note">movimientos registrados</div></div>
         <div class="kpi"><div class="kpi-label">Salidas acumuladas</div><div class="kpi-value">{_h(_compact(total_out))}</div><div class="kpi-note">movimientos registrados</div></div>
@@ -311,10 +311,8 @@ def _cycle_html(cycles: pd.DataFrame) -> str:
     if cycles.empty:
         return ""
     rows = []
-    points = []
-    for index, row in cycles.sort_values(["Currency", "cycle_start"]).reset_index(drop=True).iterrows():
+    for _, row in cycles.sort_values(["Currency", "cycle_start"]).reset_index(drop=True).iterrows():
         closing = pd.to_numeric(pd.Series([row.get("closing_accountability_balance")]), errors="coerce").iloc[0]
-        points.append(f'{index},{0 if pd.isna(closing) else float(closing)}')
         gap = row.get("accountability_gap") if str(row.get("accountability_gap_status")) == "available" else pd.NA
         rows.append(
             "<tr>"
@@ -329,7 +327,7 @@ def _cycle_html(cycles: pd.DataFrame) -> str:
             f"<td>{_h(_fmt_num(gap))}</td></tr>"
         )
     return f'''<section class="box-section" id="fb-accountability-cycles"><header class="box-head"><h2 class="box-title">FAMILY BUSINESS · CICLOS DE RENDICIÓN</h2><div class="box-subtitle">Cortes determinísticos Mar–Ago / Sep–Feb. Son fechas de revisión, no fechas legales de distribución.</div></header>
-      <div class="chart-card"><div class="chart-title">Saldo contable sin destino acreditado · historia por ciclo</div><div class="chart-subtitle">Serie de cierres por ciclo: {" · ".join(points)}. No representa caja real.</div></div>
+      <div class="chart-card"><div class="chart-title">Saldo contable acumulado sujeto a rendición</div><div class="chart-subtitle">Cierres históricos por ciclo plenamente cubierto. No representa caja real.</div></div>
       <div class="table-wrap"><table class="treasury"><thead><tr><th>Ciclo</th><th>Vista</th><th>Moneda</th><th>Apertura</th><th>Fondos recibidos</th><th>Distribuciones</th><th>Usos</th><th>Transferencias</th><th>Saldo bajo rendición</th><th>Gap vs caja</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
       <div class="table-note">El gap contra liquidez se muestra únicamente cuando existe una observación de caja validada y alineada; de lo contrario figura No disponible.</div></section>'''
 
@@ -453,6 +451,12 @@ def render_report(
         source[col] = pd.to_numeric(source[col], errors="coerce")
 
     max_period = source["period"].astype(str).max()
+    cutoff_label = pd.Period(max_period, freq="M").end_time.strftime("%d/%m/%Y")
+    if not cycles.empty:
+        cutoff = pd.Period(max_period, freq="M").end_time.normalize()
+        starts = pd.to_datetime(cycles["cycle_start"], errors="coerce")
+        ends = pd.to_datetime(cycles["cycle_end"], errors="coerce")
+        cycles = cycles.loc[starts.ge(pd.Timestamp("2022-03-01")) & ends.le(cutoff)].copy()
     completed: dict[tuple[str, str], pd.DataFrame] = {}
     for (box, currency), group in source.groupby(["Box", "Currency"], sort=False):
         completed[(str(box), str(currency))] = complete_calendar(
@@ -484,7 +488,7 @@ def render_report(
     )
     css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
-      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
+      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Corte contable: {_h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
       {_cycle_html(cycles)}
       {"".join(sections)}
       <section class="qa-card"><h2>Control de integridad del reporte</h2><div class="qa-grid">{qa_items}</div></section>

@@ -102,7 +102,7 @@ def test_treasury_report_renders_three_native_currency_series(tmp_path: Path) ->
     assert "FAMILY BUSINESS" in html
     assert "PROPERTY MANAGEMENT" in html
     assert "Control acumulado y flujo neto mensual · USD" in html
-    assert "base 0 desde 2022-01" in html
+    assert "No equivale a caja validada" in html
     assert "no disponible" in html
     assert not (validation["status"] == "fail").any()
     assert set(zip(summary["Box"], summary["Currency"])) == {
