@@ -21,6 +21,7 @@ from accounting.contracts.funding_support import (
 from accounting.professional import annual_dashboard_tables_legacy as _legacy
 
 
+
 _MODERN_FUNDING_COLUMNS = {
     "period",
     "Currency",

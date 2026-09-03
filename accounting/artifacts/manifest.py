@@ -202,6 +202,26 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "derived_treasury_accountability",
             "notes": "Monthly treasury accountability composed from governed treasury flow, inferred Box control, validated cash selection, and debt activity cross-checks.",
         }
+    if key == "family_business_accountability_cycles.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "control",
+            "grain": "six_month_accountability_cycle",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "derived_treasury_accountability",
+            "notes": "Family Business Mar-Aug / Sep-Feb accountability bridge; closing balance is not actual cash and liquidity gap is unavailable without validated cash.",
+        }
+    if key == "household_monthly_control.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "control",
+            "grain": "monthly",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat",
+            "source_authority": "derived_treasury_accountability",
+            "notes": "Household-only effective funding, domestic uses, and own surplus/deficit control.",
+        }
     if key in {"monthly_box_treasury_flow_qa.csv", "monthly_cash_accountability_qa.csv"}:
         return {
             "artifact_role": "qa",
@@ -251,6 +271,16 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "safe_with_caveat",
             "source_authority": "source_of_truth_for_debt_activity",
             "notes": "Canonical debt movement wrapper; use for debt activity, not closing debt stock.",
+        }
+    if key == "monthly_debt_repayment_detail.csv":
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "transaction",
+            "grain": "tx",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only",
+            "source_authority": "source_of_truth_for_debt_activity",
+            "notes": "Allocation-grain repayment lineage; sums must use allocated_amount and must not repeat repayment_amount across allocations.",
         }
     if key == "monthly_debt_position.csv":
         return {

@@ -129,12 +129,16 @@ def build_report_bundle(
     annual_qa = metrics_dir / "annual_balance_dashboard_qa.csv"
     treasury_accountability = run_root / "monthly_cash_accountability.csv"
     treasury_qa = run_root / "monthly_cash_accountability_qa.csv"
+    accountability_cycles = run_root / "family_business_accountability_cycles.csv"
+    repayment_detail = run_root / "monthly_debt_repayment_detail.csv"
     required = [
         annual_metrics,
         annual_contract,
         annual_qa,
         treasury_accountability,
         treasury_qa,
+        accountability_cycles,
+        repayment_detail,
     ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -154,10 +158,12 @@ def build_report_bundle(
         contract_path=annual_contract,
         qa_path=annual_qa,
         out_dir=annual_dir,
+        repayment_detail_path=repayment_detail,
     )
     treasury_outputs = render_treasury(
         accountability_path=treasury_accountability,
         qa_path=treasury_qa,
+        cycles_path=accountability_cycles,
         out_dir=treasury_dir,
     )
 
@@ -187,6 +193,7 @@ def build_report_bundle(
             _source(annual_metrics, "metrics/annual_balance_dashboard_metrics.csv"),
             _source(annual_contract, "metrics/annual_balance_dashboard_contract.csv"),
             _source(annual_qa, "metrics/annual_balance_dashboard_qa.csv"),
+            _source(repayment_detail, "run/monthly_debt_repayment_detail.csv"),
         ],
         outputs=_manifest_outputs(annual_outputs, bundle_root=out_dir),
         validation_status=annual_status,
@@ -203,6 +210,7 @@ def build_report_bundle(
         sources=[
             _source(treasury_accountability, "run/monthly_cash_accountability.csv"),
             _source(treasury_qa, "run/monthly_cash_accountability_qa.csv"),
+            _source(accountability_cycles, "run/family_business_accountability_cycles.csv"),
         ],
         outputs=_manifest_outputs(treasury_outputs, bundle_root=out_dir),
         validation_status=treasury_status,

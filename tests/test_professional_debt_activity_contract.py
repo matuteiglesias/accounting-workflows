@@ -44,6 +44,30 @@ def test_monthly_debt_activity_consumes_contract_and_sums_owning_rows() -> None:
     assert filters["matched_activity_rows"] == 2
 
 
+def test_repayment_drilldown_includes_atomic_obligation_allocations() -> None:
+    row = pd.Series({"measure": "repayments", "Currency": "USD", "pair": "PM → MI"})
+    detail = pd.DataFrame([
+        {
+            "period": "2025-03", "Currency": "USD", "debtor": "PM", "creditor": "MI",
+            "repayment_tx_id": "repay-1", "target_debt_id": "prestamo::debt-1",
+            "target_source_tx_id": "debt-1", "target_detail": "Synthetic obligation",
+            "balance_before": 100.0, "allocated_amount": 100.0, "balance_after": 0.0,
+        }
+    ])
+    result = professional.execute_monthly_debt_activity(
+        row=row,
+        period="2025-03",
+        display_value=180.0,
+        debt_activity=_activity_rows(),
+        repayment_detail=detail,
+        tolerance=0.01,
+    )
+    assert result is not None
+    title, allocation_rows = result[8][-1]
+    assert title == "Repayment-to-obligation allocation detail"
+    assert allocation_rows["target_debt_id"].tolist() == ["prestamo::debt-1"]
+
+
 def test_annual_debt_activity_alias_resolves_to_same_spec_and_sums_periods() -> None:
     row = pd.Series({"Currency": "USD", "debtor": "PM", "creditor": "MI", "pair": "PM → MI", "activity_type": "repayments"})
     result = professional._build_annual_debt_activity_companion_cell(

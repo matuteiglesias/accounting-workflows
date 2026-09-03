@@ -136,6 +136,45 @@ def test_repayment_without_debt_items_keeps_schemas_and_pipeline_completes(tmp_p
     assert (mart_dir / "monthly_debt_activity.csv").is_file()
 
 
+def test_repayment_never_allocates_to_an_obligation_opened_later(tmp_path):
+    ledger = tmp_path / "future_debt.csv"
+    pd.DataFrame([
+        {
+            "tx_id": "eligible-principal", "Date": "2025-01-01", "amount": 40,
+            "Currency": "USD", "payer": "PM", "receiver": "Creditor",
+            "Flujo": "Debt", "Tipo": "Prestamo", "status": "abierto",
+            "Box": "Property Management", "Detalle": "Eligible obligation",
+        },
+        {
+            "tx_id": "repayment", "Date": "2025-02-01", "amount": 50,
+            "Currency": "USD", "payer": "PM", "receiver": "Creditor",
+            "Flujo": "Debt", "Tipo": "Repago", "status": "pagado",
+            "Box": "Property Management", "Detalle": "February repayment",
+        },
+        {
+            "tx_id": "future-interest", "Date": "2025-03-01", "amount": 10,
+            "Currency": "USD", "payer": "PM", "receiver": "Creditor",
+            "Flujo": "Debt", "Tipo": "Interes", "status": "abierto",
+            "Box": "Property Management", "Detalle": "Future interest",
+        },
+    ]).to_csv(ledger, index=False)
+
+    debt_dir, mart_dir = _run_debt_pipeline(ledger, tmp_path)
+    allocations = pd.read_csv(debt_dir / "debt_allocations.csv")
+    assert allocations["target_source_tx_id"].tolist() == ["eligible-principal"]
+    assert allocations.loc[0, "balance_before"] == 40
+    assert allocations.loc[0, "allocated_amount"] == 40
+    assert allocations.loc[0, "balance_after"] == 0
+    events = pd.read_csv(debt_dir / "debt_repayment_events.csv")
+    assert events.loc[0, "leftover_amount"] == 10
+
+    detail = pd.read_csv(mart_dir / "monthly_debt_repayment_detail.csv")
+    assert detail["target_debt_id"].tolist() == ["prestamo::eligible-principal"]
+    assert detail.loc[0, "target_detail"] == "Eligible obligation"
+    assert detail.loc[0, "repayment_detail"] == "February repayment"
+    assert detail.loc[0, "allocation_status"] == "partial"
+
+
 def test_zero_row_debt_outputs_keep_schema_and_balance_views_can_read_them(tmp_path):
     ledger = tmp_path / "empty_debt_ledger.csv"
     pd.DataFrame([{

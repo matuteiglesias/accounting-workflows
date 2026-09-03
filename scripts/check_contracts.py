@@ -44,6 +44,7 @@ KNOWN_ARTIFACTS = [
     "monthly_cash_close.csv",
     "monthly_debt_position.csv",
     "monthly_debt_activity.csv",
+    "monthly_debt_repayment_detail.csv",
     "per_flow_time_long.freq=M.csv",
     "daily_cash_position.csv",
     "metric_contract_frontier.csv",

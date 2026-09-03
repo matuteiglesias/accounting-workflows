@@ -366,9 +366,16 @@ _run_debt_products_action:
 		test -s "$(RUN_OUT)/monthly_debt_position_qa.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_activity.csv"; \
 		test -s "$(RUN_OUT)/monthly_debt_activity_qa.csv"; \
+		test -s "$(RUN_OUT)/monthly_debt_repayment_detail.csv"; \
 		$(PY) -m accounting.marts.treasury --run-root "$(RUN_OUT)"; \
 		test -s "$(RUN_OUT)/monthly_cash_accountability.csv"; \
 		test -s "$(RUN_OUT)/monthly_cash_accountability_qa.csv"; \
+		$(PY) -m accounting.marts.accountability --run-root "$(RUN_OUT)"; \
+		test -f "$(RUN_OUT)/family_business_accountability_cycles.csv"; \
+		test -f "$(RUN_OUT)/household_monthly_control.csv"; \
+		$(PY) -m accounting.grooming --ledger "$(RUN_OUT)/ledger_canonical_all_status.csv" \
+			--debt-reconciliation "$(RUN_DEBT_DIR)/debt_status_reconciliation.csv" \
+			--out-dir "$(RUN_OUT)/private_review"; \
 	'
 
 
@@ -466,14 +473,19 @@ _check_materialize:
 # Professional presentation over governed artifacts
 # ---------------------------------------------------------------------------
 
-.PHONY: professional-drilldowns professional-linked-digest
-professional-drilldowns:
+.PHONY: _professional-debt-tables professional-drilldowns professional-linked-digest
+_professional-debt-tables:
+	@$(PY) -m accounting.professional.debt_tables \
+		--run-root "$(ROOT)/out/run/accounting/latest_FBPM" \
+		--tables-dir "$(ROOT)/out/professional_pack/latest/tables"
+
+professional-drilldowns: _professional-debt-tables
 	@$(PY) -m accounting.professional.drilldown \
 		--repo-root "$(ROOT)" \
-		--pack "$(ROOT)/out/professional_pack/latest_FBPM" \
+		--pack "$(ROOT)/out/professional_pack/latest" \
 		--run-root "$(ROOT)/out/run/accounting/latest_FBPM"
 
 professional-linked-digest:
 	@$(PY) -m accounting.professional.render_linked_digest \
 		--repo-root "$(ROOT)" \
-		--pack "$(ROOT)/out/professional_pack/latest_FBPM"
+		--pack "$(ROOT)/out/professional_pack/latest"

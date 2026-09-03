@@ -67,6 +67,26 @@ def _write_sources(run_root: Path, metrics_dir: Path) -> None:
     pd.DataFrame(
         [{"check": "treasury", "status": "pass", "severity": "error", "detail": "synthetic"}]
     ).to_csv(run_root / "monthly_cash_accountability_qa.csv", index=False)
+    pd.DataFrame(
+        columns=[
+            "cycle_id", "cycle_start", "cycle_end", "view_type", "as_of_date",
+            "Box", "Currency", "opening_accountability_balance",
+            "accountable_receipts", "documented_distributions", "supported_uses",
+            "documented_transfers_out", "closing_accountability_balance",
+            "validated_cash", "validated_cash_status", "validated_cash_as_of_date",
+            "other_documented_custody", "accountability_gap",
+            "accountability_gap_status", "n_months", "n_tx", "source_table", "policy_id",
+        ]
+    ).to_csv(run_root / "family_business_accountability_cycles.csv", index=False)
+    pd.DataFrame(
+        columns=[
+            "period", "repayment_tx_id", "repayment_date", "debtor", "creditor",
+            "Currency", "repayment_amount", "allocated_amount", "leftover_amount",
+            "allocation_status", "target_debt_id", "target_source_tx_id",
+            "target_item_type", "target_opened_at", "target_detail",
+            "balance_before", "balance_after",
+        ]
+    ).to_csv(run_root / "monthly_debt_repayment_detail.csv", index=False)
 
 
 def _fake_reporter(kind: str):
@@ -131,7 +151,12 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert {source["path"] for source in annual_manifest["sources"]} == {
         "metrics/annual_balance_dashboard_metrics.csv",
         "metrics/annual_balance_dashboard_contract.csv",
-        "metrics/annual_balance_dashboard_qa.csv",
+            "metrics/annual_balance_dashboard_qa.csv",
+            "run/monthly_debt_repayment_detail.csv",
+        }
+    treasury_manifest = json.loads(outputs["treasury_manifest"].read_text(encoding="utf-8"))
+    assert "run/family_business_accountability_cycles.csv" in {
+        source["path"] for source in treasury_manifest["sources"]
     }
     assert Path(outputs["annual_pdf"]).read_bytes().startswith(b"%PDF-")
 

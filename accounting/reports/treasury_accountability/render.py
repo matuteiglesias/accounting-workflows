@@ -307,6 +307,33 @@ def _series_html(group: pd.DataFrame) -> str:
     </section>'''
 
 
+def _cycle_html(cycles: pd.DataFrame) -> str:
+    if cycles.empty:
+        return ""
+    rows = []
+    points = []
+    for index, row in cycles.sort_values(["Currency", "cycle_start"]).reset_index(drop=True).iterrows():
+        closing = pd.to_numeric(pd.Series([row.get("closing_accountability_balance")]), errors="coerce").iloc[0]
+        points.append(f'{index},{0 if pd.isna(closing) else float(closing)}')
+        gap = row.get("accountability_gap") if str(row.get("accountability_gap_status")) == "available" else pd.NA
+        rows.append(
+            "<tr>"
+            f"<td>{_h(row.get('cycle_start'))} → {_h(row.get('cycle_end'))}</td>"
+            f"<td>{_h(row.get('view_type'))}</td><td>{_h(row.get('Currency'))}</td>"
+            f"<td>{_h(_fmt_num(row.get('opening_accountability_balance')))}</td>"
+            f"<td>{_h(_fmt_num(row.get('accountable_receipts')))}</td>"
+            f"<td>{_h(_fmt_num(row.get('documented_distributions')))}</td>"
+            f"<td>{_h(_fmt_num(row.get('supported_uses')))}</td>"
+            f"<td>{_h(_fmt_num(row.get('documented_transfers_out')))}</td>"
+            f"<td>{_h(_fmt_num(row.get('closing_accountability_balance')))}</td>"
+            f"<td>{_h(_fmt_num(gap))}</td></tr>"
+        )
+    return f'''<section class="box-section" id="fb-accountability-cycles"><header class="box-head"><h2 class="box-title">FAMILY BUSINESS · CICLOS DE RENDICIÓN</h2><div class="box-subtitle">Cortes determinísticos Mar–Ago / Sep–Feb. Son fechas de revisión, no fechas legales de distribución.</div></header>
+      <div class="chart-card"><div class="chart-title">Saldo contable sin destino acreditado · historia por ciclo</div><div class="chart-subtitle">Serie de cierres por ciclo: {" · ".join(points)}. No representa caja real.</div></div>
+      <div class="table-wrap"><table class="treasury"><thead><tr><th>Ciclo</th><th>Vista</th><th>Moneda</th><th>Apertura</th><th>Fondos recibidos</th><th>Distribuciones</th><th>Usos</th><th>Transferencias</th><th>Saldo bajo rendición</th><th>Gap vs caja</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+      <div class="table-note">El gap contra liquidez se muestra únicamente cuando existe una observación de caja validada y alineada; de lo contrario figura No disponible.</div></section>'''
+
+
 def build_validation(
     source: pd.DataFrame,
     source_qa: pd.DataFrame,
@@ -409,11 +436,13 @@ def render_report(
     *,
     accountability_path: Path,
     qa_path: Path | None,
+    cycles_path: Path | None = None,
     out_dir: Path,
     start_period: str = START_PERIOD,
 ) -> dict[str, Path]:
     source = pd.read_csv(accountability_path)
     source_qa = pd.read_csv(qa_path) if qa_path and qa_path.exists() else pd.DataFrame()
+    cycles = pd.read_csv(cycles_path) if cycles_path and cycles_path.exists() else pd.DataFrame()
 
     non_numeric = {
         "period", "period_end", "control_as_of_date", "Box", "Currency",
@@ -456,6 +485,7 @@ def render_report(
     css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
       <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
+      {_cycle_html(cycles)}
       {"".join(sections)}
       <section class="qa-card"><h2>Control de integridad del reporte</h2><div class="qa-grid">{qa_items}</div></section>
       <footer class="footer"><span>Fuente contable: monthly_cash_accountability.csv · movimientos reconciliados contra box motor.</span><span>Generación reproducible; ver report_validation.csv.</span></footer>
@@ -502,12 +532,14 @@ def main() -> None:
     )
     parser.add_argument("--accountability", required=True, type=Path)
     parser.add_argument("--qa", type=Path)
+    parser.add_argument("--cycles", type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--start-period", default=START_PERIOD)
     args = parser.parse_args()
     outputs = render_report(
         accountability_path=args.accountability,
         qa_path=args.qa,
+        cycles_path=args.cycles,
         out_dir=args.out_dir,
         start_period=args.start_period,
     )

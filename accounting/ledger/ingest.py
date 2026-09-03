@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -43,6 +44,8 @@ from accounting.scope import box_scope_mask, canonical_box_name, parse_box_scope
 
 
 LOG = get_logger("ingest")
+
+INVALID_ANALYSIS_STATUSES = frozenset({"x"})
 
 
 # -----------------------
@@ -60,7 +63,26 @@ def read_sheet_to_df(sheet_url: str, service_account_file: str, sheet_name: str 
         import gspread  # type: ignore
         from google.oauth2.service_account import Credentials  # type: ignore
     except Exception as e:
-        raise RuntimeError("gspread/google-auth not available; install deps to use Google Sheets ingest") from e
+        LOG.warning("gspread unavailable (%s); using read-only Google Sheets API fallback", type(e).__name__)
+        try:
+            from google.oauth2.service_account import Credentials  # type: ignore
+            from googleapiclient.discovery import build  # type: ignore
+        except Exception as fallback_error:
+            raise RuntimeError("No supported Google Sheets read client is available") from fallback_error
+        match = re.search(r"/spreadsheets/d/([^/]+)", str(sheet_url))
+        if not match:
+            raise ValueError("sheet_url does not contain a Google spreadsheet id")
+        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        creds = Credentials.from_service_account_file(service_account_file, scopes=scopes)
+        service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        values = service.spreadsheets().values().get(
+            spreadsheetId=match.group(1), range=f"'{sheet_name}'"
+        ).execute().get("values", [])
+        if not values:
+            return pd.DataFrame()
+        header = [str(value) for value in values[0]]
+        rows = [list(row) + [""] * (len(header) - len(row)) for row in values[1:]]
+        return pd.DataFrame([row[:len(header)] for row in rows], columns=header)
 
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     creds = Credentials.from_service_account_file(service_account_file, scopes=scopes)
@@ -211,10 +233,17 @@ def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def filter_ledger_statuses(df: pd.DataFrame, statuses: Optional[Sequence[str]]) -> pd.DataFrame:
     """Return the accounting-recognition subset without altering scoped evidence."""
-    if statuses is None or "status" not in df.columns:
+    if "status" not in df.columns:
         return df.copy()
+    normalized = df["status"].astype(str).str.strip().str.casefold()
+    analytically_valid = ~normalized.isin(INVALID_ANALYSIS_STATUSES)
+    if statuses is None:
+        out = df.loc[analytically_valid].copy()
+        if "anomalies" in df.attrs:
+            out.attrs["anomalies"] = df.attrs["anomalies"]
+        return out
     allowed = {str(value).strip().lower() for value in statuses}
-    mask = df["status"].astype(str).str.strip().str.lower().isin(allowed)
+    mask = analytically_valid & normalized.isin(allowed)
     out = df.loc[mask].copy()
     if "anomalies" in df.attrs:
         out.attrs["anomalies"] = df.attrs["anomalies"]

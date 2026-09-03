@@ -60,6 +60,16 @@ DEBT_ACTIVITY_COLUMNS = [
 ]
 DEBT_ACTIVITY_QA_COLUMNS = ["check", "status", "detail", "severity"]
 
+DEBT_REPAYMENT_DETAIL_COLUMNS = [
+    "period", "repayment_tx_id", "repayment_date", "debtor", "creditor",
+    "Currency", "repayment_amount", "allocated_amount", "leftover_amount",
+    "allocation_status", "target_debt_id", "target_source_tx_id",
+    "target_item_type", "target_opened_at", "target_detail",
+    "balance_before", "balance_after", "repayment_detail", "repayment_tag",
+    "repayment_debt_family", "repayment_source_file", "repayment_source_row",
+    "source_table", "source_rule_version",
+]
+
 
 def _empty_debt_activity() -> pd.DataFrame:
     return pd.DataFrame(columns=DEBT_ACTIVITY_COLUMNS)
@@ -67,6 +77,69 @@ def _empty_debt_activity() -> pd.DataFrame:
 
 def _period_from_date(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce").dt.to_period("M").astype(str)
+
+
+def _build_repayment_detail(*, debt_dir: Path, write_dir: Path) -> Path:
+    """Preserve resolved repayment-to-obligation lineage at allocation grain."""
+    out_path = write_dir / "monthly_debt_repayment_detail.csv"
+    events_path = debt_dir / "debt_repayment_events.csv"
+    allocations_path = debt_dir / "debt_allocations.csv"
+    if not events_path.exists():
+        pd.DataFrame(columns=DEBT_REPAYMENT_DETAIL_COLUMNS).to_csv(out_path, index=False)
+        return out_path
+
+    events = pd.read_csv(events_path)
+    allocations = (
+        pd.read_csv(allocations_path)
+        if allocations_path.exists()
+        else pd.DataFrame()
+    )
+    rows: list[dict[str, Any]] = []
+    for _, event in events.iterrows():
+        repayment_tx_id = str(event.get("repayment_tx_id", ""))
+        matched = (
+            allocations.loc[
+                allocations["repayment_tx_id"].astype(str).eq(repayment_tx_id)
+            ].copy()
+            if not allocations.empty and "repayment_tx_id" in allocations.columns
+            else pd.DataFrame()
+        )
+        event_allocated = float(pd.to_numeric(event.get("allocated_amount"), errors="coerce") or 0.0)
+        leftover = float(pd.to_numeric(event.get("leftover_amount"), errors="coerce") or 0.0)
+        status = "resolved" if leftover <= 0.01 else ("partial" if event_allocated > 0.01 else "unallocated")
+        base = {
+            "period": str(pd.to_datetime(event.get("repayment_date"), errors="coerce").to_period("M")),
+            "repayment_tx_id": repayment_tx_id,
+            "repayment_date": event.get("repayment_date", ""),
+            "debtor": event.get("debtor", ""),
+            "creditor": event.get("creditor", ""),
+            "Currency": str(event.get("currency", "")).upper(),
+            "repayment_amount": event.get("repayment_amount", 0.0),
+            "leftover_amount": leftover,
+            "allocation_status": status,
+            "source_table": "debt_allocations.csv;debt_repayment_events.csv",
+            "source_rule_version": event.get("rule_version", RULE_VERSION),
+        }
+        if matched.empty:
+            rows.append({**base, "allocated_amount": 0.0})
+            continue
+        for _, allocation in matched.iterrows():
+            rows.append({
+                **base,
+                "allocated_amount": allocation.get("allocated_amount", 0.0),
+                **{
+                    column: allocation.get(column, "")
+                    for column in DEBT_REPAYMENT_DETAIL_COLUMNS
+                    if column.startswith("target_")
+                    or column.startswith("balance_")
+                    or column.startswith("repayment_detail")
+                    or column.startswith("repayment_tag")
+                    or column.startswith("repayment_debt_family")
+                    or column.startswith("repayment_source_")
+                },
+            })
+    pd.DataFrame(rows, columns=DEBT_REPAYMENT_DETAIL_COLUMNS).to_csv(out_path, index=False)
+    return out_path
 
 
 def _amount_by_item_type(items: pd.DataFrame, item_type: str) -> pd.DataFrame:
@@ -526,6 +599,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     debt_dir = Path(debt_dir)
     write_dir = Path(write_dir)
     write_dir.mkdir(parents=True, exist_ok=True)
+    repayment_detail_path = _build_repayment_detail(debt_dir=debt_dir, write_dir=write_dir)
     monthly_path = debt_dir / "debt_balance_monthly.csv"
     open_items_path = debt_dir / "debt_open_items.csv"
     out_path = write_dir / "monthly_debt_position.csv"
@@ -556,6 +630,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
         return {
             "monthly_debt_position": out_path,
             "monthly_debt_position_qa": qa_path,
+            "monthly_debt_repayment_detail": repayment_detail_path,
             **activity_paths,
         }
 
@@ -849,6 +924,7 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
     return {
         "monthly_debt_position": out_path,
         "monthly_debt_position_qa": qa_path,
+        "monthly_debt_repayment_detail": repayment_detail_path,
         **activity_paths,
     }
 

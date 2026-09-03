@@ -12,7 +12,8 @@ import pandas as pd
 VALID_DEBT_TYPES = {"Prestamo", "Interes"}
 VALID_REPAYMENT_TYPE = "Repago"
 DEFAULT_REPAYMENT_STATUSES = "pagado"
-RULE_VERSION = "interest_first_fifo_full_only_skip_if_insufficient_v2"
+INVALID_ANALYSIS_STATUSES = {"x"}
+RULE_VERSION = "interest_first_fifo_eligible_date_full_only_skip_if_insufficient_v3"
 
 
 
@@ -49,9 +50,18 @@ class Allocation:
     creditor: str
     currency: str
     target_debt_id: str
+    target_source_tx_id: str
     target_item_type: str
     target_opened_at: str
+    target_detail: str
+    balance_before: float
     allocated_amount: float
+    balance_after: float
+    repayment_detail: str
+    repayment_tag: str
+    repayment_debt_family: str
+    repayment_source_file: str
+    repayment_source_row: str
     rule_version: str
     note: str = ""
 
@@ -204,6 +214,10 @@ def load_debt_ledger(args: argparse.Namespace) -> pd.DataFrame:
 
     df = _normalize_ledger_columns(raw)
 
+    # The all-status ledger is provenance evidence, not automatic analytical
+    # eligibility.  Source status X explicitly removes a row from analysis.
+    df = df.loc[~df["status"].isin(INVALID_ANALYSIS_STATUSES)].copy()
+
     if df.columns.duplicated().any():
         dupes = df.columns[df.columns.duplicated()].tolist()
         raise ValueError(f"Duplicate columns remain after normalization: {dupes}")
@@ -231,6 +245,15 @@ def build_open_items(df: pd.DataFrame, verbose: bool = False) -> List[OpenItem]:
     #     LOG.debug(" ".join(str(x) for x in args))
 
     debt_rows = df.loc[df["Tipo"].isin(VALID_DEBT_TYPES)].copy()
+    # Approved exception: Costos -> PM Prestamo rows represent unresolved cost
+    # allocation inside Property Management, never established person debt.
+    cost_gap = (
+        debt_rows["Tipo"].eq("Prestamo")
+        & debt_rows["payer"].astype(str).str.strip().str.casefold().eq("costos")
+        & debt_rows["receiver"].astype(str).str.strip().str.casefold().eq("pm")
+        & debt_rows["Box"].astype(str).str.strip().eq("Property Management")
+    )
+    debt_rows = debt_rows.loc[~cost_gap].copy()
     vprint(f"[build_open_items] total_rows={len(df)} debt_rows={len(debt_rows)}")
 
     if verbose and not df.empty:
@@ -407,6 +430,7 @@ def resolve_repayments(
         skipped_closed = 0
         skipped_nonpositive = 0
         skipped_full_only = 0
+        skipped_not_yet_open = 0
 
         vlog(
             "Repayment start tx_id=%s date=%s debtor=%s creditor=%s currency=%s amount=%.2f candidate_count=%d",
@@ -483,6 +507,16 @@ def resolve_repayments(
                 dlog("Skip nonpositive debt_id=%s open_amount=%.2f", item.debt_id, float(item.open_amount))
                 continue
 
+            if item.opened_at > repayment_date:
+                skipped_not_yet_open += 1
+                dlog(
+                    "Skip not-yet-open debt_id=%s opened_at=%s repayment_date=%s",
+                    item.debt_id,
+                    item.opened_at,
+                    repayment_date,
+                )
+                continue
+
             needed = float(item.open_amount)
 
             if full_only and remaining < needed:
@@ -505,6 +539,7 @@ def resolve_repayments(
                 remaining,
             )
 
+            balance_before = float(item.open_amount)
             item.open_amount = float(item.open_amount - alloc_amt)
             remaining = float(remaining - alloc_amt)
             n_allocs += 1
@@ -526,9 +561,18 @@ def resolve_repayments(
                     creditor=creditor,
                     currency=currency,
                     target_debt_id=item.debt_id,
+                    target_source_tx_id=item.source_tx_id,
                     target_item_type=item.item_type,
                     target_opened_at=item.opened_at,
+                    target_detail=item.detalle,
+                    balance_before=balance_before,
                     allocated_amount=alloc_amt,
+                    balance_after=float(item.open_amount),
+                    repayment_detail=str(rep.get("Detalle", "")),
+                    repayment_tag=str(rep.get("tag", "")),
+                    repayment_debt_family=str(rep.get("debt_family", "")),
+                    repayment_source_file=str(rep.get("source_file", "")),
+                    repayment_source_row=str(rep.get("source_row", "")),
                     rule_version=rule_version,
                     note="full cancellation" if full_only else "partial or full cancellation",
                 )
@@ -553,13 +597,14 @@ def resolve_repayments(
         allocated_amount = initial_amount - remaining
 
         vlog(
-            "Repayment end tx_id=%s allocated=%.2f leftover=%.2f n_allocations=%d skipped_closed=%d skipped_nonpositive=%d skipped_full_only=%d",
+            "Repayment end tx_id=%s allocated=%.2f leftover=%.2f n_allocations=%d skipped_closed=%d skipped_nonpositive=%d skipped_not_yet_open=%d skipped_full_only=%d",
             repayment_tx_id,
             allocated_amount,
             remaining,
             n_allocs,
             skipped_closed,
             skipped_nonpositive,
+            skipped_not_yet_open,
             skipped_full_only,
         )
 

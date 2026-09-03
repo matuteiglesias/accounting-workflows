@@ -415,7 +415,15 @@ def _render_html(model: dict[str, Any], css: str) -> str:
             activity_rows,
             compact=True,
         )
-        + '<p class="caveat">Stock y actividad se presentan por separado: los saldos no se obtienen sumando meses.</p></div></div>'
+        + '<p class="caveat">Stock y actividad se presentan por separado: los saldos no se obtienen sumando meses.</p></div>'
+        + '<div class="span-12">'
+        + _table(
+            "Trazabilidad de repagos · " + meta["last_period_label"],
+            ["Relación", "Importe", "Obligación(es) y saldo antes → después", "Estado"],
+            model["debt"]["repayment_rows"],
+            compact=True,
+        )
+        + '<p class="caveat">Cada obligación proviene de la asignación gobernada del repago; una etiqueta contextual no se convierte por sí sola en identidad de deuda.</p></div></div>'
         + _page_footer(meta, 5)
     )
 
@@ -459,12 +467,47 @@ def _render_html(model: dict[str, Any], css: str) -> str:
     )
 
 
-def build_report_model(store: MetricStore, qa: pd.DataFrame | None) -> dict[str, Any]:
+def build_report_model(
+    store: MetricStore,
+    qa: pd.DataFrame | None,
+    repayment_detail: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     periods = store.periods()
     if not periods:
         raise ValueError("annual metrics contain no year periods")
     labels = _period_labels(periods, store.as_of_date())
     last = periods[-1]
+
+    repayment_rows: list[dict[str, Any]] = []
+    if repayment_detail is not None and not repayment_detail.empty:
+        detail = repayment_detail.loc[
+            repayment_detail["period"].astype(str).str[:4].eq(last)
+        ].copy()
+        detail = detail.sort_values(
+            ["repayment_date", "repayment_tx_id", "target_opened_at"]
+        )
+        for repayment_tx_id, group in detail.groupby("repayment_tx_id", sort=False):
+            first = group.iloc[0]
+            targets = []
+            for _, allocation in group.iterrows():
+                debt_id = _text(allocation.get("target_debt_id"))
+                if not debt_id:
+                    continue
+                description = _text(allocation.get("target_detail")) or "sin detalle fuente"
+                targets.append(
+                    f"{debt_id} · {description} · "
+                    f"{_text(allocation.get('balance_before'))} → {_text(allocation.get('balance_after'))}"
+                )
+            amount = pd.to_numeric(first.get("repayment_amount"), errors="coerce")
+            repayment_rows.append({
+                "label": f"{_text(first.get('repayment_date'))} · {repayment_tx_id}",
+                "values": [
+                    f"{_text(first.get('debtor'))} → {_text(first.get('creditor'))}",
+                    f"{_text(first.get('Currency'))} {float(amount):,.2f}" if pd.notna(amount) else "—",
+                    " | ".join(targets) if targets else "Sin obligación asignada",
+                    _text(first.get("allocation_status")),
+                ],
+            })
 
     kpis = []
     for spec in KPI_SPECS:
@@ -657,6 +700,7 @@ def build_report_model(store: MetricStore, qa: pd.DataFrame | None) -> dict[str,
             "positions": _rows(store, debt_specs, periods, "debt", "positions"),
             "activity": debt_activity,
             "activity_headers": [item[0] for item in activity_map],
+            "repayment_rows": repayment_rows,
         },
         "quality": {
             "contract_counts": contract_counts,
@@ -748,14 +792,20 @@ def render_report(
     contract_path: Path,
     qa_path: Path | None,
     out_dir: Path,
+    repayment_detail_path: Path | None = None,
 ) -> dict[str, Path]:
     metrics = pd.read_csv(metrics_path)
     contract = pd.read_csv(contract_path)
     qa = pd.read_csv(qa_path) if qa_path and qa_path.exists() else None
+    repayment_detail = (
+        pd.read_csv(repayment_detail_path)
+        if repayment_detail_path and repayment_detail_path.exists()
+        else None
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     store = MetricStore(metrics, contract)
-    model = build_report_model(store, qa)
+    model = build_report_model(store, qa, repayment_detail)
     validations = validate_report(store)
     cells = pd.DataFrame(store.rendered).drop_duplicates()
 

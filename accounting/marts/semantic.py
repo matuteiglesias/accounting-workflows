@@ -10,13 +10,14 @@ from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.marts.treasury import build_monthly_box_treasury_flow
 
-RULE_VERSION = "semantic_pr9_treasury_fx_2026-07-01"
+RULE_VERSION = "semantic_accounting_hardening_2026-09-03"
 RULE_REGISTRY_COLUMNS = [
     "rule_id", "rule_version", "priority", "rule_name", "match_fields", "match_pattern",
     "semantic_bucket", "semantic_subbucket", "direction", "direction_source",
     "classification_confidence", "review_required", "warning", "notes", "active",
 ]
 SEMANTIC_RULES = [
+    {"rule_id":"R000_cost_allocation_gap","priority":5,"rule_name":"Unresolved PM cost allocation gap","match_fields":"Tipo,payer,receiver,Box","match_pattern":"Tipo=Prestamo; payer=Costos; receiver=PM; Box=Property Management","semantic_bucket":"cost_allocation_gap","semantic_subbucket":"unresolved_economic_burden","direction":"unknown","direction_source":"unknown","classification_confidence":"high","review_required":True,"warning":"unresolved allocation; outside established debt and ordinary repayment","notes":"Economic burden within Property Management; PM is an accounting scope, not a legal person.","active":True},
     {"rule_id":"R011_personal_expense_text","priority":10,"rule_name":"Personal expense text","match_fields":"Detalle,notes","match_pattern":"gastos personales","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"personal_expense","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Personal/family expenses are distribution candidates, never property OPEX.","active":True},
     {"rule_id":"R001_rent_collections","priority":20,"rule_name":"Rent collections","match_fields":"Flujo,Tipo","match_pattern":"Flujo=cobros; Tipo=renta","semantic_bucket":"operating_revenue","semantic_subbucket":"rent","direction":"in","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"Operating rent revenue only.","active":True},
     {"rule_id":"R002_property_taxes","priority":30,"rule_name":"Property taxes","match_fields":"Tipo","match_pattern":"impuestos","semantic_bucket":"property_opex","semantic_subbucket":"taxes","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
@@ -43,7 +44,7 @@ AUDIT_COLUMNS = [
     "funding_channel", "source_box", "target_box", "beneficiary_box", "obligation_box",
     "payment_channel", "cash_effect", "debt_effect", "linked_debt_id", "channel", "cash_path",
     "rule_id", "rule_version", "classification_confidence", "classification_status",
-    "review_required", "warning", "notes",
+    "review_required", "warning", "status", "tag", "source_file", "source_row", "notes",
 ]
 SUMMARY_COLUMNS = [
     "period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status",
@@ -219,6 +220,14 @@ def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
     tipo = _norm_key(row.get("Tipo"))
     detail_blob = " ".join(_norm(row.get(c)) for c in ("Detalle", "notes") if c in row.index).casefold()
 
+    if (
+        tipo == "prestamo"
+        and _norm_key(row.get("payer")) == "costos"
+        and _norm_key(row.get("receiver")) == "pm"
+        and _norm(row.get("Box")) == "Property Management"
+    ):
+        return ("cost_allocation_gap", "unresolved_economic_burden", "R000_cost_allocation_gap", "high", True, "review_required", "unresolved allocation; outside established debt and ordinary repayment")
+
     if "gastos personales" in detail_blob:
         return ("family_withdrawal_candidate", "personal_expense", "R011_personal_expense_text", "medium", False, "classified", "review family/informal withdrawal candidate")
     if flujo == "cobros" and tipo == "renta":
@@ -282,7 +291,7 @@ def _prepare_ledger(ledger: pd.DataFrame, freq: str = "M") -> pd.DataFrame:
     period = df["Date"].dt.to_period(freq)
     df["period"] = period.astype(str)
     df["period_end"] = period.dt.end_time.dt.date.astype(str)
-    for col in ["tx_id", "Currency", "Box", "Lugar", "Flujo", "Tipo", "Detalle", "payer", "receiver", "status", "notes", "channel", "cash_path"]:
+    for col in ["tx_id", "Currency", "Box", "Lugar", "Flujo", "Tipo", "Detalle", "payer", "receiver", "status", "tag", "source_file", "source_row", "notes", "channel", "cash_path"]:
         if col not in df.columns:
             df[col] = ""
     return df
@@ -335,16 +344,18 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     audit["review_required"] = audit["review_required"].astype(bool)
     period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
     audit = audit[AUDIT_COLUMNS]
+    legacy_mask = audit["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
+    analysis_audit = audit.loc[~legacy_mask].copy()
     treasury_paths = build_monthly_box_treasury_flow(
-        audit, out_dir=out_dir, freq=freq
+        analysis_audit, out_dir=out_dir, freq=freq
     )
 
-    summary = audit.groupby(["period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status", "review_required", "rule_id"], dropna=False).agg(
+    summary = analysis_audit.groupby(["period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status", "review_required", "rule_id"], dropna=False).agg(
         amount_total=("amount", "sum"), amount_abs_total=("amount", lambda s: s.abs().sum()), n_tx=("tx_id", "count"),
         sample_detalle=("Detalle", "first"), sample_payer=("payer", "first"), sample_receiver=("receiver", "first"),
     ).reset_index()[SUMMARY_COLUMNS]
 
-    work = audit.copy()
+    work = analysis_audit.copy()
     work["amount_in"] = work["amount"].where(work["direction"].eq("in"), 0.0)
     work["amount_out"] = work["amount"].where(work["direction"].eq("out"), 0.0)
     work["net_amount"] = work["amount_in"] - work["amount_out"]
@@ -365,8 +376,8 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     monthly["source_table"] = "ledger_canonical.csv"
     monthly = monthly[MONTHLY_COLUMNS]
 
-    validations = _build_validation_rows(audit, monthly)
-    leakage = build_semantic_leakage_qa(audit)
+    validations = _build_validation_rows(analysis_audit, monthly)
+    leakage = build_semantic_leakage_qa(analysis_audit)
     paths = {
         "semantic_rule_registry": out_dir / "semantic_rule_registry.csv",
         "classification_audit": out_dir / "classification_audit.csv",
@@ -375,6 +386,9 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
         "classification_validation": out_dir / "classification_validation.csv",
         "semantic_leakage_qa": out_dir / "semantic_leakage_qa.csv",
         "semantic_dashboard_coverage": out_dir / "semantic_dashboard_coverage.csv",
+        "legacy_inferred_net_audit": out_dir / "legacy_inferred_net_audit.csv",
+        "pm_cost_allocation_gaps": out_dir / "pm_cost_allocation_gaps.csv",
+        "legacy_inferred_net_impact": out_dir / "legacy_inferred_net_impact.csv",
     }
     paths.update(treasury_paths)
     rule_registry.to_csv(paths["semantic_rule_registry"], index=False)
@@ -383,6 +397,38 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     monthly.to_csv(paths["monthly_flow_semantic_split"], index=False)
     validations.to_csv(paths["classification_validation"], index=False)
     leakage.to_csv(paths["semantic_leakage_qa"], index=False)
+    audit.loc[legacy_mask].to_csv(paths["legacy_inferred_net_audit"], index=False)
+    audit.loc[
+        audit["semantic_bucket"].eq("cost_allocation_gap")
+    ].to_csv(paths["pm_cost_allocation_gaps"], index=False)
+    legacy = audit.loc[legacy_mask].copy()
+    if legacy.empty:
+        impact = pd.DataFrame(columns=[
+            "Box", "Currency", "period", "accountability_cycle", "excluded_rows",
+            "excluded_source_amount", "cash_before", "cash_after", "opex_before",
+            "opex_after", "established_debt_before", "established_debt_after",
+            "repayments_before", "repayments_after", "funding_before", "funding_after",
+            "distributions_before", "distributions_after", "accountability_balance_delta",
+            "professional_drilldown_members_before", "professional_drilldown_members_after",
+        ])
+    else:
+        dates = pd.to_datetime(legacy["Date"], errors="coerce")
+        start_year = dates.dt.year.where(dates.dt.month.ge(3), dates.dt.year - 1)
+        start_month = dates.dt.month.map(lambda month: 3 if 3 <= month <= 8 else 9)
+        starts = pd.to_datetime(dict(year=start_year, month=start_month, day=1))
+        ends = starts + pd.DateOffset(months=6) - pd.Timedelta(days=1)
+        legacy["accountability_cycle"] = starts.dt.date.astype(str) + "_" + ends.dt.date.astype(str)
+        legacy["cash_before"] = legacy["amount"].where(legacy["direction"].isin(["in", "out"]), 0.0)
+        legacy["distribution_before"] = legacy["amount"].where(legacy["direction"].eq("out"), 0.0)
+        impact = legacy.groupby(["Box", "Currency", "period", "accountability_cycle"], dropna=False).agg(
+            excluded_rows=("tx_id", "size"), excluded_source_amount=("amount", "sum"),
+            cash_before=("cash_before", "sum"), distributions_before=("distribution_before", "sum"),
+            professional_drilldown_members_before=("tx_id", "size"),
+        ).reset_index()
+        for column in ["cash_after", "opex_before", "opex_after", "established_debt_before", "established_debt_after", "repayments_before", "repayments_after", "funding_before", "funding_after", "distributions_after", "professional_drilldown_members_after"]:
+            impact[column] = 0.0
+        impact["accountability_balance_delta"] = impact["distributions_before"]
+    impact.to_csv(paths["legacy_inferred_net_impact"], index=False)
     build_semantic_dashboard_coverage().to_csv(paths["semantic_dashboard_coverage"], index=False)
     return paths
 

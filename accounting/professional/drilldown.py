@@ -86,6 +86,9 @@ _ORIGINAL_ENRICH_PROFESSIONAL_TABLE_CONTRACTS = _legacy.enrich_professional_tabl
 _CURRENT_ANNUAL_FLOW_MEMBERSHIP: ContextVar[pd.DataFrame | None] = ContextVar(
     "current_annual_flow_membership", default=None
 )
+_CURRENT_REPAYMENT_DETAIL: ContextVar[pd.DataFrame | None] = ContextVar(
+    "current_repayment_detail", default=None
+)
 
 # Broader support needs FundingSupportSpec rather than the narrow atomic
 # funding_contribution specs. FX is no longer deferred: its dedicated
@@ -598,6 +601,7 @@ def _build_debt_activity_cell(
         period=period,
         display_value=display_value,
         debt_activity=debt_activity,
+        repayment_detail=_CURRENT_REPAYMENT_DETAIL.get(),
         tolerance=tolerance,
     )
     if governed is not None:
@@ -622,6 +626,7 @@ def _build_annual_debt_activity_companion_cell(
         period=period,
         display_value=display_value,
         debt_activity=debt_activity,
+        repayment_detail=_CURRENT_REPAYMENT_DETAIL.get(),
         tolerance=tolerance,
     )
     if governed is not None:
@@ -895,7 +900,19 @@ def build_professional_flow_drilldowns(
         if membership_path is not None
         else pd.DataFrame()
     )
+    repayment_detail_path = _legacy._find_source(
+        Path(repo_root),
+        Path(pack_dir),
+        Path(run_root) if run_root is not None else None,
+        "monthly_debt_repayment_detail.csv",
+    )
+    repayment_detail = (
+        _legacy._read_csv(repayment_detail_path)
+        if repayment_detail_path is not None
+        else pd.DataFrame()
+    )
     token = _CURRENT_ANNUAL_FLOW_MEMBERSHIP.set(membership)
+    repayment_token = _CURRENT_REPAYMENT_DETAIL.set(repayment_detail)
     try:
         return _ORIGINAL_BUILD_PROFESSIONAL_FLOW_DRILLDOWNS(
             repo_root=repo_root,
@@ -907,8 +924,10 @@ def build_professional_flow_drilldowns(
         )
     finally:
         _CURRENT_ANNUAL_FLOW_MEMBERSHIP.reset(token)
+        _CURRENT_REPAYMENT_DETAIL.reset(repayment_token)
 
 
+_legacy.build_professional_flow_drilldowns = build_professional_flow_drilldowns
 main = _legacy.main
 
 

@@ -98,6 +98,8 @@ def _cash_category(row: pd.Series) -> str:
 
 
 def _movement_basis(row: pd.Series) -> str:
+    if _text(row.get("semantic_bucket")) == "cost_allocation_gap":
+        return "economic_only"
     direction_source = _text(row.get("direction_source"))
     direction = _text(row.get("direction"))
     cash_effect = _text(row.get("cash_effect"))

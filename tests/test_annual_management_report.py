@@ -67,15 +67,29 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     metrics_path = tmp_path / "annual_balance_dashboard_metrics.csv"
     contract_path = tmp_path / "annual_balance_dashboard_contract.csv"
     qa_path = tmp_path / "annual_balance_dashboard_qa.csv"
+    repayment_detail_path = tmp_path / "monthly_debt_repayment_detail.csv"
     metrics.to_csv(metrics_path, index=False)
     contract.to_csv(contract_path, index=False)
     qa.to_csv(qa_path, index=False)
+    pd.DataFrame([
+        {
+            "period": "2026-01", "repayment_tx_id": "repay-1",
+            "repayment_date": "2026-01-12", "debtor": "PM", "creditor": "MI",
+            "Currency": "USD", "repayment_amount": 200.0, "allocated_amount": 200.0,
+            "leftover_amount": 0.0, "allocation_status": "resolved",
+            "target_debt_id": "prestamo::debt-1", "target_source_tx_id": "debt-1",
+            "target_item_type": "Prestamo", "target_opened_at": "2025-12-01",
+            "target_detail": "Synthetic obligation", "balance_before": 200.0,
+            "balance_after": 0.0,
+        }
+    ]).to_csv(repayment_detail_path, index=False)
 
     outputs = render_report(
         metrics_path=metrics_path,
         contract_path=contract_path,
         qa_path=qa_path,
         out_dir=tmp_path / "report",
+        repayment_detail_path=repayment_detail_path,
     )
 
     html = outputs["html"].read_text(encoding="utf-8")
@@ -86,6 +100,10 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     assert "2026 YTD" in html
     assert "Operación en USD" in html
     assert "No disponible" in html
+    assert "Trazabilidad de repagos" in html
+    assert "repay-1" in html
+    assert "prestamo::debt-1" in html
+    assert "Synthetic obligation" in html
     assert not (validation["status"] == "fail").any()
     assert not (
         (cells["page_id"] == "summary")

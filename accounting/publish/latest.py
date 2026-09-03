@@ -21,6 +21,7 @@ class PublishPaths:
     public_root: Path
     metrics_latest: Path
     debt_latest: Path
+    run_latest: Path
 
 
 DEFAULT_PUBLIC_SUBDIR = Path("public") / "accounting"
@@ -36,17 +37,22 @@ METRIC_FILES_BY_CLASS = {
         "annual_balance_dashboard_metrics.csv",
         "annual_balance_dashboard_qa.csv",
         "frontend_metric_series.csv",
-        "monthly_operating_statement.csv",
-        "monthly_flow_semantic_split.csv",
-        "monthly_cash_close.csv",
-        "monthly_debt_position.csv",
-        "monthly_debt_activity.csv",
     ],
     "internal_diagnostic": [
         "build_manifest.json",
         "metrics_frontier_qa.csv",
         "frontier_source_qa.csv",
         "source_contract_qa.csv",
+    ],
+}
+
+RUN_FILES_BY_CLASS = {
+    "canonical_dashboard": [
+        "monthly_operating_statement.csv",
+        "monthly_flow_semantic_split.csv",
+        "monthly_cash_close.csv",
+        "monthly_debt_position.csv",
+        "monthly_debt_activity.csv",
     ],
 }
 
@@ -107,8 +113,9 @@ def resolve_paths(
     out_root = project_root / "out"
     metrics_latest = (out_root / "metrics" / f"latest_{scope_tag}").resolve(strict=strict)
     debt_latest = (out_root / "debt_resolution" / f"latest_{scope_tag}").resolve(strict=strict)
+    run_latest = (out_root / "run" / "accounting" / f"latest_{scope_tag}").resolve(strict=strict)
     public_root = project_root / public_subdir / f"latest_{scope_tag}"
-    identities = {path.name for path in [metrics_latest, debt_latest]}
+    identities = {path.name for path in [metrics_latest, debt_latest, run_latest]}
     if strict and len(identities) != 1:
         raise ValueError(
             f"Publish inputs mix accounting runs for {scope_tag}: {sorted(identities)}"
@@ -119,6 +126,7 @@ def resolve_paths(
         public_root=public_root,
         metrics_latest=metrics_latest,
         debt_latest=debt_latest,
+        run_latest=run_latest,
     )
 
 
@@ -240,6 +248,14 @@ def publish_metrics(paths: PublishPaths, mode: str) -> dict[str, Any]:
         METRIC_FILES_BY_CLASS,
         mode,
     )
+    run_published = _publish_classified_files(
+        paths.run_latest,
+        paths.public_root,
+        RUN_FILES_BY_CLASS,
+        mode,
+    )
+    for publish_class, files in run_published.items():
+        published_by_class.setdefault(publish_class, []).extend(files)
     build_manifest_path = paths.metrics_latest / "build_manifest.json"
     build_manifest = read_json(build_manifest_path) if build_manifest_path.exists() else {}
     return {
@@ -334,10 +350,13 @@ def build_publish_contract_qa(paths: PublishPaths, files: list[str]) -> str:
         ),
         "retired generic metric outputs are absent from the public bundle",
     )
-    stock_activity_contracts = {"debt_stock", "debt_activity"}
+    stock_activity_contracts = {
+        "source_of_truth_for_debt_stock",
+        "source_of_truth_for_debt_activity",
+    }
     stock_activity_present = stock_activity_contracts.intersection(
         {
-            artifact_contract_for_name(Path(f).name, f).get("artifact_role")
+            artifact_contract_for_name(Path(f).name, f).get("source_authority")
             for f in files
         }
     )
@@ -380,6 +399,7 @@ def build_bundle_manifest(
                 paths.metrics_latest, paths.project_root
             ),
             "debt_latest": relative_to_project(paths.debt_latest, paths.project_root),
+            "run_latest": relative_to_project(paths.run_latest, paths.project_root),
             "public_root": relative_to_project(paths.public_root, paths.project_root),
         },
         files=sorted(
@@ -412,6 +432,7 @@ def build_dry_run_manifest(paths: PublishPaths, mode: str) -> dict[str, Any]:
         source_paths={
             "metrics_latest": str(paths.metrics_latest),
             "debt_latest": str(paths.debt_latest),
+            "run_latest": str(paths.run_latest),
             "public_root": str(paths.public_root),
         },
         files=[],

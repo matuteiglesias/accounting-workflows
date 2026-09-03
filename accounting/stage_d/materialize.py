@@ -39,6 +39,17 @@ from accounting.support.partitions import load_partitions_json, save_partitions_
 LOG = get_logger("materialize")
 
 
+def _analytical_ledger(ledger: pd.DataFrame) -> pd.DataFrame:
+    """Exclude audit-only inferred residuals from every analytical motor."""
+    if "tag" not in ledger.columns:
+        return ledger.copy()
+    legacy = ledger["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
+    out = ledger.loc[~legacy].copy()
+    if "anomalies" in ledger.attrs:
+        out.attrs["anomalies"] = ledger.attrs["anomalies"]
+    return out
+
+
 def _materialize_debug_enabled() -> bool:
     return str(os.getenv("MATERIALIZE_DEBUG", "0")).strip().lower() in {"1", "true", "yes", "y", "on"}
 
@@ -451,7 +462,8 @@ def materialize_all(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    ledger_df = _ensure_amount_float(ledger_df)
+    source_ledger_df = _ensure_amount_float(ledger_df)
+    ledger_df = _analytical_ledger(source_ledger_df)
     run_scope = load_run_scope_if_present(out_dir)
     if run_scope is not None:
         assert_frame_within_scope(
@@ -548,7 +560,7 @@ def materialize_all(
 
     # 4.5) conservative semantic classification mart and monthly operating statement
     try:
-        semantic_paths = build_semantic_outputs(ledger_df, out_dir=out_dir, freq="M")
+        semantic_paths = build_semantic_outputs(source_ledger_df, out_dir=out_dir, freq="M")
         operating_statement_paths = build_monthly_operating_statement(out_dir=out_dir)
         for name, path in {**semantic_paths, **operating_statement_paths}.items():
             aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _safe_sha256(path)}

@@ -134,6 +134,7 @@ def _execute_debt_activity(
     period: str,
     display_value: float,
     debt_activity: pd.DataFrame,
+    repayment_detail: pd.DataFrame | None,
     tolerance: float,
     annual: bool,
 ):
@@ -244,6 +245,19 @@ def _execute_debt_activity(
         if annual
         else [("Debt activity rows", source)]
     )
+    if spec.activity_type == "repayment" and repayment_detail is not None and not repayment_detail.empty:
+        detail_period_mask = (
+            _legacy._year_mask(repayment_detail, period)
+            if annual
+            else _legacy._period_eq(repayment_detail, period)
+        )
+        allocation_rows = repayment_detail.loc[
+            detail_period_mask
+            & _legacy._source_filter_eq(repayment_detail, "Currency", currency)
+            & _legacy._source_filter_eq(repayment_detail, "debtor", debtor)
+            & _legacy._source_filter_eq(repayment_detail, "creditor", creditor)
+        ].copy()
+        sections.append(("Repayment-to-obligation allocation detail", allocation_rows))
     return (
         status,
         matched,
@@ -265,6 +279,7 @@ def execute_monthly_debt_activity(
     period: str,
     display_value: float,
     debt_activity: pd.DataFrame,
+    repayment_detail: pd.DataFrame | None = None,
     tolerance: float,
 ):
     """Execute one governed monthly debt-activity flow or return ``None``."""
@@ -274,6 +289,7 @@ def execute_monthly_debt_activity(
         period=period,
         display_value=display_value,
         debt_activity=debt_activity,
+        repayment_detail=repayment_detail,
         tolerance=tolerance,
         annual=False,
     )
@@ -285,6 +301,7 @@ def execute_annual_debt_activity(
     period: str,
     display_value: float,
     debt_activity: pd.DataFrame,
+    repayment_detail: pd.DataFrame | None = None,
     tolerance: float,
 ):
     """Execute annual debt activity as a sum of governed monthly activity."""
@@ -294,6 +311,7 @@ def execute_annual_debt_activity(
         period=period,
         display_value=display_value,
         debt_activity=debt_activity,
+        repayment_detail=repayment_detail,
         tolerance=tolerance,
         annual=True,
     )
