@@ -87,6 +87,11 @@ def _write_sources(run_root: Path, metrics_dir: Path) -> None:
             "balance_before", "balance_after",
         ]
     ).to_csv(run_root / "monthly_debt_repayment_detail.csv", index=False)
+    pd.DataFrame([{"period": "2026-08", "as_of_date": "2026-08-31"}]).to_csv(run_root / "monthly_debt_position.csv", index=False)
+    for name in ("monthly_debt_activity.csv", "cost_allocation_gaps.csv"):
+        pd.DataFrame([{"synthetic": True}]).to_csv(run_root / name, index=False)
+    for name in ("monthly_debt_position_qa.csv", "monthly_debt_activity_qa.csv", "cost_allocation_gaps_qa.csv"):
+        pd.DataFrame([{"check": name, "status": "pass", "severity": "error", "detail": "synthetic"}]).to_csv(run_root / name, index=False)
 
 
 def _fake_reporter(kind: str):
@@ -127,6 +132,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
 
     monkeypatch.setattr("accounting.reports.build.render_annual", _fake_reporter("annual"))
     monkeypatch.setattr("accounting.reports.build.render_treasury", _fake_reporter("treasury"))
+    monkeypatch.setattr("accounting.reports.build.render_debt", _fake_reporter("debt"))
     monkeypatch.setattr("accounting.reports.build.render_pdf", _fake_pdf)
 
     outputs = build_report_bundle(
@@ -141,6 +147,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert [row["report_id"] for row in catalog["reports"]] == [
         "annual_management",
         "treasury_accountability",
+        "debt_accountability",
     ]
     assert all(row["pdf"].endswith("report.pdf") for row in catalog["reports"])
     assert all(row["manifest"] is None for row in catalog["reports"])
@@ -158,6 +165,8 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert "run/family_business_accountability_cycles.csv" in {
         source["path"] for source in treasury_manifest["sources"]
     }
+    debt_manifest = json.loads(outputs["debt_manifest"].read_text(encoding="utf-8"))
+    assert len(debt_manifest["sources"]) == 7
     assert Path(outputs["annual_pdf"]).read_bytes().startswith(b"%PDF-")
 
 

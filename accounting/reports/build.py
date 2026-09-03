@@ -20,6 +20,7 @@ from accounting.reports.manifest import (
     write_report_manifest,
 )
 from accounting.reports.pdf import render_pdf
+from accounting.reports.debt_accountability.render import render_report as render_debt
 from accounting.reports.treasury_accountability.render import (
     render_report as render_treasury,
 )
@@ -131,6 +132,12 @@ def build_report_bundle(
     treasury_qa = run_root / "monthly_cash_accountability_qa.csv"
     accountability_cycles = run_root / "family_business_accountability_cycles.csv"
     repayment_detail = run_root / "monthly_debt_repayment_detail.csv"
+    debt_position = run_root / "monthly_debt_position.csv"
+    debt_position_qa = run_root / "monthly_debt_position_qa.csv"
+    debt_activity = run_root / "monthly_debt_activity.csv"
+    debt_activity_qa = run_root / "monthly_debt_activity_qa.csv"
+    cost_gaps = run_root / "cost_allocation_gaps.csv"
+    cost_gaps_qa = run_root / "cost_allocation_gaps_qa.csv"
     required = [
         annual_metrics,
         annual_contract,
@@ -139,19 +146,28 @@ def build_report_bundle(
         treasury_qa,
         accountability_cycles,
         repayment_detail,
+        debt_position, debt_position_qa, debt_activity, debt_activity_qa,
+        cost_gaps, cost_gaps_qa,
     ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"report source artifact(s) missing: {missing}")
 
     _assert_annual_run_identity(annual_metrics, source_run_id)
-    as_of_date, annual_period_label = _annual_metadata(annual_metrics)
+    _annual_as_of_date, annual_period_label = _annual_metadata(annual_metrics)
+    debt_dates = pd.read_csv(debt_position, usecols=["period", "as_of_date"])
+    latest_debt_period = debt_dates["period"].astype(str).max()
+    latest_debt_dates = sorted(set(debt_dates.loc[debt_dates["period"].astype(str).eq(latest_debt_period), "as_of_date"].dropna().astype(str)))
+    if len(latest_debt_dates) != 1:
+        raise ValueError(f"debt report cutoff is not singular: {latest_debt_dates}")
+    as_of_date = latest_debt_dates[0]
     treasury_period_label = _treasury_period_label(treasury_accountability)
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat()
 
     out_dir.mkdir(parents=True, exist_ok=True)
     annual_dir = out_dir / "annual_management"
     treasury_dir = out_dir / "treasury_accountability"
+    debt_dir = out_dir / "debt_accountability"
 
     annual_outputs = render_annual(
         metrics_path=annual_metrics,
@@ -166,6 +182,17 @@ def build_report_bundle(
         cycles_path=accountability_cycles,
         out_dir=treasury_dir,
     )
+    debt_outputs = render_debt(
+        position_path=debt_position,
+        position_qa_path=debt_position_qa,
+        activity_path=debt_activity,
+        activity_qa_path=debt_activity_qa,
+        repayment_detail_path=repayment_detail,
+        gaps_path=cost_gaps,
+        gaps_qa_path=cost_gaps_qa,
+        out_dir=debt_dir,
+        as_of_date=as_of_date,
+    )
 
     if require_pdf:
         annual_outputs["pdf"] = render_pdf(
@@ -174,13 +201,17 @@ def build_report_bundle(
         treasury_outputs["pdf"] = render_pdf(
             treasury_outputs["html"], treasury_dir / "report.pdf", browser_bin=browser_bin
         )
+        debt_outputs["pdf"] = render_pdf(
+            debt_outputs["html"], debt_dir / "report.pdf", browser_bin=browser_bin
+        )
 
     annual_status = _validation_status(annual_outputs["validation"])
     treasury_status = _validation_status(treasury_outputs["validation"])
-    if annual_status == "fail" or treasury_status == "fail":
+    debt_status = _validation_status(debt_outputs["validation"])
+    if annual_status == "fail" or treasury_status == "fail" or debt_status == "fail":
         raise ValueError(
             "report bundle cannot be cataloged with failed report validation: "
-            f"annual={annual_status} treasury={treasury_status}"
+            f"annual={annual_status} treasury={treasury_status} debt={debt_status}"
         )
 
     annual_manifest = build_report_manifest(
@@ -218,6 +249,27 @@ def build_report_bundle(
     treasury_manifest_path = treasury_dir / "report_manifest.json"
     write_report_manifest(treasury_manifest_path, treasury_manifest)
 
+    debt_manifest = build_report_manifest(
+        report_id="debt_accountability",
+        renderer_version="debt_accountability.v1",
+        source_run_id=source_run_id,
+        scope_tag=scope_tag,
+        as_of_date=as_of_date,
+        sources=[
+            _source(debt_position, "run/monthly_debt_position.csv"),
+            _source(debt_position_qa, "run/monthly_debt_position_qa.csv"),
+            _source(debt_activity, "run/monthly_debt_activity.csv"),
+            _source(debt_activity_qa, "run/monthly_debt_activity_qa.csv"),
+            _source(repayment_detail, "run/monthly_debt_repayment_detail.csv"),
+            _source(cost_gaps, "run/cost_allocation_gaps.csv"),
+            _source(cost_gaps_qa, "run/cost_allocation_gaps_qa.csv"),
+        ],
+        outputs=_manifest_outputs(debt_outputs, bundle_root=out_dir),
+        validation_status=debt_status,
+    )
+    debt_manifest_path = debt_dir / "report_manifest.json"
+    write_report_manifest(debt_manifest_path, debt_manifest)
+
     # The catalog is the viewer boundary. Internal provenance manifests and
     # trace/validation CSVs remain under out/reports and are deliberately not
     # part of the public document-discovery contract.
@@ -238,6 +290,16 @@ def build_report_bundle(
                 sort_order=10,
                 html="annual_management/report.html",
                 pdf="annual_management/report.pdf" if require_pdf else None,
+                manifest=None,
+            ),
+            ReportCatalogItem(
+                report_id="debt_accountability",
+                title="Posición y movimientos de deuda",
+                description="Obligaciones registradas, actividad, repagos y trazabilidad.",
+                period_label=f"{as_of_date[:4]} YTD · cierre {as_of_date}",
+                sort_order=30,
+                html="debt_accountability/report.html",
+                pdf="debt_accountability/report.pdf" if require_pdf else None,
                 manifest=None,
             ),
             ReportCatalogItem(
@@ -267,6 +329,9 @@ def build_report_bundle(
         "treasury_html": treasury_outputs["html"],
         "treasury_pdf": treasury_outputs.get("pdf", Path()),
         "treasury_manifest": treasury_manifest_path,
+        "debt_html": debt_outputs["html"],
+        "debt_pdf": debt_outputs.get("pdf", Path()),
+        "debt_manifest": debt_manifest_path,
     }
 
 

@@ -436,6 +436,9 @@ _run_reports_action:
 		test -s "$(RUN_REPORTS_DIR)/treasury_accountability/report.html"; \
 		test -s "$(RUN_REPORTS_DIR)/treasury_accountability/report.pdf"; \
 		test -s "$(RUN_REPORTS_DIR)/treasury_accountability/report_manifest.json"; \
+		test -s "$(RUN_REPORTS_DIR)/debt_accountability/report.html"; \
+		test -s "$(RUN_REPORTS_DIR)/debt_accountability/report.pdf"; \
+		test -s "$(RUN_REPORTS_DIR)/debt_accountability/report_manifest.json"; \
 	'
 
 
