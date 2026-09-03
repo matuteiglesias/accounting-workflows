@@ -9,7 +9,7 @@ evidence (``direction_source == box_party_match``).
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 import pandas as pd
 
@@ -55,6 +55,20 @@ ACCOUNTABILITY_QA_COLUMNS = [
     "check", "period", "Box", "Currency", "amount", "status", "severity", "detail"
 ]
 TOLERANCE = 0.01
+DEFAULT_RESIDUAL_SHARE_WARN_THRESHOLD = 0.10
+DEFAULT_RESIDUAL_ABSOLUTE_WARN_THRESHOLDS = {"ARS": 100_000.0, "USD": 100.0}
+RESIDUAL_AUDIT_COLUMNS = [
+    "tx_id", "Date", "period", "Box", "Currency", "direction", "amount",
+    "payer", "receiver", "semantic_bucket", "semantic_subbucket",
+    "movement_basis", "direction_source", "cash_effect", "rule_id",
+]
+RESIDUAL_MATERIALITY_COLUMNS = [
+    "period", "Box", "Currency", "other_cash_in", "total_cash_in",
+    "other_cash_in_share", "other_cash_out", "total_cash_out",
+    "other_cash_out_share", "n_in_transactions", "n_out_transactions",
+    "top_source_tx_ids_in", "top_source_tx_ids_out", "share_warn_threshold",
+    "absolute_warn_threshold", "status", "severity", "detail",
+]
 
 
 def _text(value: Any) -> str:
@@ -121,6 +135,72 @@ def _cash_direction(row: pd.Series) -> str:
     if basis == "non_cash_support":
         return "non_cash"
     return "none"
+
+
+def _residual_cash_outputs(
+    work: pd.DataFrame,
+    *,
+    share_warn_threshold: float,
+    absolute_warn_thresholds: Mapping[str, float],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    residual = work.loc[work["movement_basis"].eq("actual_cash")].copy()
+    residual["__component"] = residual.apply(
+        lambda row: _cash_component(_text(row.get("cash_category")), _text(row.get("cash_direction"))),
+        axis=1,
+    )
+    residual = residual.loc[residual["__component"].isin({"other_cash_in", "other_cash_out"})]
+    for column in RESIDUAL_AUDIT_COLUMNS:
+        if column not in residual.columns:
+            residual[column] = ""
+    audit = residual[RESIDUAL_AUDIT_COLUMNS].sort_values(
+        ["period", "Box", "Currency", "Date", "tx_id"]
+    ).reset_index(drop=True)
+
+    rows: list[dict[str, Any]] = []
+    actual = work.loc[work["movement_basis"].eq("actual_cash")].copy()
+    keys = actual[["period", "Box", "Currency"]].drop_duplicates()
+    for _, key in keys.iterrows():
+        mask = (
+            actual["period"].eq(key["period"])
+            & actual["Box"].eq(key["Box"])
+            & actual["Currency"].eq(key["Currency"])
+        )
+        group = actual.loc[mask]
+        residual_group = residual.loc[
+            residual["period"].eq(key["period"])
+            & residual["Box"].eq(key["Box"])
+            & residual["Currency"].eq(key["Currency"])
+        ]
+        incoming = residual_group.loc[residual_group["__component"].eq("other_cash_in")]
+        outgoing = residual_group.loc[residual_group["__component"].eq("other_cash_out")]
+        total_in = float(pd.to_numeric(group["amount_in"], errors="coerce").fillna(0.0).sum())
+        total_out = float(pd.to_numeric(group["amount_out"], errors="coerce").fillna(0.0).sum())
+        other_in = float(pd.to_numeric(incoming["amount_in"], errors="coerce").fillna(0.0).sum())
+        other_out = float(pd.to_numeric(outgoing["amount_out"], errors="coerce").fillna(0.0).sum())
+        share_in = other_in / total_in if total_in else 0.0
+        share_out = other_out / total_out if total_out else 0.0
+        absolute = float(absolute_warn_thresholds.get(_text(key["Currency"]), float("inf")))
+        warn_in = other_in > TOLERANCE and (share_in > share_warn_threshold or other_in > absolute)
+        warn_out = other_out > TOLERANCE and (share_out > share_warn_threshold or other_out > absolute)
+        warn = warn_in or warn_out
+        top = lambda frame: ";".join(
+            frame.assign(__amount=pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0))
+            .sort_values(["__amount", "tx_id"], ascending=[False, True])["tx_id"].astype(str).head(10)
+        )
+        rows.append({
+            "period": key["period"], "Box": key["Box"], "Currency": key["Currency"],
+            "other_cash_in": other_in, "total_cash_in": total_in,
+            "other_cash_in_share": share_in, "other_cash_out": other_out,
+            "total_cash_out": total_out, "other_cash_out_share": share_out,
+            "n_in_transactions": len(incoming), "n_out_transactions": len(outgoing),
+            "top_source_tx_ids_in": top(incoming), "top_source_tx_ids_out": top(outgoing),
+            "share_warn_threshold": share_warn_threshold,
+            "absolute_warn_threshold": absolute,
+            "status": "warn" if warn else "pass", "severity": "warning",
+            "detail": "Residual cash is diagnostic only; warning thresholds never reclassify transactions.",
+        })
+    qa = pd.DataFrame(rows, columns=RESIDUAL_MATERIALITY_COLUMNS)
+    return audit, qa
 
 
 def _motor_frame(path: Path, *, flow: bool) -> pd.DataFrame:
@@ -246,6 +326,8 @@ def build_monthly_box_treasury_flow(
     out_dir: Path,
     freq: str = "M",
     tolerance: float = TOLERANCE,
+    residual_share_warn_threshold: float = DEFAULT_RESIDUAL_SHARE_WARN_THRESHOLD,
+    residual_absolute_warn_thresholds: Mapping[str, float] | None = None,
 ) -> Dict[str, Path]:
     """Build semantic monthly cash movement using physical Box evidence only."""
     required = {
@@ -273,6 +355,12 @@ def build_monthly_box_treasury_flow(
     )
     work["gross_amount"] = work["amount"].abs()
     work["__review"] = work["review_required"].map(_truth).astype(int)
+    residual_audit, residual_qa = _residual_cash_outputs(
+        work,
+        share_warn_threshold=residual_share_warn_threshold,
+        absolute_warn_thresholds=residual_absolute_warn_thresholds
+        or DEFAULT_RESIDUAL_ABSOLUTE_WARN_THRESHOLDS,
+    )
 
     group_cols = [
         "period", "period_end", "Box", "Currency", "movement_basis", "cash_direction",
@@ -309,12 +397,18 @@ def build_monthly_box_treasury_flow(
     out_dir.mkdir(parents=True, exist_ok=True)
     flow_path = out_dir / "monthly_box_treasury_flow.csv"
     qa_path = out_dir / "monthly_box_treasury_flow_qa.csv"
+    residual_path = out_dir / "treasury_residual_cash_audit.csv"
+    residual_qa_path = out_dir / "treasury_residual_cash_materiality_qa.csv"
     monthly.to_csv(flow_path, index=False)
+    residual_audit.to_csv(residual_path, index=False)
+    residual_qa.to_csv(residual_qa_path, index=False)
     qa = _build_treasury_qa(monthly, out_dir=out_dir, freq=freq, tolerance=tolerance)
     qa.to_csv(qa_path, index=False)
     return {
         "monthly_box_treasury_flow": flow_path,
         "monthly_box_treasury_flow_qa": qa_path,
+        "treasury_residual_cash_audit": residual_path,
+        "treasury_residual_cash_materiality_qa": residual_qa_path,
     }
 
 

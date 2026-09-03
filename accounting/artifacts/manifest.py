@@ -192,6 +192,26 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "source_of_truth_for_treasury_flow",
             "notes": "Canonical effective Box cash movement; actual cash requires physical Box-counterparty evidence.",
         }
+    if key == "treasury_residual_cash_audit.csv":
+        return {
+            "artifact_role": "diagnostic",
+            "accounting_nature": "flow",
+            "grain": "tx",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only",
+            "source_authority": "treasury_residual_membership_evidence",
+            "notes": "Transaction-grain traceability for other_cash_in/out; does not reclassify cash.",
+        }
+    if key == "treasury_residual_cash_materiality_qa.csv":
+        return {
+            "artifact_role": "qa",
+            "accounting_nature": "quality",
+            "grain": "monthly_box_currency",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only",
+            "source_authority": "treasury_residual_materiality_diagnostic",
+            "notes": "Configurable WARN-only residual cash materiality diagnostics.",
+        }
     if key == "monthly_cash_accountability.csv":
         return {
             "artifact_role": "canonical_source",

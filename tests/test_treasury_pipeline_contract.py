@@ -13,6 +13,15 @@ def test_treasury_artifact_contracts_are_explicit():
     assert flow["currency_policy"] == "by_currency"
     assert flow["source_authority"] == "source_of_truth_for_treasury_flow"
 
+    residual = artifact_contract_for_name("treasury_residual_cash_audit.csv")
+    assert residual["artifact_role"] == "diagnostic"
+    assert residual["grain"] == "tx"
+    assert residual["frontend_suitability"] == "internal_only"
+
+    residual_qa = artifact_contract_for_name("treasury_residual_cash_materiality_qa.csv")
+    assert residual_qa["artifact_role"] == "qa"
+    assert residual_qa["grain"] == "monthly_box_currency"
+
     accountability = artifact_contract_for_name("monthly_cash_accountability.csv")
     assert accountability["artifact_role"] == "canonical_source"
     assert accountability["accounting_nature"] == "mixed"
