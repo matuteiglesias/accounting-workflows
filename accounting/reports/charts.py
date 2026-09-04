@@ -7,6 +7,7 @@ no ledger classification and no client-side aggregation.
 """
 
 from dataclasses import dataclass
+import hashlib
 from math import cos, pi, sin
 from typing import Mapping
 from xml.sax.saxutils import escape
@@ -25,6 +26,12 @@ PAYMENT_DISPLAY_ALIASES = {
     "Property Management": "Caja PM",
     "Inquilino": "Inquilino no identificado",
 }
+TITLE_PREFIX_ALIASES = {
+    "TAX_SERVICE.PAYMENTS.BY_ACTOR": (
+        "Impuestos y servicios pagados o aplicados por actor",
+        "Impuestos y servicios por fuente de cobertura",
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +48,11 @@ class PieSpec:
     subtitle: str = ""
     max_slices: int = 8
 
+    def __post_init__(self) -> None:
+        alias = TITLE_PREFIX_ALIASES.get(self.source_metric)
+        if alias and self.title.startswith(alias[0]):
+            object.__setattr__(self, "title", self.title.replace(alias[0], alias[1], 1))
+
 
 def _canonical_actor_identity(value: object) -> str:
     text = str(value or "").strip()
@@ -53,12 +65,21 @@ def _amount(value: float) -> str:
     return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _stable_identity_color(identity: str) -> str:
+    """Return a deterministic blue-forward color from canonical slice identity."""
+    digest = hashlib.sha256(identity.encode("utf-8")).digest()
+    red = 35 + digest[0] % 85
+    green = 70 + digest[1] % 105
+    blue = 120 + digest[2] % 100
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
 def build_stable_color_map(
     rows: pd.DataFrame,
     slice_dimension: str,
     measure: str = "value",
 ) -> dict[str, str]:
-    """Assign one deterministic family-level color per canonical slice identity."""
+    """Assign one deterministic family-level palette color per slice identity."""
     if rows.empty:
         return {}
     if slice_dimension not in rows.columns or measure not in rows.columns:
@@ -132,7 +153,7 @@ def render_pie_svg(
     def color_for(identity: str, index: int) -> str:
         if color_map and identity in color_map:
             return str(color_map[identity])
-        return PALETTE[index % len(PALETTE)]
+        return _stable_identity_color(identity)
 
     def display_for(row: pd.Series) -> str:
         candidate = str(row.get("display_label", "") or "").strip()
