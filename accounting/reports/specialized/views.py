@@ -18,6 +18,7 @@ from accounting.reports.charts import (
     professional_support_view,
     professional_tax_service_payment_view,
 )
+from accounting.reports.specialized import round2_views as _round2
 
 
 TOLERANCE = 0.01
@@ -58,7 +59,13 @@ def _path_for(source_key: str, run_root: Path, metrics_dir: Path) -> Path:
     return (run_root if root_key == "run" else metrics_dir) / filename
 
 
-def source_paths_for_view(view_key: str, run_root: Path, metrics_dir: Path) -> tuple[tuple[Path, str], ...]:
+def source_paths_for_view(
+    view_key: str,
+    run_root: Path,
+    metrics_dir: Path,
+) -> tuple[tuple[Path, str], ...]:
+    if view_key in _round2.VIEW_REQUIREMENTS:
+        return _round2.source_paths_for_view(view_key, run_root, metrics_dir)
     keys = _VIEW_REQUIREMENTS[view_key]
     paths = []
     for key in keys:
@@ -463,6 +470,21 @@ def build_specialized_view(
     metrics_dir: Path,
     scope: str,
 ) -> SpecializedViewResult:
+    if view_key in _round2.VIEW_REQUIREMENTS:
+        result = _round2.build_view(
+            view_key,
+            run_root=run_root,
+            metrics_dir=metrics_dir,
+            scope=scope,
+        )
+        return SpecializedViewResult(
+            result.frame,
+            result.metric_id,
+            result.dimension,
+            result.table_columns,
+            source_paths_for_view(view_key, run_root, metrics_dir),
+        )
+
     loaders: dict[str, Callable[[], pd.DataFrame]] = {
         key: (lambda source_key=key: _read(source_key, run_root, metrics_dir))
         for key in _VIEW_REQUIREMENTS[view_key]
