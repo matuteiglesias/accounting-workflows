@@ -7,8 +7,11 @@ import pandas as pd
 
 from accounting.reports.charts import PieSpec, render_pie_svg
 from accounting.reports.pdf import render_pdf
-from accounting.reports.specialized.spec import REPORT_SPECS
+from accounting.reports.specialized.spec import REPORT_SPECS, SpecializedReportSpec
 from accounting.reports.specialized.views import SpecializedViewResult, build_specialized_view
+
+
+TOLERANCE = 0.01
 
 
 def _money(value: float, currency: str) -> str:
@@ -140,6 +143,63 @@ def _plain_trace(report_id: str, result: SpecializedViewResult, frame: pd.DataFr
     return pd.DataFrame(rows)
 
 
+def _build_validation(
+    spec: SpecializedReportSpec,
+    selected: pd.DataFrame,
+    trace: pd.DataFrame,
+    result: SpecializedViewResult,
+) -> pd.DataFrame:
+    rows: list[dict[str, str]] = []
+
+    def add(check: str, ok: bool, detail: str) -> None:
+        rows.append({
+            "check": check,
+            "status": "pass" if ok else "fail",
+            "severity": "error",
+            "detail": detail,
+        })
+
+    add("governed_population_nonempty", not selected.empty, f"rows={len(selected)}")
+    values = pd.to_numeric(selected.get("value", pd.Series(dtype=float)), errors="coerce")
+    add("values_available", bool(len(values)) and values.notna().all(), f"na={int(values.isna().sum())}")
+    add("values_nonnegative", not values.dropna().lt(-TOLERANCE).any(), f"min={values.min() if len(values) else 'NA'}")
+    scopes = set(selected.get("scope", pd.Series(dtype=str)).astype(str))
+    add("scope_matches_recipe", scopes == {spec.scope}, f"scope={sorted(scopes)} expected={spec.scope}")
+    add("trace_nonempty", not trace.empty, f"rows={len(trace)}")
+
+    if not selected.empty and not trace.empty:
+        for currency in sorted(selected["Currency"].astype(str).unique()):
+            source_rows = selected.loc[selected["Currency"].astype(str).eq(currency)].copy()
+            trace_rows = trace.loc[trace["Currency"].astype(str).eq(currency)].copy()
+            source_total = float(pd.to_numeric(source_rows["value"], errors="coerce").sum())
+            trace_total = float(pd.to_numeric(trace_rows["value"], errors="coerce").sum())
+            add(
+                f"trace_total_matches_view::{currency}",
+                abs(source_total - trace_total) <= TOLERANCE,
+                f"view={source_total}; trace={trace_total}",
+            )
+            if "line_id" in source_rows.columns and "line_id" in trace_rows.columns:
+                source_ids = set(source_rows["line_id"].fillna("").astype(str)) - {""}
+                trace_ids = set(trace_rows["line_id"].fillna("").astype(str)) - {""}
+                add(
+                    f"trace_membership_matches_view::{currency}",
+                    source_ids == trace_ids,
+                    f"source={len(source_ids)}; trace={len(trace_ids)}",
+                )
+            add(
+                f"single_native_currency_section::{currency}",
+                set(trace_rows["Currency"].astype(str)) <= {currency},
+                f"currency={currency}",
+            )
+
+    add(
+        "report_declares_interpretation_boundary",
+        bool(spec.establishes.strip()) and bool(spec.caveat.strip()),
+        "establishes/caveat present",
+    )
+    return pd.DataFrame(rows)
+
+
 def render_specialized(
     *,
     report_id: str,
@@ -196,6 +256,9 @@ def render_specialized(
             )
             svg, pie_trace = render_pie_svg(pie_spec, current, denominator)
             pie_trace.insert(0, "report_id", report_id)
+            if "line_id" in current.columns:
+                line_map = dict(zip(current[result.dimension].astype(str), current["line_id"].astype(str)))
+                pie_trace["line_id"] = pie_trace["slice_key"].astype(str).map(line_map).fillna("")
             traces.append(pie_trace)
             blocks.append(f'<div class="chart">{svg}</div>')
         elif "bars" in spec.section_plan:
@@ -221,6 +284,12 @@ def render_specialized(
     trace_path = out_dir / "internal_trace.csv"
     trace.to_csv(trace_path, index=False)
 
+    validation = _build_validation(spec, selected, trace, result)
+    validation_path = out_dir / "report_validation.csv"
+    validation.to_csv(validation_path, index=False)
+    if validation["status"].eq("fail").any():
+        raise ValueError(f"specialized report validation failed: {report_id}; inspect {validation_path}")
+
     cutoff_label = pd.Timestamp(as_of_date).strftime("%d/%m/%Y")
     body = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(spec.title)}</title><style>{css}</style></head><body><main>
       <header><p class="eyebrow">INFORME ESPECIALIZADO · {html.escape(spec.family.upper())}</p><h1>{html.escape(spec.title)}</h1><p class="subtitle">Corte contable: {html.escape(cutoff_label)} · Scope: {html.escape(_scope_label(spec.scope))}</p></header>
@@ -230,7 +299,7 @@ def render_specialized(
     </main></body></html>'''
     html_path = out_dir / "report.html"
     html_path.write_text(body, encoding="utf-8")
-    outputs = {"html": html_path, "trace": trace_path}
+    outputs = {"html": html_path, "trace": trace_path, "validation": validation_path}
     if require_pdf:
         outputs["pdf"] = render_pdf(html_path, out_dir / "report.pdf", browser_bin=browser_bin)
     return outputs
