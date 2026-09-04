@@ -22,6 +22,7 @@ from accounting.reports.manifest import (
 from accounting.reports.pdf import render_pdf
 from accounting.reports.specialized.render import render_specialized
 from accounting.reports.specialized.spec import REPORT_SPECS
+from accounting.reports.specialized.views import source_paths_for_view, view_is_available
 from accounting.reports.debt_accountability.render import render_report as render_debt
 from accounting.reports.treasury_accountability.render import (
     render_report as render_treasury,
@@ -243,18 +244,20 @@ def build_report_bundle(
         out_dir=debt_dir,
         as_of_date=as_of_date,
     )
-    specialized_outputs = {}
+
+    specialized_outputs: dict[str, dict[str, Path]] = {}
     specialized_dir = out_dir / "specialized"
-    # Specialized reports are an additive governed surface.  Keep the core
-    # three-report contract fixture-safe when optional professional views are
-    # unavailable; production runs with the governed sources materialize all.
-    active_specialized_specs = REPORT_SPECS if semantic_audit.is_file() and stakeholder_support.is_file() else ()
+    active_specialized_specs = tuple(
+        spec for spec in REPORT_SPECS
+        if view_is_available(spec.view_key, run_root, metrics_dir)
+    )
     for specialized_spec in active_specialized_specs:
         specialized_outputs[specialized_spec.report_id] = render_specialized(
             report_id=specialized_spec.report_id,
             run_root=run_root,
             metrics_dir=metrics_dir,
             out_dir=specialized_dir / specialized_spec.report_id,
+            as_of_date=as_of_date,
             browser_bin=browser_bin,
             require_pdf=require_pdf,
         )
@@ -342,24 +345,42 @@ def build_report_bundle(
     for specialized_spec in active_specialized_specs:
         report_out = specialized_outputs[specialized_spec.report_id]
         report_dir = specialized_dir / specialized_spec.report_id
+        specialized_sources = [
+            _source(path, logical_path)
+            for path, logical_path in source_paths_for_view(
+                specialized_spec.view_key, run_root, metrics_dir
+            )
+        ]
         manifest = build_report_manifest(
             report_id=specialized_spec.report_id,
-            renderer_version="specialized.v1",
+            renderer_version="specialized.v2",
             source_run_id=source_run_id,
             scope_tag=scope_tag,
             as_of_date=as_of_date,
-            sources=[_source(semantic_audit, "run/classification_audit.csv"), _source(stakeholder_support, "run/monthly_stakeholder_support.csv"), _source(annual_metrics, "metrics/annual_balance_dashboard_metrics.csv")],
+            sources=specialized_sources,
             outputs=_manifest_outputs(report_out, bundle_root=out_dir),
             validation_status="pass",
         )
         specialized_manifests[specialized_spec.report_id] = report_dir / "report_manifest.json"
         write_report_manifest(specialized_manifests[specialized_spec.report_id], manifest)
 
+    specialized_source_paths = []
+    seen_specialized_sources = set()
+    for specialized_spec in active_specialized_specs:
+        for path, _ in source_paths_for_view(specialized_spec.view_key, run_root, metrics_dir):
+            if path not in seen_specialized_sources:
+                specialized_source_paths.append(path)
+                seen_specialized_sources.add(path)
+    specialized_html = [
+        specialized_outputs[spec.report_id]["html"]
+        for spec in active_specialized_specs
+    ]
+
     pack_validation = _build_pack_validation(
         run_id=source_run_id, scope_tag=scope_tag, as_of_date=as_of_date,
         annual_metrics=annual_metrics, debt_position=debt_position,
-        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, stakeholder_support, debt_position, debt_activity, repayment_detail, cost_gaps],
-        report_html=[annual_outputs["html"], treasury_outputs["html"], debt_outputs["html"]],
+        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, stakeholder_support, debt_position, debt_activity, repayment_detail, cost_gaps, *specialized_source_paths],
+        report_html=[annual_outputs["html"], treasury_outputs["html"], debt_outputs["html"], *specialized_html],
     )
     pack_validation_path = out_dir / "report_pack_validation.csv"
     pack_validation.to_csv(pack_validation_path, index=False)
