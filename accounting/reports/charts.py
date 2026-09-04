@@ -191,6 +191,32 @@ def professional_fb_receipts_view(semantic_audit: pd.DataFrame, *, scope: str = 
     return pd.DataFrame(rows)
 
 
+def professional_rent_receipts_view(semantic_audit: pd.DataFrame, *, scope: str = "FBPM") -> pd.DataFrame:
+    """Governed rent cash receipts split by accounting Box."""
+    frame = semantic_audit.copy()
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.loc[
+        frame["Box"].astype(str).isin({"Family Business", "Property Management"})
+        & frame["semantic_subbucket"].astype(str).eq("rent")
+        & frame["direction"].astype(str).eq("in")
+        & frame["cash_effect"].astype(str).eq("cash_in_box")
+    ].copy()
+    frame["value"] = pd.to_numeric(frame["amount"], errors="coerce")
+    frame["period"] = frame["Date"].dt.year.astype("Int64").astype(str)
+    rows = []
+    for (period, currency, box), group in frame.groupby(["period", "Currency", "Box"], sort=True):
+        rows.append({
+            "metric_id": "RENT.CASH_RECEIPTS.BY_BOX",
+            "line_id": f"RENT.CASH_RECEIPTS.BY_BOX|{period}|{currency}|{box}",
+            "period": period, "period_basis": "annual", "Currency": currency, "scope": scope,
+            "box": box, "value": float(group["value"].sum()),
+            "source_table": "classification_audit.csv",
+            "source_filter": "semantic_subbucket=rent; direction=in; cash_effect=cash_in_box",
+            "calculation_rule": "annual governed rent cash receipts grouped by accounting Box",
+        })
+    return pd.DataFrame(rows)
+
+
 def professional_tax_service_support_view(stakeholder_support: pd.DataFrame, *, scope: str = "FBPM") -> pd.DataFrame:
     """Recognized taxes/services applied by actors to PM, not PM cash-out."""
     frame = stakeholder_support.copy()
@@ -212,5 +238,36 @@ def professional_tax_service_support_view(stakeholder_support: pd.DataFrame, *, 
             "source_table": "monthly_stakeholder_support.csv",
             "source_filter": "target_box=Property Management; obligation_category in taxes,services",
             "calculation_rule": "annual recognized taxes/services support grouped by funding actor",
+        })
+    return pd.DataFrame(rows)
+
+
+def professional_tax_service_payment_view(semantic_audit: pd.DataFrame, *, scope: str = "FBPM") -> pd.DataFrame:
+    """All governed tax/service applications, by identified payer/supporter.
+
+    Economic-expense legs are not counted when a separate direct-support leg
+    exists.  Box cash expenses remain attributed to the paying Box.
+    """
+    frame = semantic_audit.copy()
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.loc[
+        frame["semantic_subbucket"].astype(str).isin({"taxes", "services"})
+        & frame["Box"].astype(str).isin({"Family Business", "Property Management"})
+        & frame["cash_effect"].astype(str).isin({"cash_out_box", "no_cash_in_box_direct_payment", "no_cash_out_box_direct_payment"})
+        & ~((frame["cash_effect"].astype(str).eq("no_cash_out_box_direct_payment")) & frame["leg_role"].astype(str).eq("economic_expense"))
+    ].copy()
+    frame["payer_actor"] = frame["funding_actor"].where(frame["funding_actor"].notna() & frame["funding_actor"].astype(str).ne(""), frame["Box"])
+    frame["value"] = pd.to_numeric(frame["amount"], errors="coerce")
+    frame["period"] = frame["Date"].dt.year.astype("Int64").astype(str)
+    rows = []
+    for (period, currency, actor), group in frame.groupby(["period", "Currency", "payer_actor"], sort=True):
+        rows.append({
+            "metric_id": "TAX_SERVICE.PAYMENTS.BY_ACTOR",
+            "line_id": f"TAX_SERVICE.PAYMENTS.BY_ACTOR|{period}|{currency}|{actor}",
+            "period": period, "period_basis": "annual", "Currency": currency, "scope": scope,
+            "funding_actor": str(actor), "value": float(group["value"].sum()),
+            "source_table": "classification_audit.csv",
+            "source_filter": "semantic_subbucket in taxes,services; cash/payment leg; economic_expense direct mirror excluded",
+            "calculation_rule": "annual identified tax/service applications grouped by funding actor or paying Box",
         })
     return pd.DataFrame(rows)

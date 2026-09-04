@@ -18,9 +18,11 @@ from accounting.reports.treasury_accountability.spec import (
 from accounting.reports.charts import (
     PieSpec,
     professional_fb_receipts_view,
+    professional_rent_receipts_view,
     professional_distribution_view,
     professional_support_view,
     professional_tax_service_support_view,
+    professional_tax_service_payment_view,
     render_pie_svg,
 )
 
@@ -392,7 +394,8 @@ def _stakeholder_charts_html(
     distribution = professional_distribution_view(semantic_audit, annual_metrics)
     support = professional_support_view(stakeholder_support)
     receipts = professional_fb_receipts_view(semantic_audit)
-    tax_support = professional_tax_service_support_view(stakeholder_support)
+    rents = professional_rent_receipts_view(semantic_audit)
+    tax_support = professional_tax_service_payment_view(semantic_audit)
     cards: list[str] = []
     traces: list[pd.DataFrame] = []
 
@@ -420,6 +423,17 @@ def _stakeholder_charts_html(
             raise ValueError(f"governed FB receipt denominator unavailable: {period} {currency}")
         return float(value)
 
+    def rent_total(period: str, currency: str) -> float:
+        frame = accountability.loc[
+            accountability["Box"].astype(str).isin({"Family Business", "Property Management"})
+            & accountability["Currency"].astype(str).eq(currency)
+            & pd.to_datetime(accountability["period"].astype(str) + "-01", errors="coerce").dt.year.astype("Int64").astype(str).eq(str(period))
+        ]
+        value = pd.to_numeric(frame.get("rent_in", pd.Series(dtype=float)), errors="coerce").sum()
+        if pd.isna(value) or float(value) < 0:
+            raise ValueError(f"governed rent denominator unavailable: {period} {currency}")
+        return float(value)
+
     available = []
     for period in sorted(set(distribution.get("period", pd.Series(dtype=str)).astype(str))):
         available.append(("distribution", period))
@@ -433,7 +447,8 @@ def _stakeholder_charts_html(
         ("distribution", distribution, "DIST.DRAWS.PERSONAL", "recipient", "Distribuciones registradas por receptor"),
         ("support", support, "SUPPORT.BY_ACTOR", "funding_actor", "Pagos y aportes reconocidos por actor"),
         ("fb_receipts", receipts, "FB.CASH_RECEIPTS.BY_NATURE", "receipt_nature", "Fondos recibidos por Family Business"),
-        ("tax_service_support", tax_support, "SUPPORT.TAXES_SERVICES.BY_ACTOR", "funding_actor", "Impuestos y servicios aplicados por actor"),
+        ("rents", rents, "RENT.CASH_RECEIPTS.BY_BOX", "box", "Rentas cobradas por ámbito contable"),
+        ("tax_service_support", tax_support, "TAX_SERVICE.PAYMENTS.BY_ACTOR", "funding_actor", "Impuestos y servicios pagados o aplicados por actor"),
     ]:
         for period in selected:
             for currency in sorted(set(frame.loc[frame["period"].eq(period), "Currency"].astype(str))):
@@ -444,13 +459,16 @@ def _stakeholder_charts_html(
                     denominator = metric_total(metric, period, currency)
                 elif family == "fb_receipts":
                     denominator = receipt_total(period, currency)
+                elif family == "rents":
+                    denominator = rent_total(period, currency)
                 else:
                     denominator = float(subset["value"].sum())
                 spec = PieSpec(
                     chart_id=f"{family}_by_{dim}_{period}_{currency}", source_metric=metric,
                     measure="value", slice_dimension=dim, currency=currency, scope="FBPM",
                     period_basis="annual", period=period, title=f"{title} · {period}{' YTD · corte 31/08/2026' if period == '2026' else ''}",
-                    subtitle=("Entradas registradas; no implica distribución ni destino final" if family == "fb_receipts" else ("Acumulado anual nominal" if currency == "ARS" else "Total anual nominal")),
+                    subtitle=("Entradas registradas; no implica distribución ni destino final" if family == "fb_receipts" else ("Misma moneda; Boxes contables separados" if family == "rents" else ("Acumulado anual nominal" if currency == "ARS" else "Total anual nominal"))),
+                    max_slices=12 if family == "tax_service_support" else 8,
                 )
                 card, trace = _governed_pie_card(spec, subset, denominator)
                 if family == "fb_receipts":
@@ -473,6 +491,10 @@ def _stakeholder_charts_html(
                 denominator = float(pd.to_numeric(accountability.loc[
                     accountability["Box"].astype(str).eq("Family Business")
                     & accountability["Currency"].astype(str).eq(currency), "total_cash_in"], errors="coerce").sum())
+            elif family == "rents":
+                denominator = float(pd.to_numeric(accountability.loc[
+                    accountability["Box"].astype(str).isin({"Family Business", "Property Management"})
+                    & accountability["Currency"].astype(str).eq(currency), "rent_in"], errors="coerce").sum())
             else:
                 denominator = float(subset["value"].sum())
             if denominator <= 0 or subset.empty:

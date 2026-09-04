@@ -3,6 +3,7 @@ import pytest
 
 from accounting.reports.charts import (
     PieSpec, professional_support_view, professional_fb_receipts_view,
+    professional_rent_receipts_view,
     professional_tax_service_support_view, render_pie_svg,
 )
 
@@ -69,3 +70,13 @@ def test_tax_service_support_view_excludes_non_service_support():
     ])
     view = professional_tax_service_support_view(source)
     assert view["value"].sum() == 100
+
+
+def test_rent_receipts_view_keeps_both_accounting_boxes_separate():
+    source = pd.DataFrame([
+        {"Date": "2026-01-01", "Box": "Family Business", "Currency": "ARS", "direction": "in", "cash_effect": "cash_in_box", "semantic_subbucket": "rent", "amount": 100},
+        {"Date": "2026-01-02", "Box": "Property Management", "Currency": "ARS", "direction": "in", "cash_effect": "cash_in_box", "semantic_subbucket": "rent", "amount": 40},
+    ])
+    view = professional_rent_receipts_view(source)
+    assert view["value"].sum() == 140
+    assert set(view["box"]) == {"Family Business", "Property Management"}
