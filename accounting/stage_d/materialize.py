@@ -14,6 +14,7 @@ Writes CSV files (atomic) and small JSON manifest / partitions files.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -796,6 +797,17 @@ def main() -> int:
         "run_id": run_id,
         "inputs": [in_art],
         "params": {"freq": freq, "force": int(force_flag)},
+        "git_sha": subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+        ).stdout.strip() or None,
+        "private_inputs": load_partitions_json(
+            out_dir / "meta" / "stakeholder_private_input.json"
+        ) if (out_dir / "meta" / "stakeholder_private_input.json").exists() else {
+            "present": False,
+            "schema_version": "stakeholder_settlement_override.v2",
+            "row_count": 0,
+            "sha256": None,
+        },
         "outputs": out_arts,
         "warnings": [],
         # optional: keep the returned summary (small + useful)

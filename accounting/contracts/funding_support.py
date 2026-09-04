@@ -72,6 +72,12 @@ _SPECS = (
         requires_funding_channel=True,
     ),
     FundingSupportSpec(
+        spec_id="funding.support.self_contained_direct_obligation_payment",
+        support_kind="direct_obligation_payment",
+        cash_effect="no_cash_out_box_direct_payment",
+        requires_funding_channel=True,
+    ),
+    FundingSupportSpec(
         spec_id="funding.support.debt_linked_support",
         support_kind="debt_linked_support",
         requires_debt_effect=True,

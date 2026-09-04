@@ -227,6 +227,30 @@ def _motor_frame(path: Path, *, flow: bool) -> pd.DataFrame:
     return df[["period", "Box", "Currency", "net"]].copy()
 
 
+def _explicit_non_cash_motor_adjustment(treasury: pd.DataFrame) -> pd.DataFrame:
+    """Adjust legacy source-party motors for explicitly governed non-cash legs."""
+    needed = {"direction_source", "cash_effect", "funding_channel", "gross_amount"}
+    if not needed.issubset(treasury.columns):
+        return pd.DataFrame(columns=["period", "Box", "Currency", "motor_adjustment"])
+    excluded = treasury.loc[
+        treasury["direction_source"].eq("box_party_match")
+        & (
+            treasury["cash_effect"].eq("no_cash_out_box_direct_payment")
+            | (
+                treasury["cash_effect"].eq("no_cash_in_box_direct_payment")
+                & treasury["funding_channel"].eq("constructive_stakeholder_settlement")
+            )
+        )
+    ].copy()
+    excluded["motor_adjustment"] = excluded["gross_amount"].where(
+        excluded["cash_effect"].eq("no_cash_out_box_direct_payment"),
+        -excluded["gross_amount"],
+    )
+    return excluded.groupby(
+        ["period", "Box", "Currency"], dropna=False, as_index=False
+    )["motor_adjustment"].sum()
+
+
 def _build_treasury_qa(
     treasury: pd.DataFrame,
     *,
@@ -243,6 +267,10 @@ def _build_treasury_qa(
         .sum()
         .rename(columns={"net_amount": "treasury_net"})
     )
+    # Legacy Box motors are source-party projections. Explicit governed
+    # direct-payment semantics therefore adjust those motors for reconciliation
+    # without rewriting source history or manufacturing cash.
+    motor_adjustment = _explicit_non_cash_motor_adjustment(treasury)
     balance_path = out_dir / f"box_balance_time_long.freq={freq}.csv"
     flow_path = out_dir / f"box_flow_balance_time_long.freq={freq}.csv"
     balance = _motor_frame(balance_path, flow=False).rename(columns={"net": "box_balance_net"})
@@ -266,7 +294,9 @@ def _build_treasury_qa(
             keys.merge(treasury_net, on=["period", "Box", "Currency"], how="left")
             .merge(flow, on=["period", "Box", "Currency"], how="left")
             .merge(balance, on=["period", "Box", "Currency"], how="left")
+            .merge(motor_adjustment, on=["period", "Box", "Currency"], how="left")
         )
+        check["motor_adjustment"] = pd.to_numeric(check["motor_adjustment"], errors="coerce").fillna(0.0)
         for col in ["treasury_net", "box_flow_net", "box_balance_net"]:
             check[col] = pd.to_numeric(check[col], errors="coerce")
         # A month made entirely of constructive/economic legs legitimately has
@@ -278,8 +308,8 @@ def _build_treasury_qa(
             gap = float("inf")
             if values_present:
                 gap = max(
-                    abs(float(row["treasury_net"]) - float(row["box_balance_net"])),
-                    abs(float(row["box_flow_net"]) - float(row["box_balance_net"])),
+                    abs(float(row["treasury_net"]) - (float(row["box_balance_net"]) + float(row["motor_adjustment"]))),
+                    abs((float(row["box_flow_net"]) + float(row["motor_adjustment"])) - float(row["treasury_net"])),
                 )
             ok = bool(gap <= tolerance)
             rows.append({
@@ -288,7 +318,7 @@ def _build_treasury_qa(
                 "treasury_net": row["treasury_net"], "box_flow_net": row["box_flow_net"],
                 "box_balance_net": row["box_balance_net"], "gap": gap,
                 "status": "pass" if ok else "fail", "severity": "error",
-                "detail": "semantic actual-cash net must equal both physical Box motor nets",
+                "detail": f"semantic actual-cash net equals source Box motors after explicit non-cash adjustment={row.get('motor_adjustment', 0.0)}",
             })
 
     noncash_leak = treasury.loc[
@@ -551,6 +581,13 @@ def build_monthly_cash_accountability(
         on=["period", "Box", "Currency"],
         how="left",
     )
+    motor_adjustment = _explicit_non_cash_motor_adjustment(treasury)
+    controls = controls.merge(
+        motor_adjustment, on=["period", "Box", "Currency"], how="left"
+    )
+    controls["motor_adjustment"] = pd.to_numeric(
+        controls["motor_adjustment"], errors="coerce"
+    ).fillna(0.0)
     controls["box_motor_observed"] = controls["box_motor_net"].notna()
     controls["box_flow_observed"] = controls["box_flow_net"].notna()
     presence_mismatch = controls.loc[
@@ -565,12 +602,18 @@ def build_monthly_cash_accountability(
     controls["box_flow_net"] = pd.to_numeric(
         controls["box_flow_net"], errors="coerce"
     ).fillna(0.0)
+    controls["box_motor_net"] += controls["motor_adjustment"]
+    controls["box_flow_net"] += controls["motor_adjustment"]
     controls = controls.sort_values(["Box", "Currency", "period"]).reset_index(drop=True)
     controls["closing_control"] = controls.groupby(
         ["Box", "Currency"], dropna=False
     )["box_motor_net"].cumsum()
-    observed_gap = controls["closing_control"] - pd.to_numeric(
-        controls["observed_closing_control"], errors="coerce"
+    controls["cumulative_motor_adjustment"] = controls.groupby(
+        ["Box", "Currency"], dropna=False
+    )["motor_adjustment"].cumsum()
+    observed_gap = controls["closing_control"] - (
+        pd.to_numeric(controls["observed_closing_control"], errors="coerce")
+        + controls["cumulative_motor_adjustment"]
     )
     bad_observed = controls.loc[
         controls["observed_closing_control"].notna() & observed_gap.abs().gt(tolerance)

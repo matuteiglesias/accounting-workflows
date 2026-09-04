@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import os
 from typing import Any, Dict, Tuple
 
 import pandas as pd
@@ -49,7 +50,8 @@ AUDIT_COLUMNS = [
     "review_required", "warning", "status", "tag", "source_file", "source_row", "notes",
     "settlement_case_id", "actor_role", "settlement_mode", "physical_payment_id",
     "physical_payer", "physical_payee", "payment_method", "evidence_ref",
-    "evidence_status", "mirror_group_id", "leg_role",
+    "evidence_status", "mirror_group_id", "leg_role", "settlement_nature",
+    "obligation_period", "settlement_period", "debt_origin",
 ]
 SUMMARY_COLUMNS = [
     "period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status",
@@ -410,7 +412,8 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
     for column in set(AUDIT_COLUMNS) - set(audit.columns):
         audit[column] = ""
-    override_path = out_dir / "private_review" / "stakeholder_settlement_overrides.csv"
+    configured_override = os.environ.get("STAKEHOLDER_SETTLEMENT_INPUT", "").strip()
+    override_path = Path(configured_override) if configured_override else out_dir / "private_review" / "stakeholder_settlement_overrides.csv"
     audit, stakeholder_paths = write_stakeholder_outputs(
         audit, out_dir=out_dir, override_path=override_path
     )
