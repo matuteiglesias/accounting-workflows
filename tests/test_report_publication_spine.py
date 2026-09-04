@@ -144,6 +144,9 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     monkeypatch.setattr("accounting.reports.build.render_debt", _fake_reporter("debt"))
     monkeypatch.setattr("accounting.reports.build.render_pdf", _fake_pdf)
     monkeypatch.setattr("accounting.reports.build._build_pack_validation", lambda **kwargs: pd.DataFrame([{"check":"pack","status":"pass","severity":"error","detail":"synthetic"}]))
+    # This fixture verifies the core bundle/catalog contract only. Specialized
+    # report activation has dedicated report-level regression coverage.
+    monkeypatch.setattr("accounting.reports.build.view_is_available", lambda *args, **kwargs: False)
 
     outputs = build_report_bundle(
         run_root=run_root,
@@ -168,9 +171,9 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert {source["path"] for source in annual_manifest["sources"]} == {
         "metrics/annual_balance_dashboard_metrics.csv",
         "metrics/annual_balance_dashboard_contract.csv",
-            "metrics/annual_balance_dashboard_qa.csv",
-            "run/monthly_debt_repayment_detail.csv",
-        }
+        "metrics/annual_balance_dashboard_qa.csv",
+        "run/monthly_debt_repayment_detail.csv",
+    }
     treasury_manifest = json.loads(outputs["treasury_manifest"].read_text(encoding="utf-8"))
     assert "run/family_business_accountability_cycles.csv" in {
         source["path"] for source in treasury_manifest["sources"]
