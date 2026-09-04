@@ -47,8 +47,8 @@ h1 { margin: 5px 0; font-size: 31px; line-height: 1.05; letter-spacing: -.55px; 
 .status-strip { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
 .status-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 9px; color: #4c5768; background: var(--soft); }
 .chart-card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 8px; margin-bottom: 13px; }
-.pie-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px 20px 4px; }
-.pie-card { margin: 0; break-inside: avoid; }
+.pie-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px 20px 4px; align-items: start; }
+.pie-card { margin: 0; break-inside: avoid; align-self: start; }
 svg.governed-pie { width: 100%; height: auto; display: block; }
 .pie-total { font: 700 11px Inter, Arial, sans-serif; fill: #102a56; }
 .chart-note { padding: 0 20px 18px; }
@@ -80,6 +80,7 @@ table.treasury td.non-cash { color: #667085; background: #fafafa; }
 .qa-item strong { display: block; color: var(--navy); font-size: 10px; }
 .qa-item span { display: block; color: var(--muted); font-size: 9px; margin-top: 4px; line-height: 1.35; }
 .footer { color: var(--muted); font-size: 8.5px; padding: 14px 4px 0; display: flex; justify-content: space-between; gap: 20px; }
+.neutral-receipts { background: #f3f4f6; border-color: #c9ced6; }
 @media (max-width: 900px) {
   .report-shell { padding: 10px 8px 30px; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
@@ -92,12 +93,11 @@ table.treasury td.non-cash { color: #667085; background: #fafafa; }
   .report-shell { max-width: none; padding: 0; }
   .hero, .box-section, .qa-card { border-radius: 0; border-color: #bfc6d0; }
   .box-section { break-before: page; }
-.chart-card { break-inside: avoid; }
-.neutral-receipts { background: #f3f4f6; border-color: #c9ced6; }
+  .chart-card { break-inside: avoid; }
   .chart-section { break-before: page; }
-  .pie-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px 12px 2px; }
-  .pie-card { padding: 6px 8px 4px; }
-  svg.governed-pie { max-height: 125px; }
+  .pie-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px 12px 2px; align-items: start; }
+  .pie-card { padding: 6px 8px 4px; align-self: start; }
+  svg.governed-pie { max-height: none; }
   .chart-note { padding: 0 12px 10px; }
   .table-wrap { overflow: visible; border-radius: 0; }
   table.treasury { width: 100%; min-width: 0; font-size: 6.4px; }
