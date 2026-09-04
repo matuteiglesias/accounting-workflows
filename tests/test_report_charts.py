@@ -75,26 +75,29 @@ def test_pie_orders_geometry_legend_and_trace_by_value_then_identity():
     assert svg.index(">B</text>") < svg.index(">C</text>") < svg.index(">A</text>")
 
 
-def test_stable_color_map_preserves_identity_colors_across_periods():
+def test_default_colors_are_stable_by_identity_when_rank_changes():
     family = pd.DataFrame([
         {"actor": "A", "value": 90, "Currency": "ARS", "scope": "FBPM", "period_basis": "annual", "period": "2025"},
         {"actor": "B", "value": 10, "Currency": "ARS", "scope": "FBPM", "period_basis": "annual", "period": "2025"},
         {"actor": "A", "value": 5, "Currency": "ARS", "scope": "FBPM", "period_basis": "annual", "period": "2026"},
         {"actor": "B", "value": 95, "Currency": "ARS", "scope": "FBPM", "period_basis": "annual", "period": "2026"},
     ])
-    colors = build_stable_color_map(family, "actor")
-    trace_2025 = render_pie_svg(
-        _spec(period="2025"), family.loc[family.period.eq("2025")], 100, color_map=colors
-    )[1]
-    trace_2026 = render_pie_svg(
-        _spec(period="2026"), family.loc[family.period.eq("2026")], 100, color_map=colors
-    )[1]
-    color_a_2025 = trace_2025.loc[trace_2025.slice_key.eq("A"), "color"].iloc[0]
-    color_a_2026 = trace_2026.loc[trace_2026.slice_key.eq("A"), "color"].iloc[0]
-    color_b_2025 = trace_2025.loc[trace_2025.slice_key.eq("B"), "color"].iloc[0]
-    color_b_2026 = trace_2026.loc[trace_2026.slice_key.eq("B"), "color"].iloc[0]
-    assert color_a_2025 == color_a_2026
-    assert color_b_2025 == color_b_2026
+    trace_2025 = render_pie_svg(_spec(period="2025"), family.loc[family.period.eq("2025")], 100)[1]
+    trace_2026 = render_pie_svg(_spec(period="2026"), family.loc[family.period.eq("2026")], 100)[1]
+    for actor in ["A", "B"]:
+        color_2025 = trace_2025.loc[trace_2025.slice_key.eq(actor), "color"].iloc[0]
+        color_2026 = trace_2026.loc[trace_2026.slice_key.eq(actor), "color"].iloc[0]
+        assert color_2025 == color_2026
+
+
+def test_optional_family_color_map_is_deterministic():
+    family = pd.DataFrame([
+        {"actor": "A", "value": 90},
+        {"actor": "B", "value": 10},
+        {"actor": "A", "value": 5},
+        {"actor": "B", "value": 95},
+    ])
+    assert build_stable_color_map(family, "actor") == build_stable_color_map(family, "actor")
 
 
 def test_pie_dynamic_height_keeps_long_legend_and_total_inside_viewbox():
@@ -122,6 +125,21 @@ def test_one_slice_population_uses_compact_fallback_without_pie_geometry():
     assert "<path" not in svg
     assert "Only" in svg and "100.0%" in svg and "Total: ARS 60" in svg
     assert trace["slice_key"].tolist() == ["Only"]
+
+
+def test_tax_service_spec_uses_source_of_coverage_wording():
+    spec = PieSpec(
+        chart_id="tax",
+        source_metric="TAX_SERVICE.PAYMENTS.BY_ACTOR",
+        measure="value",
+        slice_dimension="funding_actor",
+        currency="ARS",
+        scope="FBPM",
+        period_basis="annual",
+        period="2026",
+        title="Impuestos y servicios pagados o aplicados por actor · 2026 YTD · corte 31/08/2026",
+    )
+    assert spec.title == "Impuestos y servicios por fuente de cobertura · 2026 YTD · corte 31/08/2026"
 
 
 def test_support_reporting_group_remap_preserves_denominator():
