@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from accounting.reports.specialized.render import render_specialized
 from accounting.reports.specialized.spec import REPORT_SPECS
@@ -77,19 +78,43 @@ def test_round1_semantic_views_reconcile_governed_sources(tmp_path: Path):
     assert set(opex["metric_id"]) == {"IS.OPEX.BY_CATEGORY"}
 
 
+def test_split_based_round1_views_fail_closed_on_annual_reconciliation_gap(tmp_path: Path):
+    run = tmp_path / "run"
+    metrics = tmp_path / "metrics"
+    run.mkdir(); metrics.mkdir()
+    _write_round1_sources(run, metrics)
+    bad = _annual_metrics()
+    bad.loc[bad["metric_id"].eq("IS.RENT.TOTAL"), "value"] = 149
+    bad.to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+
+    with pytest.raises(ValueError, match="monthly rent -> IS.RENT.TOTAL"):
+        build_specialized_view("rent_monthly_evolution", run_root=run, metrics_dir=metrics, scope="FBPM")
+
+    bad = _annual_metrics()
+    bad.loc[
+        bad["metric_id"].eq("IS.OPEX.BY_CATEGORY") & bad["dimension_value"].eq("taxes"),
+        "value",
+    ] = 29
+    bad.to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+    with pytest.raises(ValueError, match="taxes by property"):
+        build_specialized_view("taxes_by_property", run_root=run, metrics_dir=metrics, scope="FBPM")
+
+
 def test_specialized_view_availability_is_per_recipe(tmp_path: Path):
     run = tmp_path / "run"
     metrics = tmp_path / "metrics"
     run.mkdir(); metrics.mkdir()
     _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
 
-    assert view_is_available("rent_monthly_evolution", run, metrics)
-    assert view_is_available("taxes_by_property", run, metrics)
+    assert not view_is_available("rent_monthly_evolution", run, metrics)
+    assert not view_is_available("taxes_by_property", run, metrics)
     assert not view_is_available("rent_by_property", run, metrics)
     assert not view_is_available("pm_support_by_actor", run, metrics)
     assert not view_is_available("distributions_vs_rent", run, metrics)
 
     _annual_metrics().to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+    assert view_is_available("rent_monthly_evolution", run, metrics)
+    assert view_is_available("taxes_by_property", run, metrics)
     assert view_is_available("rent_by_property", run, metrics)
     assert view_is_available("opex_by_category", run, metrics)
 
@@ -118,6 +143,21 @@ def test_round1_renderer_is_self_contained_and_cutoff_driven(tmp_path: Path):
     assert "<style>" in document and '<link rel="stylesheet"' not in document
     assert trace["value"].sum() == 150
     assert set(trace["slice_key"]) == {"Site A", "Site B"}
+
+
+def test_pm_tax_report_selector_does_not_leak_fb_tax_rows(tmp_path: Path):
+    run = tmp_path / "run"
+    metrics = tmp_path / "metrics"
+    run.mkdir(); metrics.mkdir()
+    pd.DataFrame([
+        {"Date":"2026-01-01","Box":"Property Management","Currency":"ARS","semantic_subbucket":"taxes","cash_effect":"cash_out_box","leg_role":"box_cash_expense","funding_actor":"","amount":30},
+        {"Date":"2026-01-02","Box":"Family Business","Currency":"ARS","semantic_subbucket":"taxes","cash_effect":"cash_out_box","leg_role":"box_cash_expense","funding_actor":"","amount":70},
+    ]).to_csv(run / "classification_audit.csv", index=False)
+
+    view = build_specialized_view("pm_tax_by_actor", run_root=run, metrics_dir=metrics, scope="FBPM").frame
+    assert view["value"].sum() == 30
+    assert set(view["funding_actor"]) == {"Property Management"}
+    assert set(view["metric_id"]) == {"PM.TAXES.COVERAGE.BY_ACTOR"}
 
 
 def test_distributions_vs_rent_keeps_measures_separate(tmp_path: Path):
