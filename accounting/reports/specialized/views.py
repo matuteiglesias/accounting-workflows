@@ -68,8 +68,27 @@ def source_paths_for_view(view_key: str, run_root: Path, metrics_dir: Path) -> t
     return tuple(paths)
 
 
-def view_is_available(view_key: str, run_root: Path, metrics_dir: Path) -> bool:
-    return all(path.is_file() for path, _ in source_paths_for_view(view_key, run_root, metrics_dir))
+def view_is_available(
+    view_key: str,
+    run_root: Path,
+    metrics_dir: Path,
+    scope: str = "FBPM",
+) -> bool:
+    """Return true only when the governed view has an actual reportable population.
+
+    Missing files or empty governed populations mean that this optional report is
+    not available for the run. Reconciliation or semantic errors are intentionally
+    not swallowed: they must fail the bundle rather than silently hiding a bad
+    report.
+    """
+    if not all(path.is_file() for path, _ in source_paths_for_view(view_key, run_root, metrics_dir)):
+        return False
+    return not build_specialized_view(
+        view_key,
+        run_root=run_root,
+        metrics_dir=metrics_dir,
+        scope=scope,
+    ).frame.empty
 
 
 def _read(source_key: str, run_root: Path, metrics_dir: Path) -> pd.DataFrame:
