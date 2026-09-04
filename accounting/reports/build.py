@@ -20,6 +20,8 @@ from accounting.reports.manifest import (
     write_report_manifest,
 )
 from accounting.reports.pdf import render_pdf
+from accounting.reports.specialized.render import render_specialized
+from accounting.reports.specialized.spec import REPORT_SPECS
 from accounting.reports.debt_accountability.render import render_report as render_debt
 from accounting.reports.treasury_accountability.render import (
     render_report as render_treasury,
@@ -210,6 +212,9 @@ def build_report_bundle(
     annual_dir = out_dir / "annual_management"
     treasury_dir = out_dir / "treasury_accountability"
     debt_dir = out_dir / "debt_accountability"
+    annual_dir.mkdir(parents=True, exist_ok=True)
+    treasury_dir.mkdir(parents=True, exist_ok=True)
+    debt_dir.mkdir(parents=True, exist_ok=True)
 
     annual_outputs = render_annual(
         metrics_path=annual_metrics,
@@ -238,6 +243,21 @@ def build_report_bundle(
         out_dir=debt_dir,
         as_of_date=as_of_date,
     )
+    specialized_outputs = {}
+    specialized_dir = out_dir / "specialized"
+    # Specialized reports are an additive governed surface.  Keep the core
+    # three-report contract fixture-safe when optional professional views are
+    # unavailable; production runs with the governed sources materialize all.
+    active_specialized_specs = REPORT_SPECS if semantic_audit.is_file() and stakeholder_support.is_file() else ()
+    for specialized_spec in active_specialized_specs:
+        specialized_outputs[specialized_spec.report_id] = render_specialized(
+            report_id=specialized_spec.report_id,
+            run_root=run_root,
+            metrics_dir=metrics_dir,
+            out_dir=specialized_dir / specialized_spec.report_id,
+            browser_bin=browser_bin,
+            require_pdf=require_pdf,
+        )
 
     if require_pdf:
         annual_outputs["pdf"] = render_pdf(
@@ -318,6 +338,23 @@ def build_report_bundle(
     debt_manifest_path = debt_dir / "report_manifest.json"
     write_report_manifest(debt_manifest_path, debt_manifest)
 
+    specialized_manifests = {}
+    for specialized_spec in active_specialized_specs:
+        report_out = specialized_outputs[specialized_spec.report_id]
+        report_dir = specialized_dir / specialized_spec.report_id
+        manifest = build_report_manifest(
+            report_id=specialized_spec.report_id,
+            renderer_version="specialized.v1",
+            source_run_id=source_run_id,
+            scope_tag=scope_tag,
+            as_of_date=as_of_date,
+            sources=[_source(semantic_audit, "run/classification_audit.csv"), _source(stakeholder_support, "run/monthly_stakeholder_support.csv"), _source(annual_metrics, "metrics/annual_balance_dashboard_metrics.csv")],
+            outputs=_manifest_outputs(report_out, bundle_root=out_dir),
+            validation_status="pass",
+        )
+        specialized_manifests[specialized_spec.report_id] = report_dir / "report_manifest.json"
+        write_report_manifest(specialized_manifests[specialized_spec.report_id], manifest)
+
     pack_validation = _build_pack_validation(
         run_id=source_run_id, scope_tag=scope_tag, as_of_date=as_of_date,
         annual_metrics=annual_metrics, debt_position=debt_position,
@@ -374,6 +411,19 @@ def build_report_bundle(
                 pdf="treasury_accountability/report.pdf" if require_pdf else None,
                 manifest=None,
             ),
+            *[
+                ReportCatalogItem(
+                    report_id=s.report_id,
+                    title=s.title,
+                    description=s.description,
+                    period_label=f"{as_of_date[:4]} YTD · cierre {as_of_date}",
+                    sort_order=40 + i,
+                    html=f"specialized/{s.report_id}/report.html",
+                    pdf=f"specialized/{s.report_id}/report.pdf" if require_pdf else None,
+                    manifest=None,
+                )
+                for i, s in enumerate(active_specialized_specs)
+            ],
         ],
     )
     catalog_path = out_dir / "report_catalog.json"
