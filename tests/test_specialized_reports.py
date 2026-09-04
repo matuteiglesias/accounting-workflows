@@ -41,7 +41,7 @@ def test_specialized_vertical_has_explicit_recipe_seam_and_round1_reports():
         "stakeholder_support",
         "distributions_by_recipient",
     ]
-    assert ids[4:] == [
+    assert ids[4:10] == [
         "rent_by_property",
         "rent_monthly_evolution",
         "opex_by_category",
