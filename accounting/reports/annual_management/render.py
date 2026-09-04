@@ -445,7 +445,7 @@ def _render_html(model: dict[str, Any], css: str) -> str:
             "CONTROL Y CALIDAD",
             "¿Qué sabemos con confianza y qué sigue necesitando evidencia?",
         )
-        + '<div class="page-grid"><div class="span-5">'
+        + '<div class="page-grid quality-page"><div class="span-5">'
         + _table("Estado del contrato", ["Métricas"], count_rows, compact=True)
         + '</div><div class="span-7">'
         + _table("Indicadores de calidad", ["Estado", "Detalle"], quality_rows, compact=True)

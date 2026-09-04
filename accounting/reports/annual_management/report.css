@@ -70,6 +70,10 @@ body {
 .metric-table td { font-size: 8.2px; }
 .metric-table .major td { font-weight: 730; color: var(--navy); }
 .metric-table.compact th, .metric-table.compact td { padding: 1.35mm 1.1mm; font-size: 7.6px; }
+.quality-page { gap: 8px; }
+.quality-page .panel { padding: 2.5mm; }
+.quality-page .metric-table.compact th,
+.quality-page .metric-table.compact td { padding: .85mm 1mm; font-size: 7px; }
 .indent-1 { padding-left: 4mm !important; color: #475467; }
 .chart-slot { min-height: 42mm; background: var(--white); }
 .chart-slot.tall { min-height: 60mm; }
