@@ -9,6 +9,7 @@ import pandas as pd
 from accounting.box_cash import box_party_match_masks, infer_box_party
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.marts.treasury import build_monthly_box_treasury_flow
+from accounting.marts.stakeholder import write_stakeholder_outputs
 from accounting.scope import load_run_scope_if_present
 
 RULE_VERSION = "semantic_accounting_hardening_2026-09-03"
@@ -46,6 +47,9 @@ AUDIT_COLUMNS = [
     "payment_channel", "cash_effect", "debt_effect", "linked_debt_id", "channel", "cash_path",
     "rule_id", "rule_version", "classification_confidence", "classification_status",
     "review_required", "warning", "status", "tag", "source_file", "source_row", "notes",
+    "settlement_case_id", "actor_role", "settlement_mode", "physical_payment_id",
+    "physical_payer", "physical_payee", "payment_method", "evidence_ref",
+    "evidence_status", "mirror_group_id", "leg_role",
 ]
 SUMMARY_COLUMNS = [
     "period", "Currency", "semantic_bucket", "semantic_subbucket", "classification_status",
@@ -404,15 +408,18 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
     audit["Date"] = audit["Date"].dt.date.astype(str)
     audit["review_required"] = audit["review_required"].astype(bool)
     period_end_lookup = audit[["period", "period_end"]].drop_duplicates()
+    for column in set(AUDIT_COLUMNS) - set(audit.columns):
+        audit[column] = ""
+    override_path = out_dir / "private_review" / "stakeholder_settlement_overrides.csv"
+    audit, stakeholder_paths = write_stakeholder_outputs(
+        audit, out_dir=out_dir, override_path=override_path
+    )
     audit = audit[AUDIT_COLUMNS]
     legacy_mask = audit["tag"].astype(str).str.strip().str.casefold().eq("legacy_inferred_net")
     analysis_mask = ~legacy_mask
     scope = load_run_scope_if_present(out_dir)
-    if scope is not None and "Household" not in scope.boxes:
-        analysis_mask &= ~(
-            audit["funding_actor"].astype(str).str.casefold().eq("household")
-            | audit["funding_channel"].astype(str).str.casefold().eq("household_to_pm")
-        )
+    # Accounting scope is governed by the owning Box at ingest. Counterparties
+    # and funding actors are participant dimensions and never narrow Box scope.
     analysis_audit = audit.loc[analysis_mask].copy()
     treasury_paths = build_monthly_box_treasury_flow(
         analysis_audit, out_dir=out_dir, freq=freq
@@ -459,6 +466,7 @@ def build_semantic_outputs(ledger: pd.DataFrame, out_dir: Path, freq: str = "M")
         "legacy_inferred_net_impact": out_dir / "legacy_inferred_net_impact.csv",
     }
     paths.update(treasury_paths)
+    paths.update(stakeholder_paths)
     rule_registry.to_csv(paths["semantic_rule_registry"], index=False)
     audit.to_csv(paths["classification_audit"], index=False)
     summary.to_csv(paths["classification_audit_summary"], index=False)

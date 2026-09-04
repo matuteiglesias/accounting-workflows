@@ -78,6 +78,15 @@ def _write_sources(run_root: Path, metrics_dir: Path) -> None:
             "accountability_gap_status", "n_months", "n_tx", "source_table", "policy_id",
         ]
     ).to_csv(run_root / "family_business_accountability_cycles.csv", index=False)
+    pd.DataFrame(columns=[
+        "period", "period_end", "Currency", "target_box", "funding_actor",
+        "actor_role", "funding_channel", "settlement_mode", "cash_path",
+        "obligation_category", "recognized_amount", "physical_cash_amount",
+        "n_tx", "settlement_case_ids", "source_tx_ids",
+    ]).to_csv(run_root / "monthly_stakeholder_support.csv", index=False)
+    pd.DataFrame(
+        [{"check": "stakeholder", "status": "pass", "severity": "error", "detail": "synthetic"}]
+    ).to_csv(run_root / "monthly_stakeholder_support_qa.csv", index=False)
     pd.DataFrame(
         columns=[
             "period", "repayment_tx_id", "repayment_date", "debtor", "creditor",

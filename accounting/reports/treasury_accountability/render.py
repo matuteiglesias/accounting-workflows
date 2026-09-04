@@ -332,6 +332,38 @@ def _cycle_html(cycles: pd.DataFrame) -> str:
       <div class="table-note">El gap contra liquidez se muestra únicamente cuando existe una observación de caja validada y alineada; de lo contrario figura No disponible.</div></section>'''
 
 
+def _stakeholder_support_html(support: pd.DataFrame) -> str:
+    if support.empty:
+        return ""
+    work = support.loc[support["target_box"].astype(str).eq("Property Management")].copy()
+    if work.empty:
+        return ""
+    work["recognized_amount"] = pd.to_numeric(work["recognized_amount"], errors="coerce").fillna(0.0)
+    role_labels = {
+        "tenant": "Inquilino/a", "tenant_family": "Familia inquilina",
+        "family_funder": "Aportante familiar", "other": "Otro",
+        "unavailable": "No disponible",
+    }
+    rows = []
+    for (currency, actor, role), group in work.groupby(
+        ["Currency", "funding_actor", "actor_role"], dropna=False, sort=True
+    ):
+        categories = group.groupby("obligation_category")["recognized_amount"].sum()
+        taxes = float(categories.get("taxes", 0.0))
+        services = float(categories.get("services", 0.0))
+        total = float(group["recognized_amount"].sum())
+        other = total - taxes - services
+        rows.append(
+            f"<tr><td>{_h(actor)}</td><td>{_h(role_labels.get(str(role), str(role)))}</td>"
+            f"<td>{_h(currency)}</td><td>{_h(_fmt_num(taxes))}</td>"
+            f"<td>{_h(_fmt_num(services))}</td><td>{_h(_fmt_num(other))}</td>"
+            f"<td>{_h(_fmt_num(total))}</td></tr>"
+        )
+    return f'''<section class="box-section" id="pm-stakeholder-support"><header class="box-head"><h2 class="box-title">PROPERTY MANAGEMENT · PAGOS Y APORTES APLICADOS POR ACTORES</h2><div class="box-subtitle">Apoyo reconocido para obligaciones de PM sin afirmar que el dinero haya ingresado a su caja.</div></header>
+      <div class="table-wrap"><table class="treasury"><thead><tr><th>Actor</th><th>Rol</th><th>Moneda</th><th>Impuestos</th><th>Servicios</th><th>Otros</th><th>Total reconocido</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+      <div class="table-note">Estas aplicaciones son constructivas y están siempre identificadas por Box objetivo. No se suman como eventos físicos independientes ni establecen por sí solas un derecho legal de reintegro.</div></section>'''
+
+
 def build_validation(
     source: pd.DataFrame,
     source_qa: pd.DataFrame,
@@ -435,12 +467,18 @@ def render_report(
     accountability_path: Path,
     qa_path: Path | None,
     cycles_path: Path | None = None,
+    stakeholder_support_path: Path | None = None,
     out_dir: Path,
     start_period: str = START_PERIOD,
 ) -> dict[str, Path]:
     source = pd.read_csv(accountability_path)
     source_qa = pd.read_csv(qa_path) if qa_path and qa_path.exists() else pd.DataFrame()
     cycles = pd.read_csv(cycles_path) if cycles_path and cycles_path.exists() else pd.DataFrame()
+    stakeholder_support = (
+        pd.read_csv(stakeholder_support_path)
+        if stakeholder_support_path and stakeholder_support_path.exists()
+        else pd.DataFrame()
+    )
 
     non_numeric = {
         "period", "period_end", "control_as_of_date", "Box", "Currency",
@@ -490,6 +528,7 @@ def render_report(
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
       <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Corte contable: {_h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
       {_cycle_html(cycles)}
+      {_stakeholder_support_html(stakeholder_support)}
       {"".join(sections)}
       <section class="qa-card"><h2>Control de integridad del reporte</h2><div class="qa-grid">{qa_items}</div></section>
       <footer class="footer"><span>Fuente contable: monthly_cash_accountability.csv · movimientos reconciliados contra box motor.</span><span>Generación reproducible; ver report_validation.csv.</span></footer>

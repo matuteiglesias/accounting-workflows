@@ -47,12 +47,8 @@ def _analytical_ledger(ledger: pd.DataFrame, *, include_household: bool = True, 
         else pd.Series(False, index=ledger.index)
     )
     eligible = ~legacy if exclude_legacy else pd.Series(True, index=ledger.index)
-    if not include_household:
-        household_party = pd.Series(False, index=ledger.index)
-        for col in ("payer", "receiver"):
-            if col in ledger.columns:
-                household_party |= ledger[col].astype(str).str.strip().str.casefold().isin({"hh", "household"})
-        eligible &= ~household_party
+    # The owning Box governs scope. Household may remain a counterparty or
+    # stakeholder actor on an in-scope PM/FB transaction.
     out = ledger.loc[eligible].copy()
     if "anomalies" in ledger.attrs:
         out.attrs["anomalies"] = ledger.attrs["anomalies"]

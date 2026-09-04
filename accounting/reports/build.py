@@ -111,16 +111,18 @@ def _build_pack_validation(*, run_id: str, scope_tag: str, as_of_date: str, annu
     def add(check: str, ok: bool, detail: str) -> None:
         rows.append({"check": check, "status": "pass" if ok else "fail", "severity": "error", "detail": detail})
     add("exact_release_identity", scope_tag == "FBPM" and run_id.endswith("_FBPM") and as_of_date == "2026-08-31", f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}")
-    future_periods, household_rows = [], 0
+    future_periods, household_box_rows = [], 0
     for path in source_paths:
         frame = pd.read_csv(path)
         for col in ("period", "cycle_start", "Date", "as_of_date"):
             if col not in frame.columns: continue
             dates = pd.to_datetime(frame[col], errors="coerce") if col != "period" else pd.to_datetime(frame[col].astype(str)+"-01", errors="coerce")
             future_periods.extend(f"{path.name}:{value}" for value in frame.loc[dates.gt(cutoff), col].astype(str).unique())
-        household_rows += int(frame.astype(str).apply(lambda col: col.str.contains("Household", case=False, regex=False)).any(axis=1).sum())
+        for box_col in ("Box", "target_box", "obligation_box"):
+            if box_col in frame.columns:
+                household_box_rows += int(frame[box_col].astype(str).str.strip().eq("Household").sum())
     add("no_period_after_cutoff", not future_periods, f"future={future_periods[:10]}")
-    add("no_household_source_membership", household_rows == 0, f"rows={household_rows}")
+    add("no_household_reporting_box_membership", household_box_rows == 0, f"rows={household_box_rows}; Household remains allowed as a participant dimension")
     position = pd.read_csv(debt_position); latest = position["period"].astype(str).max()
     debt_total = pd.to_numeric(position.loc[(position.period.astype(str)==latest)&position.component.eq("total"),"open_amount"],errors="coerce").sum()
     metrics = pd.read_csv(annual_metrics); year=as_of_date[:4]
@@ -131,7 +133,11 @@ def _build_pack_validation(*, run_id: str, scope_tag: str, as_of_date: str, annu
     pm_primos=position.loc[(position.period.astype(str)==latest)&position.debtor.eq("PM")&position.creditor.eq("Primos")&position.component.eq("total"),"open_amount"]
     add("pm_primos_closes_zero", len(pm_primos)==1 and abs(float(pm_primos.iloc[0]))<=0.01, f"rows={len(pm_primos)}; close={pm_primos.tolist()}")
     visible="\n".join(path.read_text(encoding="utf-8") for path in report_html)
-    add("no_household_report_text", "household" not in visible.casefold(), "searched all report HTML")
+    household_page = bool(__import__("re").search(
+        r"<h[12][^>]*>[^<]*HOUSEHOLD\s*(?:·|<|$)", visible,
+        flags=__import__("re").I,
+    ))
+    add("no_household_reporting_page", not household_page, "Household may appear only as an actor within an in-scope Box table")
     add("no_visible_raw_debt_hash", not bool(__import__("re").search(r">\s*(?:prestamo|interes)::[0-9a-f]+\s*<", visible, flags=__import__("re").I)), "visible text nodes checked")
     return pd.DataFrame(rows)
 
@@ -162,6 +168,8 @@ def build_report_bundle(
     treasury_accountability = run_root / "monthly_cash_accountability.csv"
     treasury_qa = run_root / "monthly_cash_accountability_qa.csv"
     accountability_cycles = run_root / "family_business_accountability_cycles.csv"
+    stakeholder_support = run_root / "monthly_stakeholder_support.csv"
+    stakeholder_support_qa = run_root / "monthly_stakeholder_support_qa.csv"
     repayment_detail = run_root / "monthly_debt_repayment_detail.csv"
     debt_position = run_root / "monthly_debt_position.csv"
     debt_position_qa = run_root / "monthly_debt_position_qa.csv"
@@ -176,6 +184,8 @@ def build_report_bundle(
         treasury_accountability,
         treasury_qa,
         accountability_cycles,
+        stakeholder_support,
+        stakeholder_support_qa,
         repayment_detail,
         debt_position, debt_position_qa, debt_activity, debt_activity_qa,
         cost_gaps, cost_gaps_qa,
@@ -211,6 +221,7 @@ def build_report_bundle(
         accountability_path=treasury_accountability,
         qa_path=treasury_qa,
         cycles_path=accountability_cycles,
+        stakeholder_support_path=stakeholder_support,
         out_dir=treasury_dir,
     )
     debt_outputs = render_debt(
@@ -273,6 +284,8 @@ def build_report_bundle(
             _source(treasury_accountability, "run/monthly_cash_accountability.csv"),
             _source(treasury_qa, "run/monthly_cash_accountability_qa.csv"),
             _source(accountability_cycles, "run/family_business_accountability_cycles.csv"),
+            _source(stakeholder_support, "run/monthly_stakeholder_support.csv"),
+            _source(stakeholder_support_qa, "run/monthly_stakeholder_support_qa.csv"),
         ],
         outputs=_manifest_outputs(treasury_outputs, bundle_root=out_dir),
         validation_status=treasury_status,
@@ -304,7 +317,7 @@ def build_report_bundle(
     pack_validation = _build_pack_validation(
         run_id=source_run_id, scope_tag=scope_tag, as_of_date=as_of_date,
         annual_metrics=annual_metrics, debt_position=debt_position,
-        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, debt_position, debt_activity, repayment_detail, cost_gaps],
+        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, stakeholder_support, debt_position, debt_activity, repayment_detail, cost_gaps],
         report_html=[annual_outputs["html"], treasury_outputs["html"], debt_outputs["html"]],
     )
     pack_validation_path = out_dir / "report_pack_validation.csv"

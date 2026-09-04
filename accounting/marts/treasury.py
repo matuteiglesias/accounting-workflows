@@ -114,9 +114,14 @@ def _cash_category(row: pd.Series) -> str:
 def _movement_basis(row: pd.Series) -> str:
     if _text(row.get("semantic_bucket")) == "cost_allocation_gap":
         return "economic_only"
+    cash_effect = _text(row.get("cash_effect"))
+    settlement_mode = _text(row.get("settlement_mode"))
+    if settlement_mode in {"constructive", "offset"} and cash_effect in {
+        "no_cash_in_box_direct_payment", "no_cash_out_box_direct_payment", "non_cash_support",
+    }:
+        return "non_cash_support" if cash_effect != "no_cash_out_box_direct_payment" else "economic_only"
     direction_source = _text(row.get("direction_source"))
     direction = _text(row.get("direction"))
-    cash_effect = _text(row.get("cash_effect"))
     if direction_source == "box_party_match" and direction in {"in", "out"}:
         return "actual_cash"
     if direction_source == "box_party_match" and direction == "internal":
@@ -264,6 +269,10 @@ def _build_treasury_qa(
         )
         for col in ["treasury_net", "box_flow_net", "box_balance_net"]:
             check[col] = pd.to_numeric(check[col], errors="coerce")
+        # A month made entirely of constructive/economic legs legitimately has
+        # no actual-cash aggregate row. Its governed physical cash movement is
+        # explicit zero, not missing.
+        check["treasury_net"] = check["treasury_net"].fillna(0.0)
         for _, row in check.iterrows():
             values_present = not pd.isna(row["treasury_net"]) and not pd.isna(row["box_flow_net"]) and not pd.isna(row["box_balance_net"])
             gap = float("inf")

@@ -192,6 +192,27 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "source_of_truth_for_treasury_flow",
             "notes": "Canonical effective Box cash movement; actual cash requires physical Box-counterparty evidence.",
         }
+    if key == "stakeholder_settlement_detail.csv":
+        return {
+            "artifact_role": "canonical_source", "accounting_nature": "flow",
+            "grain": "tx", "currency_policy": "by_currency",
+            "frontend_suitability": "internal_only", "source_authority": "source_of_truth",
+            "notes": "Governed constructive settlement legs; mirrors never duplicate target-Box support.",
+        }
+    if key == "monthly_stakeholder_support.csv":
+        return {
+            "artifact_role": "canonical_source", "accounting_nature": "flow",
+            "grain": "monthly", "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat", "source_authority": "source_of_truth",
+            "notes": "Target-Box-scoped recognized stakeholder support; physical_cash_amount remains separate.",
+        }
+    if key == "monthly_stakeholder_support_qa.csv":
+        return {
+            "artifact_role": "qa", "accounting_nature": "quality", "grain": "mixed",
+            "currency_policy": "by_currency", "frontend_suitability": "internal_only",
+            "source_authority": "diagnostic_evidence",
+            "notes": "Settlement identity, mirror, expense, allocation, and physical-cash controls.",
+        }
     if key == "treasury_residual_cash_audit.csv":
         return {
             "artifact_role": "diagnostic",
