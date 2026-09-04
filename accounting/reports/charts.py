@@ -157,3 +157,60 @@ def professional_support_view(stakeholder_support: pd.DataFrame, *, scope: str =
             "calculation_rule": "annual recognized stakeholder support summed from governed mart",
         })
     return pd.DataFrame(rows)
+
+
+def professional_fb_receipts_view(semantic_audit: pd.DataFrame, *, scope: str = "FBPM") -> pd.DataFrame:
+    """Transaction-backed Family Business cash receipts, grouped by nature.
+
+    The view is deliberately not called distributions: it is the governed
+    physical cash-in population for the FB Box, with no claim about custody or
+    final destination.
+    """
+    frame = semantic_audit.copy()
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.loc[
+        frame["Box"].astype(str).eq("Family Business")
+        & frame["direction"].astype(str).eq("in")
+        & frame["cash_effect"].astype(str).eq("cash_in_box")
+    ].copy()
+    frame["value"] = pd.to_numeric(frame["amount"], errors="coerce")
+    frame = frame.loc[frame["value"].ge(0)]
+    frame["period"] = frame["Date"].dt.year.astype("Int64").astype(str)
+    frame["receipt_nature"] = frame["semantic_subbucket"].astype(str).replace({"nan": "Sin clasificar"})
+    rows = []
+    for (period, currency, nature), group in frame.groupby(["period", "Currency", "receipt_nature"], sort=True):
+        rows.append({
+            "metric_id": "FB.CASH_RECEIPTS.BY_NATURE",
+            "line_id": f"FB.CASH_RECEIPTS.BY_NATURE|{period}|{currency}|{nature}",
+            "period": period, "period_basis": "annual", "Currency": currency, "scope": scope,
+            "receipt_nature": nature, "value": float(group["value"].sum()),
+            "source_table": "classification_audit.csv",
+            "source_filter": "Box=Family Business; direction=in; cash_effect=cash_in_box",
+            "calculation_rule": "annual physical cash receipts grouped by governed semantic subbucket",
+        })
+    return pd.DataFrame(rows)
+
+
+def professional_tax_service_support_view(stakeholder_support: pd.DataFrame, *, scope: str = "FBPM") -> pd.DataFrame:
+    """Recognized taxes/services applied by actors to PM, not PM cash-out."""
+    frame = stakeholder_support.copy()
+    frame = frame.loc[
+        frame["target_box"].astype(str).eq("Property Management")
+        & frame["obligation_category"].astype(str).isin({"taxes", "services"})
+    ].copy()
+    frame["value"] = pd.to_numeric(frame["recognized_amount"], errors="coerce")
+    frame["period_basis"] = "settlement"
+    frame["period"] = frame["period"].astype(str).str[:4]
+    rows = []
+    for (period, currency, actor), group in frame.groupby(["period", "Currency", "funding_actor"], dropna=False, sort=True):
+        actor = str(actor)
+        rows.append({
+            "metric_id": "SUPPORT.TAXES_SERVICES.BY_ACTOR",
+            "line_id": f"SUPPORT.TAXES_SERVICES.BY_ACTOR|{period}|{currency}|{actor}",
+            "period": period, "period_basis": "annual", "Currency": currency, "scope": scope,
+            "funding_actor": actor, "value": float(group["value"].sum()),
+            "source_table": "monthly_stakeholder_support.csv",
+            "source_filter": "target_box=Property Management; obligation_category in taxes,services",
+            "calculation_rule": "annual recognized taxes/services support grouped by funding actor",
+        })
+    return pd.DataFrame(rows)

@@ -92,7 +92,8 @@ table.treasury td.non-cash { color: #667085; background: #fafafa; }
   .report-shell { max-width: none; padding: 0; }
   .hero, .box-section, .qa-card { border-radius: 0; border-color: #bfc6d0; }
   .box-section { break-before: page; }
-  .chart-card { break-inside: avoid; }
+.chart-card { break-inside: avoid; }
+.neutral-receipts { background: #f3f4f6; border-color: #c9ced6; }
   .chart-section { break-before: page; }
   .pie-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px 12px 2px; }
   .pie-card { padding: 6px 8px 4px; }

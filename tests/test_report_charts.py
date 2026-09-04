@@ -1,7 +1,10 @@
 import pandas as pd
 import pytest
 
-from accounting.reports.charts import PieSpec, professional_support_view, render_pie_svg
+from accounting.reports.charts import (
+    PieSpec, professional_support_view, professional_fb_receipts_view,
+    professional_tax_service_support_view, render_pie_svg,
+)
 
 
 def _spec(**values):
@@ -45,3 +48,24 @@ def test_support_reporting_group_remap_preserves_denominator():
     before = view.value.sum()
     view["reporting_group"] = view["funding_actor"].map({"Actor A": "FB", "Actor B": "FB"})
     assert view.value.sum() == before
+
+
+def test_fb_receipts_view_is_cash_receipt_population_not_distribution():
+    source = pd.DataFrame([
+        {"Date": "2026-01-01", "Box": "Family Business", "Currency": "ARS", "direction": "in", "cash_effect": "cash_in_box", "semantic_subbucket": "rent", "amount": 100},
+        {"Date": "2026-01-02", "Box": "Family Business", "Currency": "ARS", "direction": "in", "cash_effect": "cash_in_box", "semantic_subbucket": "rent", "amount": 50},
+        {"Date": "2026-01-03", "Box": "Property Management", "Currency": "ARS", "direction": "in", "cash_effect": "cash_in_box", "semantic_subbucket": "rent", "amount": 999},
+    ])
+    view = professional_fb_receipts_view(source)
+    assert view["value"].sum() == 150
+    assert set(view["receipt_nature"]) == {"rent"}
+
+
+def test_tax_service_support_view_excludes_non_service_support():
+    source = pd.DataFrame([
+        {"period": "2026-01", "Currency": "ARS", "target_box": "Property Management", "funding_actor": "A", "obligation_category": "taxes", "recognized_amount": 60},
+        {"period": "2026-01", "Currency": "ARS", "target_box": "Property Management", "funding_actor": "A", "obligation_category": "services", "recognized_amount": 40},
+        {"period": "2026-01", "Currency": "ARS", "target_box": "Property Management", "funding_actor": "A", "obligation_category": "maintenance", "recognized_amount": 999},
+    ])
+    view = professional_tax_service_support_view(source)
+    assert view["value"].sum() == 100
