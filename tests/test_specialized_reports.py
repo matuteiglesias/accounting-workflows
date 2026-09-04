@@ -16,6 +16,22 @@ def _semantic_split() -> pd.DataFrame:
     ])
 
 
+def _annual_metrics() -> pd.DataFrame:
+    base = {"period":"2026","Currency":"ARS","value_status":"available"}
+    return pd.DataFrame([
+        base | {"metric_id":"IS.RENT.BY_PROPERTY","dimension_name":"Lugar","dimension_value":"Site A","value":100,"source_table":"monthly_flow_semantic_split.csv","source_filter":"rent; Lugar=Site A","calculation_rule":"governed annual rent by property"},
+        base | {"metric_id":"IS.RENT.BY_PROPERTY","dimension_name":"Lugar","dimension_value":"Site B","value":50,"source_table":"monthly_flow_semantic_split.csv","source_filter":"rent; Lugar=Site B","calculation_rule":"governed annual rent by property"},
+        base | {"metric_id":"IS.RENT.TOTAL","dimension_name":"","dimension_value":"","value":150,"source_table":"annual_flow_membership.csv","source_filter":"rent","calculation_rule":"governed annual rent total"},
+        base | {"metric_id":"IS.OPEX.BY_CATEGORY","dimension_name":"semantic_subbucket","dimension_value":"taxes","value":30,"source_table":"monthly_flow_semantic_split.csv","source_filter":"property_opex; taxes","calculation_rule":"governed annual OPEX by category"},
+        base | {"metric_id":"IS.OPEX.BY_CATEGORY","dimension_name":"semantic_subbucket","dimension_value":"services","value":20,"source_table":"monthly_flow_semantic_split.csv","source_filter":"property_opex; services","calculation_rule":"governed annual OPEX by category"},
+    ])
+
+
+def _write_round1_sources(run: Path, metrics: Path) -> None:
+    _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
+    _annual_metrics().to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+
+
 def test_specialized_vertical_has_explicit_recipe_seam_and_round1_reports():
     ids = [spec.report_id for spec in REPORT_SPECS]
     assert ids[:4] == [
@@ -38,11 +54,11 @@ def test_specialized_vertical_has_explicit_recipe_seam_and_round1_reports():
         assert spec.section_plan
 
 
-def test_round1_semantic_views_reconcile_governed_split(tmp_path: Path):
+def test_round1_semantic_views_reconcile_governed_sources(tmp_path: Path):
     run = tmp_path / "run"
     metrics = tmp_path / "metrics"
     run.mkdir(); metrics.mkdir()
-    _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
+    _write_round1_sources(run, metrics)
 
     rent = build_specialized_view("rent_by_property", run_root=run, metrics_dir=metrics, scope="FBPM").frame
     opex = build_specialized_view("opex_by_category", run_root=run, metrics_dir=metrics, scope="FBPM").frame
@@ -57,6 +73,8 @@ def test_round1_semantic_views_reconcile_governed_split(tmp_path: Path):
     assert monthly["value"].sum() == 150
     assert set(rent["property"]) == {"Site A", "Site B"}
     assert set(opex["category"]) == {"Impuestos", "Servicios"}
+    assert set(rent["metric_id"]) == {"IS.RENT.BY_PROPERTY"}
+    assert set(opex["metric_id"]) == {"IS.OPEX.BY_CATEGORY"}
 
 
 def test_specialized_view_availability_is_per_recipe(tmp_path: Path):
@@ -65,9 +83,15 @@ def test_specialized_view_availability_is_per_recipe(tmp_path: Path):
     run.mkdir(); metrics.mkdir()
     _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
 
-    assert view_is_available("rent_by_property", run, metrics)
+    assert view_is_available("rent_monthly_evolution", run, metrics)
+    assert view_is_available("taxes_by_property", run, metrics)
+    assert not view_is_available("rent_by_property", run, metrics)
     assert not view_is_available("pm_support_by_actor", run, metrics)
     assert not view_is_available("distributions_vs_rent", run, metrics)
+
+    _annual_metrics().to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+    assert view_is_available("rent_by_property", run, metrics)
+    assert view_is_available("opex_by_category", run, metrics)
 
 
 def test_round1_renderer_is_self_contained_and_cutoff_driven(tmp_path: Path):
@@ -75,7 +99,7 @@ def test_round1_renderer_is_self_contained_and_cutoff_driven(tmp_path: Path):
     metrics = tmp_path / "metrics"
     out = tmp_path / "out"
     run.mkdir(); metrics.mkdir()
-    _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
+    _write_round1_sources(run, metrics)
 
     outputs = render_specialized(
         report_id="rent_by_property",
@@ -100,14 +124,11 @@ def test_distributions_vs_rent_keeps_measures_separate(tmp_path: Path):
     run = tmp_path / "run"
     metrics = tmp_path / "metrics"
     run.mkdir(); metrics.mkdir()
-    _semantic_split().to_csv(run / "monthly_flow_semantic_split.csv", index=False)
     pd.DataFrame([
         {"Date":"2026-01-10","semantic_bucket":"family_withdrawal_candidate","Box":"Family Business","receiver":"Actor A","amount":40,"Currency":"ARS"},
         {"Date":"2026-02-10","semantic_bucket":"family_withdrawal","Box":"Family Business","receiver":"Actor B","amount":10,"Currency":"ARS"},
     ]).to_csv(run / "classification_audit.csv", index=False)
-    pd.DataFrame([
-        {"metric_id":"IS.RENT.TOTAL","period":"2026","Currency":"ARS","value":150}
-    ]).to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
+    _annual_metrics().to_csv(metrics / "annual_balance_dashboard_metrics.csv", index=False)
 
     view = build_specialized_view("distributions_vs_rent", run_root=run, metrics_dir=metrics, scope="FBPM").frame
     values = dict(zip(view["concept"], view["value"]))
