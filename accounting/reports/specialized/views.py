@@ -3,8 +3,8 @@ from __future__ import annotations
 """Governed professional views for specialized human reports.
 
 This module is the accounting-facing seam of the specialized-report vertical.
-Renderers consume only the standardized frames returned here and never classify
-ledger rows themselves.
+Renderers consume only standardized professional frames returned here and never
+classify ledger rows themselves.
 """
 
 from dataclasses import dataclass
@@ -41,12 +41,12 @@ _VIEW_REQUIREMENTS = {
     "pm_services_by_actor": ("semantic_audit",),
     "pm_support_by_actor": ("stakeholder_support",),
     "distributions_by_recipient": ("semantic_audit", "annual_metrics"),
-    "rent_by_property": ("semantic_split",),
+    "rent_by_property": ("annual_metrics",),
     "rent_monthly_evolution": ("semantic_split",),
-    "opex_by_category": ("semantic_split",),
+    "opex_by_category": ("annual_metrics",),
     "taxes_by_property": ("semantic_split",),
     "services_by_property": ("semantic_split",),
-    "distributions_vs_rent": ("semantic_audit", "annual_metrics", "semantic_split"),
+    "distributions_vs_rent": ("semantic_audit", "annual_metrics"),
 }
 
 
@@ -70,8 +70,7 @@ def view_is_available(view_key: str, run_root: Path, metrics_dir: Path) -> bool:
 
 
 def _read(source_key: str, run_root: Path, metrics_dir: Path) -> pd.DataFrame:
-    path = _path_for(source_key, run_root, metrics_dir)
-    return pd.read_csv(path)
+    return pd.read_csv(_path_for(source_key, run_root, metrics_dir))
 
 
 def _clean_label(series: pd.Series, fallback: str) -> pd.Series:
@@ -119,30 +118,85 @@ def _rows_from_grouped(
     return rows
 
 
-def _rent_by_property(split: pd.DataFrame, scope: str) -> SpecializedViewResult:
-    frame = _split_base(split)
+def _available_annual_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
+    required = {"metric_id", "period", "Currency", "value"}
+    missing = sorted(required - set(metrics.columns))
+    if missing:
+        raise ValueError(f"annual_balance_dashboard_metrics missing required columns: {missing}")
+    frame = metrics.copy()
+    if "value_status" in frame.columns:
+        frame = frame.loc[frame["value_status"].astype(str).eq("available")].copy()
+    frame["period"] = frame["period"].astype(str).str.removesuffix(".0")
+    frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+    return frame.loc[frame["value"].notna()].copy()
+
+
+def _annual_dimension_metric(
+    metrics: pd.DataFrame,
+    *,
+    metric_id: str,
+    dimension_name: str,
+    output_dimension: str,
+    scope: str,
+    label_map: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    frame = _available_annual_metrics(metrics)
+    if "dimension_name" not in frame.columns or "dimension_value" not in frame.columns:
+        raise ValueError(f"annual metric {metric_id} requires dimension_name/dimension_value")
     frame = frame.loc[
-        frame["semantic_bucket"].astype(str).eq("operating_revenue")
-        & frame["semantic_subbucket"].astype(str).eq("rent")
+        frame["metric_id"].astype(str).eq(metric_id)
+        & frame["dimension_name"].fillna("").astype(str).eq(dimension_name)
     ].copy()
-    grouped = (
-        frame.groupby(["year", "Currency", "property"], as_index=False, sort=True)["amount_in"]
-        .sum()
-        .rename(columns={"year": "period", "amount_in": "value"})
+    frame[output_dimension] = _clean_label(frame["dimension_value"], "Sin clasificar")
+    if label_map:
+        frame[output_dimension] = frame[output_dimension].map(label_map).fillna(frame[output_dimension])
+    duplicate = frame.duplicated(["period", "Currency", output_dimension], keep=False)
+    if duplicate.any():
+        raise ValueError(f"annual metric {metric_id} has duplicate governed dimension rows")
+    frame["scope"] = scope
+    frame["period_basis"] = "annual"
+    frame["line_id"] = frame.apply(
+        lambda r: f"{metric_id}|{r['period']}|{r['Currency']}|{r[output_dimension]}", axis=1
     )
-    grouped = grouped.loc[grouped["value"].ge(0)]
-    out = _rows_from_grouped(
-        grouped,
-        metric_id="RENT.BY.PROPERTY",
-        dimension="property",
-        period_basis="annual",
+    if "source_table" not in frame.columns:
+        frame["source_table"] = "annual_balance_dashboard_metrics.csv"
+    if "source_filter" not in frame.columns:
+        frame["source_filter"] = f"metric_id={metric_id}; dimension_name={dimension_name}"
+    if "calculation_rule" not in frame.columns:
+        frame["calculation_rule"] = "consume governed annual dashboard metric; no report-side reclassification"
+    return frame
+
+
+def _annual_scalar_metric(metrics: pd.DataFrame, metric_id: str, scope: str) -> pd.DataFrame:
+    frame = _available_annual_metrics(metrics)
+    frame = frame.loc[frame["metric_id"].astype(str).eq(metric_id)].copy()
+    if "dimension_name" in frame.columns:
+        frame = frame.loc[frame["dimension_name"].fillna("").astype(str).eq("")].copy()
+    duplicate = frame.duplicated(["period", "Currency"], keep=False)
+    if duplicate.any():
+        raise ValueError(f"annual scalar metric {metric_id} is not singular by period/currency")
+    frame["scope"] = scope
+    frame["period_basis"] = "annual"
+    if "source_table" not in frame.columns:
+        frame["source_table"] = "annual_balance_dashboard_metrics.csv"
+    if "source_filter" not in frame.columns:
+        frame["source_filter"] = f"metric_id={metric_id}"
+    if "calculation_rule" not in frame.columns:
+        frame["calculation_rule"] = "consume governed annual dashboard metric"
+    return frame
+
+
+def _rent_by_property(metrics: pd.DataFrame, scope: str) -> SpecializedViewResult:
+    out = _annual_dimension_metric(
+        metrics,
+        metric_id="IS.RENT.BY_PROPERTY",
+        dimension_name="Lugar",
+        output_dimension="property",
         scope=scope,
-        source_filter="semantic_bucket=operating_revenue; semantic_subbucket=rent",
-        calculation_rule="annual governed rent amount_in summed by Lugar",
     )
     return SpecializedViewResult(
         out,
-        "RENT.BY.PROPERTY",
+        "IS.RENT.BY_PROPERTY",
         "property",
         (("property", "Inmueble / fuente"), ("value", "Importe"), ("Currency", "Moneda")),
         (),
@@ -179,36 +233,24 @@ def _rent_monthly(split: pd.DataFrame, scope: str) -> SpecializedViewResult:
     )
 
 
-def _opex_by_category(split: pd.DataFrame, scope: str) -> SpecializedViewResult:
-    frame = _split_base(split)
-    frame = frame.loc[frame["semantic_bucket"].astype(str).eq("property_opex")].copy()
+def _opex_by_category(metrics: pd.DataFrame, scope: str) -> SpecializedViewResult:
     labels = {
         "taxes": "Impuestos",
         "services": "Servicios",
         "maintenance": "Mantenimiento",
         "legal": "Legales",
     }
-    frame["category"] = frame["semantic_subbucket"].astype(str).map(labels).fillna(
-        frame["semantic_subbucket"].astype(str)
-    )
-    grouped = (
-        frame.groupby(["year", "Currency", "category"], as_index=False, sort=True)["amount_out"]
-        .sum()
-        .rename(columns={"year": "period", "amount_out": "value"})
-    )
-    grouped = grouped.loc[grouped["value"].ge(0)]
-    out = _rows_from_grouped(
-        grouped,
-        metric_id="OPEX.BY.CATEGORY",
-        dimension="category",
-        period_basis="annual",
+    out = _annual_dimension_metric(
+        metrics,
+        metric_id="IS.OPEX.BY_CATEGORY",
+        dimension_name="semantic_subbucket",
+        output_dimension="category",
         scope=scope,
-        source_filter="semantic_bucket=property_opex",
-        calculation_rule="annual governed property OPEX amount_out summed by semantic_subbucket",
+        label_map=labels,
     )
     return SpecializedViewResult(
         out,
-        "OPEX.BY.CATEGORY",
+        "IS.OPEX.BY_CATEGORY",
         "category",
         (("category", "Categoría"), ("value", "Importe"), ("Currency", "Moneda")),
         (),
@@ -249,19 +291,15 @@ def _opex_by_property(split: pd.DataFrame, scope: str, subbucket: str) -> Specia
 def _comparison_distribution_rent(
     audit: pd.DataFrame,
     metrics: pd.DataFrame,
-    split: pd.DataFrame,
     scope: str,
 ) -> SpecializedViewResult:
     dist = professional_distribution_view(audit, metrics, scope=scope)
-    rent = _rent_by_property(split, scope).frame
     dist_total = (
         dist.groupby(["period", "Currency"], as_index=False, sort=True)["value"].sum()
         .assign(concept="Distribuciones registradas")
     )
-    rent_total = (
-        rent.groupby(["period", "Currency"], as_index=False, sort=True)["value"].sum()
-        .assign(concept="Renta reconocida")
-    )
+    rent_total = _annual_scalar_metric(metrics, "IS.RENT.TOTAL", scope)[["period", "Currency", "value"]].copy()
+    rent_total["concept"] = "Renta reconocida"
     frame = pd.concat([rent_total, dist_total], ignore_index=True, sort=False)
     frame["metric_id"] = "DISTRIBUTIONS.VS.RENT"
     frame["scope"] = scope
@@ -269,8 +307,8 @@ def _comparison_distribution_rent(
     frame["line_id"] = frame.apply(
         lambda r: f"DISTRIBUTIONS.VS.RENT|{r['period']}|{r['Currency']}|{r['concept']}", axis=1
     )
-    frame["source_table"] = "monthly_flow_semantic_split.csv + classification_audit.csv"
-    frame["source_filter"] = "governed rent membership compared with governed distribution membership"
+    frame["source_table"] = "annual_balance_dashboard_metrics.csv + classification_audit.csv"
+    frame["source_filter"] = "IS.RENT.TOTAL compared with governed distribution membership"
     frame["calculation_rule"] = "present independently governed annual totals side by side; no netting"
     return SpecializedViewResult(
         frame,
@@ -338,18 +376,18 @@ def build_specialized_view(
     elif view_key == "distributions_by_recipient":
         result = _pilot_distribution(frames["semantic_audit"], frames["annual_metrics"], scope)
     elif view_key == "rent_by_property":
-        result = _rent_by_property(frames["semantic_split"], scope)
+        result = _rent_by_property(frames["annual_metrics"], scope)
     elif view_key == "rent_monthly_evolution":
         result = _rent_monthly(frames["semantic_split"], scope)
     elif view_key == "opex_by_category":
-        result = _opex_by_category(frames["semantic_split"], scope)
+        result = _opex_by_category(frames["annual_metrics"], scope)
     elif view_key == "taxes_by_property":
         result = _opex_by_property(frames["semantic_split"], scope, "taxes")
     elif view_key == "services_by_property":
         result = _opex_by_property(frames["semantic_split"], scope, "services")
     elif view_key == "distributions_vs_rent":
         result = _comparison_distribution_rent(
-            frames["semantic_audit"], frames["annual_metrics"], frames["semantic_split"], scope
+            frames["semantic_audit"], frames["annual_metrics"], scope
         )
     else:
         raise KeyError(f"unknown specialized report view: {view_key}")
