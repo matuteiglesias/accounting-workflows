@@ -20,6 +20,9 @@ from accounting.reports.charts import (
 )
 
 
+TOLERANCE = 0.01
+
+
 @dataclass(frozen=True)
 class SpecializedViewResult:
     frame: pd.DataFrame
@@ -42,10 +45,10 @@ _VIEW_REQUIREMENTS = {
     "pm_support_by_actor": ("stakeholder_support",),
     "distributions_by_recipient": ("semantic_audit", "annual_metrics"),
     "rent_by_property": ("annual_metrics",),
-    "rent_monthly_evolution": ("semantic_split",),
+    "rent_monthly_evolution": ("semantic_split", "annual_metrics"),
     "opex_by_category": ("annual_metrics",),
-    "taxes_by_property": ("semantic_split",),
-    "services_by_property": ("semantic_split",),
+    "taxes_by_property": ("semantic_split", "annual_metrics"),
+    "services_by_property": ("semantic_split", "annual_metrics"),
     "distributions_vs_rent": ("semantic_audit", "annual_metrics"),
 }
 
@@ -186,6 +189,50 @@ def _annual_scalar_metric(metrics: pd.DataFrame, metric_id: str, scope: str) -> 
     return frame
 
 
+def _annual_category_scalar(metrics: pd.DataFrame, subbucket: str, scope: str) -> pd.DataFrame:
+    frame = _available_annual_metrics(metrics)
+    if "dimension_name" not in frame.columns or "dimension_value" not in frame.columns:
+        raise ValueError("annual OPEX category authority requires dimension fields")
+    frame = frame.loc[
+        frame["metric_id"].astype(str).eq("IS.OPEX.BY_CATEGORY")
+        & frame["dimension_name"].fillna("").astype(str).eq("semantic_subbucket")
+        & frame["dimension_value"].fillna("").astype(str).eq(subbucket)
+    ].copy()
+    duplicate = frame.duplicated(["period", "Currency"], keep=False)
+    if duplicate.any():
+        raise ValueError(f"annual OPEX category {subbucket} is not singular by period/currency")
+    frame["scope"] = scope
+    return frame
+
+
+def _assert_year_currency_reconciliation(
+    actual: pd.DataFrame,
+    expected: pd.DataFrame,
+    *,
+    label: str,
+    actual_period_is_monthly: bool,
+) -> None:
+    work = actual[["period", "Currency", "value"]].copy()
+    work["period"] = work["period"].astype(str).str[:4] if actual_period_is_monthly else work["period"].astype(str)
+    actual_totals = work.groupby(["period", "Currency"], as_index=False, sort=True)["value"].sum()
+    expected_totals = expected[["period", "Currency", "value"]].copy()
+    expected_totals["period"] = expected_totals["period"].astype(str).str.removesuffix(".0")
+    expected_totals = expected_totals.groupby(["period", "Currency"], as_index=False, sort=True)["value"].sum()
+    merged = actual_totals.merge(
+        expected_totals,
+        on=["period", "Currency"],
+        how="outer",
+        suffixes=("_actual", "_expected"),
+    ).fillna(0.0)
+    merged["gap"] = pd.to_numeric(merged["value_actual"], errors="coerce").fillna(0) - pd.to_numeric(
+        merged["value_expected"], errors="coerce"
+    ).fillna(0)
+    bad = merged.loc[merged["gap"].abs().gt(TOLERANCE)]
+    if not bad.empty:
+        detail = bad[["period", "Currency", "value_actual", "value_expected", "gap"]].to_dict("records")
+        raise ValueError(f"specialized view does not reconcile to governed annual authority: {label}: {detail}")
+
+
 def _rent_by_property(metrics: pd.DataFrame, scope: str) -> SpecializedViewResult:
     out = _annual_dimension_metric(
         metrics,
@@ -203,7 +250,7 @@ def _rent_by_property(metrics: pd.DataFrame, scope: str) -> SpecializedViewResul
     )
 
 
-def _rent_monthly(split: pd.DataFrame, scope: str) -> SpecializedViewResult:
+def _rent_monthly(split: pd.DataFrame, metrics: pd.DataFrame, scope: str) -> SpecializedViewResult:
     frame = _split_base(split)
     frame = frame.loc[
         frame["semantic_bucket"].astype(str).eq("operating_revenue")
@@ -222,7 +269,13 @@ def _rent_monthly(split: pd.DataFrame, scope: str) -> SpecializedViewResult:
         period_basis="monthly",
         scope=scope,
         source_filter="semantic_bucket=operating_revenue; semantic_subbucket=rent",
-        calculation_rule="monthly governed rent amount_in summed across in-scope locations",
+        calculation_rule="monthly governed rent amount_in; annual sum reconciled to IS.RENT.TOTAL",
+    )
+    _assert_year_currency_reconciliation(
+        out,
+        _annual_scalar_metric(metrics, "IS.RENT.TOTAL", scope),
+        label="monthly rent -> IS.RENT.TOTAL",
+        actual_period_is_monthly=True,
     )
     return SpecializedViewResult(
         out,
@@ -257,7 +310,12 @@ def _opex_by_category(metrics: pd.DataFrame, scope: str) -> SpecializedViewResul
     )
 
 
-def _opex_by_property(split: pd.DataFrame, scope: str, subbucket: str) -> SpecializedViewResult:
+def _opex_by_property(
+    split: pd.DataFrame,
+    metrics: pd.DataFrame,
+    scope: str,
+    subbucket: str,
+) -> SpecializedViewResult:
     frame = _split_base(split)
     frame = frame.loc[
         frame["semantic_bucket"].astype(str).eq("property_opex")
@@ -277,7 +335,13 @@ def _opex_by_property(split: pd.DataFrame, scope: str, subbucket: str) -> Specia
         period_basis="annual",
         scope=scope,
         source_filter=f"semantic_bucket=property_opex; semantic_subbucket={subbucket}",
-        calculation_rule=f"annual governed {subbucket} amount_out summed by Lugar",
+        calculation_rule=f"annual governed {subbucket} amount_out by Lugar; reconciled to IS.OPEX.BY_CATEGORY",
+    )
+    _assert_year_currency_reconciliation(
+        out,
+        _annual_category_scalar(metrics, subbucket, scope),
+        label=f"{subbucket} by property -> IS.OPEX.BY_CATEGORY",
+        actual_period_is_monthly=False,
     )
     return SpecializedViewResult(
         out,
@@ -320,11 +384,31 @@ def _comparison_distribution_rent(
 
 
 def _pilot_tax_service(audit: pd.DataFrame, scope: str, category: str) -> SpecializedViewResult:
-    rows = audit.loc[audit["semantic_subbucket"].astype(str).eq(category)].copy()
+    required = {"semantic_subbucket", "Box"}
+    missing = sorted(required - set(audit.columns))
+    if missing:
+        raise ValueError(f"PM tax/service report source missing fields: {missing}")
+    rows = audit.loc[
+        audit["semantic_subbucket"].astype(str).eq(category)
+        & audit["Box"].astype(str).eq("Property Management")
+    ].copy()
     view = professional_tax_service_payment_view(rows, scope=scope)
+    metric_id = "PM.TAXES.COVERAGE.BY_ACTOR" if category == "taxes" else "PM.SERVICES.COVERAGE.BY_ACTOR"
+    if not view.empty:
+        view["metric_id"] = metric_id
+        view["source_filter"] = (
+            f"Box=Property Management; semantic_subbucket={category}; "
+            "cash/payment leg; economic direct mirror excluded"
+        )
+        view["calculation_rule"] = (
+            f"annual PM {category} applications grouped by identified funding actor or paying PM Box"
+        )
+        view["line_id"] = view.apply(
+            lambda r: f"{metric_id}|{r['period']}|{r['Currency']}|{r['funding_actor']}", axis=1
+        )
     return SpecializedViewResult(
         view,
-        "TAX_SERVICE.PAYMENTS.BY_ACTOR",
+        metric_id,
         "funding_actor",
         (("funding_actor", "Actor / fuente"), ("value", "Importe"), ("Currency", "Moneda")),
         (),
@@ -378,13 +462,13 @@ def build_specialized_view(
     elif view_key == "rent_by_property":
         result = _rent_by_property(frames["annual_metrics"], scope)
     elif view_key == "rent_monthly_evolution":
-        result = _rent_monthly(frames["semantic_split"], scope)
+        result = _rent_monthly(frames["semantic_split"], frames["annual_metrics"], scope)
     elif view_key == "opex_by_category":
         result = _opex_by_category(frames["annual_metrics"], scope)
     elif view_key == "taxes_by_property":
-        result = _opex_by_property(frames["semantic_split"], scope, "taxes")
+        result = _opex_by_property(frames["semantic_split"], frames["annual_metrics"], scope, "taxes")
     elif view_key == "services_by_property":
-        result = _opex_by_property(frames["semantic_split"], scope, "services")
+        result = _opex_by_property(frames["semantic_split"], frames["annual_metrics"], scope, "services")
     elif view_key == "distributions_vs_rent":
         result = _comparison_distribution_rent(
             frames["semantic_audit"], frames["annual_metrics"], scope
