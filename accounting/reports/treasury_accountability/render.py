@@ -15,6 +15,12 @@ from accounting.reports.treasury_accountability.spec import (
     LABELS,
     START_PERIOD,
 )
+from accounting.reports.charts import (
+    PieSpec,
+    professional_distribution_view,
+    professional_support_view,
+    render_pie_svg,
+)
 
 TOL = 0.01
 
@@ -364,6 +370,97 @@ def _stakeholder_support_html(support: pd.DataFrame) -> str:
       <div class="table-note">Estas aplicaciones son constructivas y están siempre identificadas por Box objetivo. No se suman como eventos físicos independientes ni establecen por sí solas un derecho legal de reintegro.</div></section>'''
 
 
+def _governed_pie_card(spec: PieSpec, rows: pd.DataFrame, denominator: float) -> tuple[str, pd.DataFrame]:
+    svg, trace = render_pie_svg(spec, rows, denominator)
+    return (
+        f'<div class="chart-card pie-card"><div class="chart-title">{_h(spec.title)}</div>'
+        f'<div class="chart-subtitle">{_h(spec.subtitle)} · Total: {_h(spec.currency)} {_h(_fmt_num(denominator, zero_dash=False))}</div>{svg}</div>',
+        trace,
+    )
+
+
+def _stakeholder_charts_html(
+    *,
+    semantic_audit: pd.DataFrame,
+    stakeholder_support: pd.DataFrame,
+    annual_metrics: pd.DataFrame,
+    out_dir: Path,
+) -> str:
+    distribution = professional_distribution_view(semantic_audit, annual_metrics)
+    support = professional_support_view(stakeholder_support)
+    cards: list[str] = []
+    traces: list[pd.DataFrame] = []
+
+    def metric_total(metric: str, period: str, currency: str) -> float:
+        rows = annual_metrics.loc[
+            annual_metrics["metric_id"].eq(metric)
+            & annual_metrics["period"].astype(str).str.removesuffix(".0").eq(str(period))
+            & annual_metrics["Currency"].astype(str).eq(currency)
+        ]
+        if len(rows) != 1:
+            raise ValueError(f"governed chart denominator is not singular: {metric} {period} {currency}")
+        value = pd.to_numeric(rows["value"], errors="coerce").iloc[0]
+        if pd.isna(value) or float(value) < 0:
+            raise ValueError(f"governed chart denominator unavailable: {metric} {period} {currency}")
+        return float(value)
+
+    available = []
+    for period in sorted(set(distribution.get("period", pd.Series(dtype=str)).astype(str))):
+        available.append(("distribution", period))
+    for period in sorted(set(support.get("period", pd.Series(dtype=str)).astype(str))):
+        available.append(("support", period))
+    # Current report: latest completed annual period for historical context,
+    # plus 2026 YTD where present. A compact cumulative card completes the view.
+    years = sorted({p for _, p in available if p})
+    selected = [y for y in years if y in {"2025", "2026"}] or (years[-1:] if years else [])
+    for family, frame, metric, dim, title in [
+        ("distribution", distribution, "DIST.DRAWS.PERSONAL", "recipient", "Distribuciones registradas por receptor"),
+        ("support", support, "SUPPORT.BY_ACTOR", "funding_actor", "Pagos y aportes reconocidos por actor"),
+    ]:
+        for period in selected:
+            for currency in sorted(set(frame.loc[frame["period"].eq(period), "Currency"].astype(str))):
+                subset = frame.loc[(frame["period"].eq(period)) & frame["Currency"].astype(str).eq(currency)].copy()
+                if subset.empty:
+                    continue
+                denominator = metric_total(metric, period, currency) if family == "distribution" else float(subset["value"].sum())
+                spec = PieSpec(
+                    chart_id=f"{family}_by_{dim}_{period}_{currency}", source_metric=metric,
+                    measure="value", slice_dimension=dim, currency=currency, scope="FBPM",
+                    period_basis="annual", period=period, title=f"{title} · {period}{' YTD · corte 31/08/2026' if period == '2026' else ''}",
+                    subtitle="Acumulado anual nominal" if currency == "ARS" else "Total anual nominal",
+                )
+                card, trace = _governed_pie_card(spec, subset, denominator); cards.append(card); traces.append(trace)
+
+        # Cumulative is a separate governed population, never a pie of mixed currencies.
+        # Keep the cumulative support population in the internal chart authority;
+        # the first human-facing v1 stays compact and renders cumulative
+        # distributions plus annual/YTD support views without an orphan page.
+        if family == "support":
+            continue
+        for currency in sorted(set(frame["Currency"].astype(str))):
+            subset = frame.loc[frame["Currency"].astype(str).eq(currency)].groupby(dim, as_index=False)["value"].sum()
+            subset["Currency"] = currency; subset["scope"] = "FBPM"; subset["period_basis"] = "cumulative"; subset["period"] = "all"
+            if family == "distribution":
+                denominators = annual_metrics.loc[annual_metrics.metric_id.eq(metric) & annual_metrics.Currency.astype(str).eq(currency), "value"]
+                denominator = float(pd.to_numeric(denominators, errors="coerce").fillna(0).sum())
+            else:
+                denominator = float(subset["value"].sum())
+            if denominator <= 0 or subset.empty:
+                continue
+            spec = PieSpec(
+                chart_id=f"{family}_by_{dim}_cumulative_{currency}", source_metric=metric,
+                measure="value", slice_dimension=dim, currency=currency, scope="FBPM",
+                period_basis="cumulative", period="all", title=f"{title} · acumulado", subtitle="Acumulado nominal ARS" if currency == "ARS" else "Acumulado nominal",
+            )
+            card, trace = _governed_pie_card(spec, subset, denominator); cards.append(card); traces.append(trace)
+
+    trace_path = out_dir / "chart_trace.csv"
+    trace_frame = pd.concat(traces, ignore_index=True) if traces else pd.DataFrame()
+    trace_frame.to_csv(trace_path, index=False)
+    note = ('<div class="table-note chart-note">Los gráficos describen universos contables diferentes y no constituyen por sí solos una liquidación o neteo jurídico entre actores. El apoyo se mide por período de settlement y por Box objetivo; 2026 es YTD al corte 31/08/2026.</div>')
+    return '<section class="box-section chart-section" id="governed-stakeholder-charts"><header class="box-head"><h2 class="box-title">QUIÉN RECIBIÓ · QUIÉN APORTÓ</h2><div class="box-subtitle">Vistas profesionales sobre autoridades gobernadas; las monedas permanecen separadas.</div></header><div class="pie-grid">' + ''.join(cards) + '</div>' + note + '</section>'
+
+
 def build_validation(
     source: pd.DataFrame,
     source_qa: pd.DataFrame,
@@ -468,6 +565,8 @@ def render_report(
     qa_path: Path | None,
     cycles_path: Path | None = None,
     stakeholder_support_path: Path | None = None,
+    semantic_audit_path: Path | None = None,
+    annual_metrics_path: Path | None = None,
     out_dir: Path,
     start_period: str = START_PERIOD,
 ) -> dict[str, Path]:
@@ -479,6 +578,8 @@ def render_report(
         if stakeholder_support_path and stakeholder_support_path.exists()
         else pd.DataFrame()
     )
+    semantic_audit = pd.read_csv(semantic_audit_path) if semantic_audit_path and semantic_audit_path.exists() else pd.DataFrame()
+    annual_metrics = pd.read_csv(annual_metrics_path) if annual_metrics_path and annual_metrics_path.exists() else pd.DataFrame()
 
     non_numeric = {
         "period", "period_end", "control_as_of_date", "Box", "Currency",
@@ -529,6 +630,7 @@ def render_report(
       <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Corte contable: {_h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
       {_cycle_html(cycles)}
       {_stakeholder_support_html(stakeholder_support)}
+      {(_stakeholder_charts_html(semantic_audit=semantic_audit, stakeholder_support=stakeholder_support, annual_metrics=annual_metrics, out_dir=out_dir) if not semantic_audit.empty and not annual_metrics.empty and not stakeholder_support.empty else '')}
       {"".join(sections)}
       <section class="qa-card"><h2>Control de integridad del reporte</h2><div class="qa-grid">{qa_items}</div></section>
       <footer class="footer"><span>Fuente contable: monthly_cash_accountability.csv · movimientos reconciliados contra box motor.</span><span>Generación reproducible; ver report_validation.csv.</span></footer>
@@ -576,6 +678,9 @@ def main() -> None:
     parser.add_argument("--accountability", required=True, type=Path)
     parser.add_argument("--qa", type=Path)
     parser.add_argument("--cycles", type=Path)
+    parser.add_argument("--stakeholder-support", type=Path)
+    parser.add_argument("--semantic-audit", type=Path)
+    parser.add_argument("--annual-metrics", type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--start-period", default=START_PERIOD)
     args = parser.parse_args()
@@ -583,6 +688,9 @@ def main() -> None:
         accountability_path=args.accountability,
         qa_path=args.qa,
         cycles_path=args.cycles,
+        stakeholder_support_path=args.stakeholder_support,
+        semantic_audit_path=args.semantic_audit,
+        annual_metrics_path=args.annual_metrics,
         out_dir=args.out_dir,
         start_period=args.start_period,
     )

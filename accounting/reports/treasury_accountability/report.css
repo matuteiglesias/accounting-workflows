@@ -47,6 +47,11 @@ h1 { margin: 5px 0; font-size: 31px; line-height: 1.05; letter-spacing: -.55px; 
 .status-strip { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
 .status-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 9px; color: #4c5768; background: var(--soft); }
 .chart-card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 8px; margin-bottom: 13px; }
+.pie-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px 20px 4px; }
+.pie-card { margin: 0; break-inside: avoid; }
+svg.governed-pie { width: 100%; height: auto; display: block; }
+.pie-total { font: 700 11px Inter, Arial, sans-serif; fill: #102a56; }
+.chart-note { padding: 0 20px 18px; }
 .chart-title { font-weight: 700; color: var(--navy); font-size: 10px; margin-bottom: 4px; }
 .chart-subtitle { color: var(--muted); font-size: 8.5px; margin-bottom: 3px; }
 svg.cash-chart { width: 100%; height: auto; display: block; }
@@ -88,6 +93,11 @@ table.treasury td.non-cash { color: #667085; background: #fafafa; }
   .hero, .box-section, .qa-card { border-radius: 0; border-color: #bfc6d0; }
   .box-section { break-before: page; }
   .chart-card { break-inside: avoid; }
+  .chart-section { break-before: page; }
+  .pie-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px 12px 2px; }
+  .pie-card { padding: 6px 8px 4px; }
+  svg.governed-pie { max-height: 125px; }
+  .chart-note { padding: 0 12px 10px; }
   .table-wrap { overflow: visible; border-radius: 0; }
   table.treasury { width: 100%; min-width: 0; font-size: 6.4px; }
   table.treasury th, table.treasury td { padding: 3px 3.5px; }

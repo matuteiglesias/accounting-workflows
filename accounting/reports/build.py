@@ -170,6 +170,7 @@ def build_report_bundle(
     accountability_cycles = run_root / "family_business_accountability_cycles.csv"
     stakeholder_support = run_root / "monthly_stakeholder_support.csv"
     stakeholder_support_qa = run_root / "monthly_stakeholder_support_qa.csv"
+    semantic_audit = run_root / "classification_audit.csv"
     repayment_detail = run_root / "monthly_debt_repayment_detail.csv"
     debt_position = run_root / "monthly_debt_position.csv"
     debt_position_qa = run_root / "monthly_debt_position_qa.csv"
@@ -222,6 +223,8 @@ def build_report_bundle(
         qa_path=treasury_qa,
         cycles_path=accountability_cycles,
         stakeholder_support_path=stakeholder_support,
+        semantic_audit_path=semantic_audit,
+        annual_metrics_path=annual_metrics,
         out_dir=treasury_dir,
     )
     debt_outputs = render_debt(
@@ -286,6 +289,7 @@ def build_report_bundle(
             _source(accountability_cycles, "run/family_business_accountability_cycles.csv"),
             _source(stakeholder_support, "run/monthly_stakeholder_support.csv"),
             _source(stakeholder_support_qa, "run/monthly_stakeholder_support_qa.csv"),
+            *([_source(semantic_audit, "run/classification_audit.csv")] if semantic_audit.is_file() else []),
         ],
         outputs=_manifest_outputs(treasury_outputs, bundle_root=out_dir),
         validation_status=treasury_status,

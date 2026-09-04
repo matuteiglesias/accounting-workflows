@@ -38,6 +38,16 @@ SETTLEMENT_NATURES = {
     "reimbursement_or_pass_through", "unknown",
 }
 
+# v2 is a governed private input, not a permissive decoration file.  These
+# fields define the minimum case/leg identity needed to apply an override;
+# additive fields may be introduced without changing this contract.
+REQUIRED_OVERRIDE_COLUMNS = {
+    "settlement_case_id", "obligation_box", "Date", "Currency", "gross_amount",
+    "allocation_status", "allocated_amount", "settlement_mode", "cash_path",
+    "evidence_status", "leg_role",
+}
+OPTIONAL_OVERRIDE_COLUMNS = set(DETAIL_COLUMNS) - REQUIRED_OVERRIDE_COLUMNS
+
 
 def _text(value: Any) -> str:
     if value is None or pd.isna(value):
@@ -49,6 +59,12 @@ def _load_override(path: Path | None) -> pd.DataFrame:
     if path is None or not Path(path).is_file():
         return pd.DataFrame(columns=DETAIL_COLUMNS)
     frame = pd.read_csv(path, dtype=str).fillna("")
+    missing_required = sorted(REQUIRED_OVERRIDE_COLUMNS - set(frame.columns))
+    if missing_required:
+        raise ValueError(
+            "stakeholder settlement override v2 missing required columns: "
+            f"{missing_required}"
+        )
     for column in DETAIL_COLUMNS:
         if column not in frame.columns:
             frame[column] = ""
@@ -59,6 +75,8 @@ def _load_override(path: Path | None) -> pd.DataFrame:
     bad = set(frame["settlement_nature"].map(_text)) - SETTLEMENT_NATURES - {""}
     if bad:
         raise ValueError(f"unsupported settlement_nature values: {sorted(bad)}")
+    # Unknown columns are additive input metadata and are deliberately not
+    # promoted into the governed detail authority.
     return frame[DETAIL_COLUMNS].copy()
 
 
@@ -139,9 +157,28 @@ def apply_stakeholder_settlements(audit: pd.DataFrame, override_path: Path | Non
         support_total = float(support["allocated_amount"].sum())
         expense_total = float(expense["gross_amount"].sum())
         allocation_total = float(allocations["underlying_allocated_amount"].sum())
-        box_cash = float(case["known_box_cash_funding"].max())
-        other = float(case["other_governed_funding"].max())
-        unresolved = float(case["unresolved_funding"].max())
+        def consistent_case_value(column: str) -> float:
+            values = pd.to_numeric(case[column], errors="coerce").dropna()
+            # Blank values are represented as zero by the input normalization;
+            # non-zero repeated values must agree exactly across all legs.
+            nonzero = values[values.abs() > .01]
+            if len(nonzero) and (nonzero - nonzero.iloc[0]).abs().gt(.01).any():
+                raise ValueError(
+                    f"conflicting {column} metadata within settlement case {case_id}"
+                )
+            return float(nonzero.iloc[0]) if len(nonzero) else 0.0
+
+        box_cash = consistent_case_value("known_box_cash_funding")
+        other = consistent_case_value("other_governed_funding")
+        unresolved = consistent_case_value("unresolved_funding")
+
+        funding_statuses = {
+            _text(value) for value in case["funding_status"] if _text(value)
+        }
+        if len(funding_statuses) > 1:
+            raise ValueError(
+                f"conflicting funding_status metadata within settlement case {case_id}"
+            )
 
         def add(check: str, ok: bool, amount: float, detail_text: str) -> None:
             qa_rows.append({"check": check, "settlement_case_id": case_id, "status": "pass" if ok else "fail", "severity": "error", "amount": amount, "detail": detail_text})

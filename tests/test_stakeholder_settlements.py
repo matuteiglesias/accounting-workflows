@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from accounting.marts.semantic import build_semantic_outputs
 from accounting.marts.stakeholder import DETAIL_COLUMNS
@@ -152,3 +153,23 @@ def test_reporting_group_defaults_to_actor_and_is_presentation_only(tmp_path: Pa
     support["reporting_group"] = support["funding_actor"].map({"Actor":"Illustrative group"}).fillna(support["funding_actor"])
     assert support["recognized_amount"].sum() == before
     assert support["target_box"].unique().tolist() == ["Property Management"]
+
+
+def test_override_v2_requires_governed_columns_and_consistent_case_funding(tmp_path: Path) -> None:
+    rows = [{"tx_id": "direct", "Date": "2025-04-29", "amount": 100, "Currency": "ARS", "Box": "Property Management", "Lugar": "Site", "payer": "Actor", "receiver": "Impuestos", "Flujo": "Pagos", "Tipo": "Impuestos", "Detalle": "", "status": "pagado"}]
+    private = tmp_path / "private_review"
+    private.mkdir(parents=True)
+    malformed = _base_leg(source_tx_id="direct", leg_role="stakeholder_direct_expense", stakeholder_actor="Actor", allocated_amount=100)
+    malformed.pop("cash_path")
+    pd.DataFrame([malformed]).to_csv(private / "stakeholder_settlement_overrides.csv", index=False)
+    with pytest.raises(ValueError, match="missing required columns"):
+        build_semantic_outputs(pd.DataFrame(rows), tmp_path)
+
+    conflicting = [
+        _base_leg(source_tx_id="direct", leg_role="stakeholder_direct_expense", stakeholder_actor="Actor", allocated_amount=100, known_box_cash_funding=10),
+        _base_leg(source_tx_id="expense", leg_role="economic_expense", allocated_amount=0, known_box_cash_funding=20),
+    ]
+    ledger = rows + [{"tx_id": "expense", "Date": "2025-04-29", "amount": 100, "Currency": "ARS", "Box": "Property Management", "Lugar": "Site", "payer": "PM", "receiver": "Impuestos", "Flujo": "Pagos", "Tipo": "Impuestos", "Detalle": "", "status": "pagado"}]
+    pd.DataFrame(conflicting, columns=DETAIL_COLUMNS).to_csv(private / "stakeholder_settlement_overrides.csv", index=False)
+    with pytest.raises(ValueError, match="conflicting known_box_cash_funding"):
+        build_semantic_outputs(pd.DataFrame(ledger), tmp_path)
