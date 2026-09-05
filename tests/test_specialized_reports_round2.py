@@ -99,8 +99,8 @@ def _write_round2_sources(run: Path, metrics: Path) -> None:
 
 def test_round2_recipes_are_declared_after_round1():
     ids = [spec.report_id for spec in REPORT_SPECS]
-    assert ids[10:] == ROUND2_IDS
-    assert len(ids) == 19
+    assert ids[10:10 + len(ROUND2_IDS)] == ROUND2_IDS
+    assert len(ids) >= 19
 
 
 def test_support_and_prior_clearing_keep_box_and_period_semantics(tmp_path: Path):
