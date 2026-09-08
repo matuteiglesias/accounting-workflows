@@ -15,6 +15,7 @@ import pandas as pd
 
 from accounting.cash_authority import select_validated_cash_period
 from accounting.cutoff import load_run_cutoff_if_present
+from accounting.marts.treasury_transaction_detail import write_treasury_transaction_detail
 
 
 TREASURY_FLOW_COLUMNS = [
@@ -434,6 +435,12 @@ def build_monthly_box_treasury_flow(
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    transaction_paths = write_treasury_transaction_detail(
+        work=work,
+        monthly=monthly,
+        out_dir=out_dir,
+        tolerance=tolerance,
+    )
     flow_path = out_dir / "monthly_box_treasury_flow.csv"
     qa_path = out_dir / "monthly_box_treasury_flow_qa.csv"
     residual_path = out_dir / "treasury_residual_cash_audit.csv"
@@ -448,6 +455,7 @@ def build_monthly_box_treasury_flow(
         "monthly_box_treasury_flow_qa": qa_path,
         "treasury_residual_cash_audit": residual_path,
         "treasury_residual_cash_materiality_qa": residual_qa_path,
+        **transaction_paths,
     }
 
 
