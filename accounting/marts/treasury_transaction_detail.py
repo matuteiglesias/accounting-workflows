@@ -57,6 +57,16 @@ QA_COLUMNS = [
     "severity",
     "detail",
 ]
+CONTRACT_COLUMNS = [
+    "name",
+    "artifact_role",
+    "accounting_nature",
+    "grain",
+    "currency_policy",
+    "frontend_suitability",
+    "source_authority",
+    "notes",
+]
 
 
 def _numeric(frame: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
@@ -206,6 +216,37 @@ def _qa(detail: pd.DataFrame, monthly: pd.DataFrame, tolerance: float) -> pd.Dat
     return qa
 
 
+def _contract() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "name": "box_treasury_transaction_detail.csv",
+                "artifact_role": "canonical_source",
+                "accounting_nature": "flow",
+                "grain": "tx",
+                "currency_policy": "by_currency",
+                "frontend_suitability": "safe_with_caveat",
+                "source_authority": "source_of_truth_for_treasury_flow",
+                "notes": (
+                    "Transaction-grain actual Box cash projected from the same governed pre-groupby "
+                    "treasury frame as monthly_box_treasury_flow; no report-side cash classification."
+                ),
+            },
+            {
+                "name": "box_treasury_transaction_detail_qa.csv",
+                "artifact_role": "qa",
+                "accounting_nature": "quality",
+                "grain": "mixed",
+                "currency_policy": "by_currency",
+                "frontend_suitability": "internal_only",
+                "source_authority": "diagnostic_evidence",
+                "notes": "Hard atomic arithmetic, physical-cash membership and monthly treasury reconciliation checks.",
+            },
+        ],
+        columns=CONTRACT_COLUMNS,
+    )
+
+
 def write_treasury_transaction_detail(
     *,
     work: pd.DataFrame,
@@ -220,9 +261,12 @@ def write_treasury_transaction_detail(
     qa = _qa(detail, monthly, tolerance)
     detail_path = out_dir / "box_treasury_transaction_detail.csv"
     qa_path = out_dir / "box_treasury_transaction_detail_qa.csv"
+    contract_path = out_dir / "box_treasury_transaction_detail_contract.csv"
     detail.to_csv(detail_path, index=False)
     qa.to_csv(qa_path, index=False)
+    _contract().to_csv(contract_path, index=False)
     return {
         "box_treasury_transaction_detail": detail_path,
         "box_treasury_transaction_detail_qa": qa_path,
+        "box_treasury_transaction_detail_contract": contract_path,
     }
