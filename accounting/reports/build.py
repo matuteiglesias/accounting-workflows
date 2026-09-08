@@ -27,6 +27,9 @@ from accounting.reports.debt_accountability.render import render_report as rende
 from accounting.reports.treasury_accountability.render import (
     render_report as render_treasury,
 )
+from accounting.reports.treasury_transaction_tape.render import (
+    render_report as render_tape,
+)
 
 
 def _csv_rows(path: Path) -> int:
@@ -170,6 +173,8 @@ def build_report_bundle(
     annual_qa = metrics_dir / "annual_balance_dashboard_qa.csv"
     treasury_accountability = run_root / "monthly_cash_accountability.csv"
     treasury_qa = run_root / "monthly_cash_accountability_qa.csv"
+    treasury_detail = run_root / "box_treasury_transaction_detail.csv"
+    treasury_detail_qa = run_root / "box_treasury_transaction_detail_qa.csv"
     accountability_cycles = run_root / "family_business_accountability_cycles.csv"
     stakeholder_support = run_root / "monthly_stakeholder_support.csv"
     stakeholder_support_qa = run_root / "monthly_stakeholder_support_qa.csv"
@@ -197,6 +202,12 @@ def build_report_bundle(
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"report source artifact(s) missing: {missing}")
+    tape_presence = [treasury_detail.is_file(), treasury_detail_qa.is_file()]
+    if any(tape_presence) and not all(tape_presence):
+        raise FileNotFoundError(
+            "treasury transaction tape source is incomplete: both atomic detail and QA are required"
+        )
+    tape_available = all(tape_presence)
 
     _assert_annual_run_identity(annual_metrics, source_run_id)
     _annual_as_of_date, annual_period_label = _annual_metadata(annual_metrics)
@@ -212,9 +223,12 @@ def build_report_bundle(
     out_dir.mkdir(parents=True, exist_ok=True)
     annual_dir = out_dir / "annual_management"
     treasury_dir = out_dir / "treasury_accountability"
+    tape_dir = out_dir / "treasury_transaction_tape"
     debt_dir = out_dir / "debt_accountability"
     annual_dir.mkdir(parents=True, exist_ok=True)
     treasury_dir.mkdir(parents=True, exist_ok=True)
+    if tape_available:
+        tape_dir.mkdir(parents=True, exist_ok=True)
     debt_dir.mkdir(parents=True, exist_ok=True)
 
     annual_outputs = render_annual(
@@ -232,6 +246,17 @@ def build_report_bundle(
         semantic_audit_path=semantic_audit,
         annual_metrics_path=annual_metrics,
         out_dir=treasury_dir,
+    )
+    tape_outputs = (
+        render_tape(
+            detail_path=treasury_detail,
+            detail_qa_path=treasury_detail_qa,
+            accountability_path=treasury_accountability,
+            out_dir=tape_dir,
+            as_of_date=as_of_date,
+        )
+        if tape_available
+        else {}
     )
     debt_outputs = render_debt(
         position_path=debt_position,
@@ -269,17 +294,23 @@ def build_report_bundle(
         treasury_outputs["pdf"] = render_pdf(
             treasury_outputs["html"], treasury_dir / "report.pdf", browser_bin=browser_bin
         )
+        if tape_available:
+            tape_outputs["pdf"] = render_pdf(
+                tape_outputs["html"], tape_dir / "report.pdf", browser_bin=browser_bin
+            )
         debt_outputs["pdf"] = render_pdf(
             debt_outputs["html"], debt_dir / "report.pdf", browser_bin=browser_bin
         )
 
     annual_status = _validation_status(annual_outputs["validation"])
     treasury_status = _validation_status(treasury_outputs["validation"])
+    tape_status = _validation_status(tape_outputs["validation"]) if tape_available else "pass"
     debt_status = _validation_status(debt_outputs["validation"])
-    if annual_status == "fail" or treasury_status == "fail" or debt_status == "fail":
+    if "fail" in {annual_status, treasury_status, tape_status, debt_status}:
         raise ValueError(
             "report bundle cannot be cataloged with failed report validation: "
-            f"annual={annual_status} treasury={treasury_status} debt={debt_status}"
+            f"annual={annual_status} treasury={treasury_status} "
+            f"tape={tape_status} debt={debt_status}"
         )
 
     annual_manifest = build_report_manifest(
@@ -319,6 +350,25 @@ def build_report_bundle(
     )
     treasury_manifest_path = treasury_dir / "report_manifest.json"
     write_report_manifest(treasury_manifest_path, treasury_manifest)
+
+    tape_manifest_path = Path()
+    if tape_available:
+        tape_manifest = build_report_manifest(
+            report_id="treasury_transaction_tape",
+            renderer_version="treasury_transaction_tape.v1",
+            source_run_id=source_run_id,
+            scope_tag=scope_tag,
+            as_of_date=as_of_date,
+            sources=[
+                _source(treasury_detail, "run/box_treasury_transaction_detail.csv"),
+                _source(treasury_detail_qa, "run/box_treasury_transaction_detail_qa.csv"),
+                _source(treasury_accountability, "run/monthly_cash_accountability.csv"),
+            ],
+            outputs=_manifest_outputs(tape_outputs, bundle_root=out_dir),
+            validation_status=tape_status,
+        )
+        tape_manifest_path = tape_dir / "report_manifest.json"
+        write_report_manifest(tape_manifest_path, tape_manifest)
 
     debt_manifest = build_report_manifest(
         report_id="debt_accountability",
@@ -376,11 +426,30 @@ def build_report_bundle(
         for spec in active_specialized_specs
     ]
 
+    pack_sources = [
+        annual_metrics,
+        treasury_accountability,
+        accountability_cycles,
+        stakeholder_support,
+        debt_position,
+        debt_activity,
+        repayment_detail,
+        cost_gaps,
+        *([treasury_detail] if tape_available else []),
+        *specialized_source_paths,
+    ]
+    pack_html = [
+        annual_outputs["html"],
+        treasury_outputs["html"],
+        *([tape_outputs["html"]] if tape_available else []),
+        debt_outputs["html"],
+        *specialized_html,
+    ]
     pack_validation = _build_pack_validation(
         run_id=source_run_id, scope_tag=scope_tag, as_of_date=as_of_date,
         annual_metrics=annual_metrics, debt_position=debt_position,
-        source_paths=[annual_metrics, treasury_accountability, accountability_cycles, stakeholder_support, debt_position, debt_activity, repayment_detail, cost_gaps, *specialized_source_paths],
-        report_html=[annual_outputs["html"], treasury_outputs["html"], debt_outputs["html"], *specialized_html],
+        source_paths=pack_sources,
+        report_html=pack_html,
     )
     pack_validation_path = out_dir / "report_pack_validation.csv"
     pack_validation.to_csv(pack_validation_path, index=False)
@@ -390,48 +459,69 @@ def build_report_bundle(
     # The catalog is the viewer boundary. Internal provenance manifests and
     # trace/validation CSVs remain under out/reports and are deliberately not
     # part of the public document-discovery contract.
+    core_reports = [
+        ReportCatalogItem(
+            report_id="annual_management",
+            title="Informe patrimonial y de gestión",
+            description=(
+                "Visión anual de rentas, operación, aplicación del resultado, "
+                "tesorería, deuda y control."
+            ),
+            period_label=annual_period_label,
+            sort_order=10,
+            html="annual_management/report.html",
+            pdf="annual_management/report.pdf" if require_pdf else None,
+            manifest=None,
+        ),
+        ReportCatalogItem(
+            report_id="treasury_accountability",
+            title="Rendición mensual de tesorería",
+            description=(
+                "Movimientos mensuales y evolución del control acumulado de "
+                "Family Business y Property Management."
+            ),
+            period_label=treasury_period_label,
+            sort_order=20,
+            html="treasury_accountability/report.html",
+            pdf="treasury_accountability/report.pdf" if require_pdf else None,
+            manifest=None,
+        ),
+    ]
+    if tape_available:
+        core_reports.append(
+            ReportCatalogItem(
+                report_id="treasury_transaction_tape",
+                title="Rendición transaccional de tesorería",
+                description=(
+                    "Entradas, salidas y saldo de control acumulado, transacción "
+                    "por transacción, para cada Box y moneda."
+                ),
+                period_label=treasury_period_label,
+                sort_order=25,
+                html="treasury_transaction_tape/report.html",
+                pdf="treasury_transaction_tape/report.pdf" if require_pdf else None,
+                manifest=None,
+            )
+        )
+    core_reports.append(
+        ReportCatalogItem(
+            report_id="debt_accountability",
+            title="Posición y movimientos de deuda",
+            description="Obligaciones registradas, actividad, repagos y trazabilidad.",
+            period_label=f"{as_of_date[:4]} YTD · cierre {as_of_date}",
+            sort_order=30,
+            html="debt_accountability/report.html",
+            pdf="debt_accountability/report.pdf" if require_pdf else None,
+            manifest=None,
+        )
+    )
     catalog = build_report_catalog(
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,
         generated_at_utc=generated_at_utc,
         reports=[
-            ReportCatalogItem(
-                report_id="annual_management",
-                title="Informe patrimonial y de gestión",
-                description=(
-                    "Visión anual de rentas, operación, aplicación del resultado, "
-                    "tesorería, deuda y control."
-                ),
-                period_label=annual_period_label,
-                sort_order=10,
-                html="annual_management/report.html",
-                pdf="annual_management/report.pdf" if require_pdf else None,
-                manifest=None,
-            ),
-            ReportCatalogItem(
-                report_id="debt_accountability",
-                title="Posición y movimientos de deuda",
-                description="Obligaciones registradas, actividad, repagos y trazabilidad.",
-                period_label=f"{as_of_date[:4]} YTD · cierre {as_of_date}",
-                sort_order=30,
-                html="debt_accountability/report.html",
-                pdf="debt_accountability/report.pdf" if require_pdf else None,
-                manifest=None,
-            ),
-            ReportCatalogItem(
-                report_id="treasury_accountability",
-                title="Rendición mensual de tesorería",
-                description=(
-                    "Movimientos mensuales y evolución del control acumulado de "
-                    "Family Business y Property Management."
-                ),
-                period_label=treasury_period_label,
-                sort_order=20,
-                html="treasury_accountability/report.html",
-                pdf="treasury_accountability/report.pdf" if require_pdf else None,
-                manifest=None,
-            ),
+            *core_reports,
             *[
                 ReportCatalogItem(
                     report_id=s.report_id,
@@ -459,6 +549,9 @@ def build_report_bundle(
         "treasury_html": treasury_outputs["html"],
         "treasury_pdf": treasury_outputs.get("pdf", Path()),
         "treasury_manifest": treasury_manifest_path,
+        "tape_html": tape_outputs.get("html", Path()),
+        "tape_pdf": tape_outputs.get("pdf", Path()),
+        "tape_manifest": tape_manifest_path,
         "debt_html": debt_outputs["html"],
         "debt_pdf": debt_outputs.get("pdf", Path()),
         "debt_manifest": debt_manifest_path,
