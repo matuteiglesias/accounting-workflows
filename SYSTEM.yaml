@@ -15,12 +15,14 @@ authority:
   - governed annual and treasury human-report rendering
   - report bundle/catalog generation and document publication
   - professional pack and drilldown artifacts
+  - governed docs-input factual projections from existing accounting authorities
   - accounting business-rule implementation
   does_not_own:
   - raw document intake
   - document parsing or OCR
   - viewer-specific navigation or presentation
   - public documentation authority
+  - legal, strategy, governance, or psychology interpretation of accounting facts
 interfaces:
   consumes:
   - artifact:acct.document-candidate@1
@@ -48,11 +50,13 @@ generated_paths:
 - public/reports/
 verification:
   status: partial
-  last_verified: '2026-08-25'
+  last_verified: '2026-09-17'
   command: make validate
   unknowns:
   - full live execution depends on local accounting inputs and an available Chromium/Chrome binary for PDF rendering
   - transaction evidence is optional enrichment and does not alter ledger/accounting calculations
+  - docs-input professional evidence coverage depends on an explicitly supplied professional pack; absence is represented as unavailable rather than inferred
+  - prospective treasury commitments are optional private non-ledger input and do not create historical accounting recognition or distributable-balance authority
   - overlapping same-scope runs remain unsupported until concurrency issue #44 is resolved
   - viewer deployment privacy/access control is governed downstream and is not inferred from repository visibility
 maintenance:
