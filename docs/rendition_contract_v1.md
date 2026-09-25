@@ -107,11 +107,14 @@ Allowed values:
 
 ### Local compile
 
+The governed Make public surface remains unchanged. Invoke the private rendition compiler directly against an existing exact run:
+
 ```bash
-make run-rendition-compile \
-  RUN_ID=<existing exact run id> \
-  RENDITION_SPEC=private/rendition.yaml \
-  PROPERTY_REGISTRY=private/property_registry.csv
+python -m accounting.rendition.build \
+  --spec private/rendition.yaml \
+  --property-registry private/property_registry.csv \
+  --run-root out/run/accounting/<RUN_ID> \
+  --out-base out/renditions
 ```
 
 The compiler fails closed on upstream treasury QA failures, duplicate transaction identities, mixed cash/non-cash populations, cash arithmetic errors, invalid scope/run/cutoff, and summary reconciliation errors.
