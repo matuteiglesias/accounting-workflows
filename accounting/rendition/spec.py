@@ -32,6 +32,7 @@ _TOP_LEVEL_KEYS = {
     "language",
     "opening_basis",
 }
+_REQUIRED_TOP_LEVEL_KEYS = _TOP_LEVEL_KEYS - {"opening_basis"}
 _RENDIDOR_KEYS = {"display_name"}
 _PERIOD_KEYS = {"from", "through"}
 _PROPERTY_ID_RE = re.compile(r"^[A-Z0-9][A-Z0-9_.-]*$")
@@ -117,7 +118,7 @@ def parse_rendition_spec(payload: dict[str, Any]) -> RenditionSpec:
     assert_no_forbidden_semantics(payload)
     _strict_keys(payload, _TOP_LEVEL_KEYS, path="spec")
 
-    missing = sorted(_TOP_LEVEL_KEYS - set(payload))
+    missing = sorted(_REQUIRED_TOP_LEVEL_KEYS - set(payload))
     if missing:
         raise ValueError(f"spec missing required fields: {missing}")
 
