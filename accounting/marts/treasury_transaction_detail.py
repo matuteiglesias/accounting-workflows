@@ -178,6 +178,13 @@ def _qa(detail: pd.DataFrame, monthly: pd.DataFrame, tolerance: float) -> pd.Dat
             atomic_net=("net_amount", "sum"),
         )
     )
+    # Empty grouped frames can infer different dtypes (notably ``Box`` as
+    # float64) from the populated side. Normalize reconciliation keys before
+    # merging so empty smoke populations fail closed without a pandas dtype
+    # error.
+    for frame in (expected, atomic):
+        for column in ("period", "Box", "Currency"):
+            frame[column] = frame[column].astype("string")
     keys = pd.concat(
         [
             expected[["period", "Box", "Currency"]],

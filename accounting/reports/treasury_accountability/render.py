@@ -229,13 +229,8 @@ def _table_html(group: pd.DataFrame) -> str:
         parts.append(f'<th class="{css_class}">{_h(LABELS.get(col, col))}</th>')
     parts.append("</tr></thead><tbody>")
 
-    prior_year = None
-    for _, row in group.iterrows():
-        period = str(row["period"])
-        year = period[:4]
-        row_class = "year-start" if prior_year is not None and year != prior_year else ""
-        prior_year = year
-        parts.append(f'<tr class="{row_class}"><td class="month">{_h(period)}</td>')
+    def render_row(row: dict[str, object], row_class: str = "") -> None:
+        parts.append(f'<tr class="{row_class}"><td class="month">{_h(row["period"])}</td>')
         for col in flat_cols:
             value = row.get(col, 0)
             display = _fmt_num(value, zero_dash=col not in {"opening_control", "closing_control"})
@@ -256,6 +251,35 @@ def _table_html(group: pd.DataFrame) -> str:
                 classes.append("zero")
             parts.append(f'<td class="{" ".join(classes)}">{_h(display)}</td>')
         parts.append("</tr>")
+
+    def subtotal(frame: pd.DataFrame, label: str) -> dict[str, object]:
+        row: dict[str, object] = {"period": label}
+        for col in flat_cols:
+            if col == "opening_control":
+                row[col] = frame.iloc[0][col]
+            elif col == "closing_control":
+                row[col] = frame.iloc[-1][col]
+            elif col in frame.columns:
+                row[col] = pd.to_numeric(frame[col], errors="coerce").fillna(0).sum()
+            else:
+                row[col] = 0
+        return row
+
+    group = group.sort_values("period").reset_index(drop=True)
+    prior_year = None
+    latest_year = str(group.iloc[-1]["period"])[:4] if not group.empty else ""
+    for index, (_, row) in enumerate(group.iterrows()):
+        period = str(row["period"])
+        year = period[:4]
+        row_class = "year-start" if prior_year is not None and year != prior_year else ""
+        prior_year = year
+        render_row(row.to_dict(), row_class)
+        next_year = index + 1 == len(group) or str(group.iloc[index + 1]["period"])[:4] != year
+        if next_year:
+            label = f"TOTAL {year} YTD" if year == latest_year else f"TOTAL {year}"
+            render_row(subtotal(group.loc[group["period"].astype(str).str[:4].eq(year)], label), "subtotal")
+    if not group.empty:
+        render_row(subtotal(group, "TOTAL PERÍODO"), "subtotal total-period")
     parts.append("</tbody></table></div>")
     return "".join(parts)
 

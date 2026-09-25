@@ -64,6 +64,8 @@ table.treasury thead tr.col-head th { top: 27px; background: var(--soft-blue); c
 table.treasury th.month, table.treasury td.month { position: sticky; left: 0; z-index: 3; text-align: left; min-width: 83px; font-weight: 650; }
 table.treasury thead th.month { z-index: 6; }
 table.treasury tbody tr.year-start td { border-top: 2px solid var(--line-strong); }
+table.treasury tbody tr.subtotal td { background: var(--soft-blue); border-top: 2px solid var(--blue); font-weight: 760; }
+table.treasury tbody tr.subtotal.total-period td { background: #e3ebf5; border-top: 3px solid var(--navy); border-bottom: 3px solid var(--navy); }
 table.treasury tbody tr:hover td { background: #fafbfd; }
 table.treasury td.zero { color: #aab2bf; text-align: center; }
 table.treasury td.net-pos, table.treasury td.net-neg, table.treasury td.close { font-weight: 720; }
