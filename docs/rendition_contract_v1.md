@@ -59,3 +59,59 @@ A successful command prints a `pass` summary. It computes no accounting values a
 ## Explicit non-goals of phase 1
 
 Phase 1 does not implement rendering, evidence blobs, digital signatures, approval, delivery, ownership percentages, legal balances, FX conversion, setoff, or consignation. Those belong to later bounded waves and must consume this scope contract rather than bypass it.
+
+
+## Wave 2 compiler
+
+Wave 2 projects the validated scope into transaction-grain rendition datasets. It does not reclassify the ledger or create a second accounting engine.
+
+Primary sources:
+
+- `box_treasury_transaction_detail.csv` for governed actual Box cash;
+- `box_treasury_transaction_detail_qa.csv` as an upstream hard gate;
+- `classification_audit.csv` for governed non-cash/direct-payment events;
+- `monthly_cash_accountability.csv` only for an optional governed prior Box close.
+
+Outputs under `out/renditions/<RENDITION_ID>/compiled/`:
+
+- `rendition_cash_tape.csv`;
+- `rendition_non_cash_events.csv`;
+- `rendition_summary.csv`;
+- `rendition_opening_basis.csv`;
+- `rendition_validation.csv`;
+- `rendition_context.json`.
+
+The cash tape is an exact property/period subset of the governed treasury transaction detail. Direct tenant payments, constructive settlements and other explicit non-cash events are kept in a separate annex population and never manufactured as Box cash.
+
+The summary is derived only from those two compiled populations. Cash components remain separated by native currency and source semantic bucket. `activity_result` is a reporting result, not a legal balance.
+
+Mandatory caveat for later rendering:
+
+> El resultado de actividad no constituye por sí mismo determinación de deuda, saldo jurídicamente exigible, titularidad de fondos ni caja física disponible.
+
+### Opening basis
+
+The optional spec block is:
+
+```yaml
+opening_basis:
+  type: unavailable
+```
+
+Allowed values:
+
+- `zero_origin_from_management_start`: emits zero only if the exact run contains no earlier activity for any selected property;
+- `governed_prior_close`: reads the latest prior `monthly_cash_accountability` close at **Box × Currency** grain and explicitly refuses to attribute that pooled control balance to a property;
+- `verified_external`: reserved for the evidence wave; Wave 2 records the state as pending and does not invent an opening amount;
+- `unavailable`: asserts no opening amount.
+
+### Local compile
+
+```bash
+make run-rendition-compile \
+  RUN_ID=<existing exact run id> \
+  RENDITION_SPEC=private/rendition.yaml \
+  PROPERTY_REGISTRY=private/property_registry.csv
+```
+
+The compiler fails closed on upstream treasury QA failures, duplicate transaction identities, mixed cash/non-cash populations, cash arithmetic errors, invalid scope/run/cutoff, and summary reconciliation errors.
