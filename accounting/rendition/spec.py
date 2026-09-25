@@ -30,16 +30,28 @@ _TOP_LEVEL_KEYS = {
     "recipients",
     "purpose",
     "language",
+    "opening_basis",
 }
 _RENDIDOR_KEYS = {"display_name"}
 _PERIOD_KEYS = {"from", "through"}
 _PROPERTY_ID_RE = re.compile(r"^[A-Z0-9][A-Z0-9_.-]*$")
+_OPENING_BASIS_TYPES = {
+    "governed_prior_close",
+    "verified_external",
+    "zero_origin_from_management_start",
+    "unavailable",
+}
 
 
 @dataclass(frozen=True)
 class RenditionPeriod:
     from_date: str
     through_date: str
+
+
+@dataclass(frozen=True)
+class OpeningBasis:
+    type: str
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,7 @@ class RenditionSpec:
     recipients: tuple[str, ...]
     purpose: str
     language: str
+    opening_basis: OpeningBasis
 
 
 def _strict_keys(mapping: dict[str, Any], allowed: set[str], *, path: str) -> None:
@@ -155,6 +168,16 @@ def parse_rendition_spec(payload: dict[str, Any]) -> RenditionSpec:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError(f"unsupported rendition language: {language!r}")
 
+    raw_opening = payload.get("opening_basis", {"type": "unavailable"})
+    if not isinstance(raw_opening, dict):
+        raise ValueError("opening_basis must be a mapping")
+    _strict_keys(raw_opening, {"type"}, path="opening_basis")
+    if set(raw_opening) != {"type"}:
+        raise ValueError("opening_basis must contain type")
+    opening_type = _nonblank(raw_opening["type"], field="opening_basis.type")
+    if opening_type not in _OPENING_BASIS_TYPES:
+        raise ValueError(f"unsupported opening_basis.type: {opening_type!r}")
+
     return RenditionSpec(
         schema=schema,
         rendition_id=rendition_id,
@@ -166,6 +189,7 @@ def parse_rendition_spec(payload: dict[str, Any]) -> RenditionSpec:
         recipients=recipients,
         purpose=purpose,
         language=language,
+        opening_basis=OpeningBasis(type=opening_type),
     )
 
 
