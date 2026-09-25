@@ -61,9 +61,6 @@ RUN_METRICS_DIR := $(OUT)/metrics/$(RUN_ID)
 RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_ID)
 RUN_REPORTS_BASE := $(OUT)/reports
 RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_ID)
-RENDITION_BASE ?= $(OUT)/renditions
-RENDITION_SPEC ?=
-PROPERTY_REGISTRY ?=
 REPORT_BROWSER_BIN ?=
 
 DEBT_CURRENCIES ?= USD
@@ -104,7 +101,6 @@ help:
 	@echo "  make run-debt           # debt resolution -> position/activity + treasury"
 	@echo "  make run-metrics        # governed frontier + annual metrics"
 	@echo "  make run-reports        # annual + treasury HTML/PDF report bundle"
-	@echo "  make run-rendition-compile RENDITION_SPEC=... PROPERTY_REGISTRY=... # private formal-rendition datasets"
 	@echo ""
 	@echo "Focused source / sidecar operations:"
 	@echo "  make run-ingest"
@@ -443,24 +439,6 @@ _run_reports_action:
 		test -s "$(RUN_REPORTS_DIR)/debt_accountability/report.pdf"; \
 		test -s "$(RUN_REPORTS_DIR)/debt_accountability/report_manifest.json"; \
 	'
-
-
-# ---------------------------------------------------------------------------
-# Private formal rendition compiler (exact-run downstream projection)
-# ---------------------------------------------------------------------------
-
-.PHONY: run-rendition-compile
-run-rendition-compile:
-	@$(call require_var,RENDITION_SPEC)
-	@$(call require_var,PROPERTY_REGISTRY)
-	@test -d "$(RUN_OUT)" || (echo "ERROR: missing exact RUN_OUT=$(RUN_OUT); set RUN_ID to an existing governed run"; exit 2)
-	@test -s "$(RENDITION_SPEC)" || (echo "ERROR: missing RENDITION_SPEC=$(RENDITION_SPEC)"; exit 2)
-	@test -s "$(PROPERTY_REGISTRY)" || (echo "ERROR: missing PROPERTY_REGISTRY=$(PROPERTY_REGISTRY)"; exit 2)
-	@$(PY) -m accounting.rendition.build \
-		--spec "$(RENDITION_SPEC)" \
-		--property-registry "$(PROPERTY_REGISTRY)" \
-		--run-root "$(RUN_OUT)" \
-		--out-base "$(RENDITION_BASE)"
 
 
 # ---------------------------------------------------------------------------
