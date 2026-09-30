@@ -7,7 +7,7 @@ sidebar_label: "Accounting Backend Output Contracts"
 # Accounting Backend Output Contracts
 
 Status: current authority
-Last reviewed: 2026-08-25
+Last reviewed: 2026-09-17
 
 ## Purpose
 
@@ -26,6 +26,7 @@ Downstream consumers should depend on governed accounting artifacts rather than 
 | annual flow membership | annual membership contract | `annual_flow_membership.csv` | drilldown/lineage evidence |
 | public bundle | `accounting.publish.latest` | `public/accounting/latest_<scope>/` | packaged downstream handoff |
 | professional drilldowns | `accounting.professional.drilldown` | professional/drilldown output roots | human traceability |
+| docs-input factual bridge | `accounting.docs_input.build` | `out/docs_input/<run_id>/` | internal documentation/professional factual inputs |
 
 The retired `metric_values.csv`, `metric_registry.csv`, generic Q/Y statements, generic metric views and generic marts/views outputs are not current contracts.
 
@@ -171,6 +172,57 @@ Required invariants when a backend change touches their source families:
 - debt stock and debt activity remain distinct;
 - unsupported or ambiguous rows fail closed rather than defaulting to another measure.
 
+## Docs-input factual bridge
+
+Producer: `accounting.docs_input.build`.
+
+Schema: `acct.docs-input@1`.
+
+The bridge exists for internal documentation, professional review, and downstream strategy/legal/governance systems that need factual accounting inputs without depending on arbitrary backend internals. It is generated from one exact accounting run and does not participate in live ingest, latest-pointer alignment, or public publication.
+
+Primary generated root:
+
+```text
+out/docs_input/<run_id>/
+```
+
+Current outputs:
+
+```text
+docs_input_manifest.json
+accounting_evidence_coverage.csv
+actor_property_cost_support_detail.csv
+unresolved_allocation_detail.csv
+required_reserve_schedule.csv        # only when a prospective commitments input is supplied
+required_reserve_schedule_qa.csv     # paired with the reserve schedule
+```
+
+The bridge consumes existing authorities rather than creating new classification rules:
+
+- professional drilldown transaction populations plus `acct.transaction-evidence@1` for evidence coverage;
+- `stakeholder_settlement_detail.csv` plus explicit `source_tx_id`/`tx_id` lookup in `classification_audit.csv` for actor/property/cost/support facts;
+- `cost_allocation_gaps.csv` for unresolved economic burden;
+- optional `treasury_commitments.v1` private input for prospective reserve scheduling.
+
+Core invariants:
+
+- explicit IDs are required for joins; date/amount/text similarity is never enough;
+- evidence coverage does not change accounting recognition or transaction validity;
+- candidate evidence is not approved evidence;
+- physical payer/support metadata does not establish legal liability, ownership, reimbursement rights, or entitlement;
+- unresolved allocation stays unresolved and keeps `debt_effect=none`;
+- prospective commitments do not enter the historical ledger, OPEX, debt, treasury, or annual metrics merely by being supplied;
+- scenario commitments remain visible but contribute zero required reserve;
+- ARS and USD remain separate native-currency populations;
+- no distribution-capacity or distributable-balance value is emitted;
+- adding/removing docs-input or prospective commitments must produce zero delta in existing canonical ledger, semantic, debt, treasury, metric, report, and drilldown values.
+
+The manifest records exact-run identity, artifact paths, row counts, SHA-256 fingerprints, grain/authority/caveat metadata, evidence/prospective-input provenance, and explicit flags that accounting authority and legal interpretation are unchanged/absent.
+
+`out/docs_input/` is generated/internal by default. Raw evidence documents and private prospective inputs are never copied into source control or public bundles by this contract.
+
+See `notes/docs_input_bridge_program_20260917.md` for the implementation waves, stop conditions, and reconciliation matrix.
+
 ## Compatibility rule
 
-Historical audits and old file names may remain in repository documentation as evidence of migration history. They do not create a current runtime contract. A removed convenience output should only be recreated if a real consumer needs it and the projection is best owned at the report layer; it is not a reason to restore a generic backend views or metric engine.
+Historical audits and old file names may remain in repository documentation as evidence of migration history. They do not create a current runtime contract. A removed convenience output should only be recreated if a real consumer needs it and the projection is best owned at the report or bounded docs-input layer; it is not a reason to restore a generic backend views or metric engine.
