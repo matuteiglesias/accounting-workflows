@@ -147,7 +147,21 @@ _update_latest:
 	@$(PY) -m accounting.support.latest --scope-tag "$(SCOPE_TAG)" --target "$(RUN_ID)" \
 		--base "$(RUN_BASE)" --base "$(OUT)/debt_resolution" --base "$(OUT)/metrics" --base "$(RUN_REPORTS_BASE)"
 
-.PHONY: publish-latest publish-reports release-check
+.PHONY: publish-latest publish-reports release-check evidence-report
+
+EVIDENCE_SNAPSHOT ?=
+PRIVATE_REPORT_BUNDLE_ROOT ?= $(OUT)/private_report_bundles/$(RUN_ID)
+
+evidence-report:
+	@$(call require_var,EVIDENCE_SNAPSHOT)
+	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing $(RUN_OUT)/ledger_canonical.csv"; exit 2)
+	@test -s "$(EVIDENCE_SNAPSHOT)/manifest.json" || (echo "ERROR: missing evidence snapshot $(EVIDENCE_SNAPSHOT)"; exit 2)
+	@$(PY) scripts/build_payment_evidence.py \
+		--run-root "$(RUN_OUT)" \
+		--evidence-snapshot "$(EVIDENCE_SNAPSHOT)" \
+		--out-root "$(PRIVATE_REPORT_BUNDLE_ROOT)" \
+		$(if $(strip $(REPORT_BROWSER_BIN)),--browser-bin "$(REPORT_BROWSER_BIN)",)
+
 publish-latest:
 	@bash -eu -o pipefail -c '\
 		args=( --project-root "$(ROOT)" --scope-tag "$(SCOPE_TAG)" --clean ); \

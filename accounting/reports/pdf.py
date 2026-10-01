@@ -45,6 +45,23 @@ def render_pdf(
     source = Path(html_path).resolve(strict=True)
     target = Path(pdf_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("REPORT_PDF_ENGINE", "").strip().lower() == "wkhtmltopdf":
+        wkhtmltopdf = shutil.which("wkhtmltopdf")
+        if not wkhtmltopdf:
+            raise FileNotFoundError("REPORT_PDF_ENGINE=wkhtmltopdf but wkhtmltopdf is unavailable")
+        command = [wkhtmltopdf, "--quiet", str(source), str(target)]
+        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout_seconds)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "wkhtmltopdf rendering failed "
+                f"returncode={result.returncode} stderr={result.stderr.strip()!r}"
+            )
+        if not target.is_file() or target.stat().st_size == 0:
+            raise RuntimeError(f"PDF renderer did not create a non-empty file: {target}")
+        with target.open("rb") as fh:
+            if fh.read(5) != b"%PDF-":
+                raise RuntimeError(f"PDF renderer produced an invalid file header: {target}")
+        return target
     browser = resolve_browser(browser_bin)
 
     command = [
@@ -55,6 +72,8 @@ def render_pdf(
         f"--print-to-pdf={target}",
         source.as_uri(),
     ]
+    if os.environ.get("REPORT_BROWSER_NO_SANDBOX", "").strip() == "1":
+        command.insert(1, "--no-sandbox")
     result = subprocess.run(
         command,
         check=False,
