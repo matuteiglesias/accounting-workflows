@@ -112,6 +112,18 @@ This writes `public/reports/latest_<SCOPE>/`. Accounting CSVs are not part of th
 
 See `notes/report_bundle_contract.md` for the exact report boundary and provenance rules.
 
+### Private payment-evidence report
+
+An approved evidence snapshot can be rendered against its exact canonical ledger without entering the public publication surface:
+
+```bash
+make evidence-report \
+  RUN_ID=<exact-run-id> \
+  EVIDENCE_SNAPSHOT=<snapshot-dir>
+```
+
+This writes `out/private_report_bundles/<RUN_ID>/pm_payment_evidence/`. The command validates the snapshot-to-ledger hash binding and packages only approved evidence. It does not re-ingest, rematch, change accounting authority, or publish the private bundle.
+
 ### Professional evidence / drilldowns
 
 Professional evidence remains layered over governed artifacts:
