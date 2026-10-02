@@ -151,6 +151,7 @@ _update_latest:
 
 EVIDENCE_SNAPSHOT ?=
 PRIVATE_REPORT_BUNDLE_ROOT ?= $(OUT)/private_report_bundles/$(RUN_ID)
+NORMAL_REPORT_BUNDLE_ROOT ?= $(RUN_REPORTS_DIR)
 
 evidence-report:
 	@$(call require_var,EVIDENCE_SNAPSHOT)
@@ -161,6 +162,12 @@ evidence-report:
 		--evidence-snapshot "$(EVIDENCE_SNAPSHOT)" \
 		--out-root "$(PRIVATE_REPORT_BUNDLE_ROOT)" \
 		$(if $(strip $(REPORT_BROWSER_BIN)),--browser-bin "$(REPORT_BROWSER_BIN)",)
+	@$(PY) scripts/compose_private_report_bundle.py \
+		--normal-reports "$(NORMAL_REPORT_BUNDLE_ROOT)" \
+		--evidence-reports "$(PRIVATE_REPORT_BUNDLE_ROOT)" \
+		--out "$(PRIVATE_REPORT_BUNDLE_ROOT).unified"
+	@rm -rf "$(PRIVATE_REPORT_BUNDLE_ROOT)" \
+		&& mv "$(PRIVATE_REPORT_BUNDLE_ROOT).unified" "$(PRIVATE_REPORT_BUNDLE_ROOT)"
 
 publish-latest:
 	@bash -eu -o pipefail -c '\

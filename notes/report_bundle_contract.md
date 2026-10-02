@@ -105,6 +105,20 @@ Source accounting CSVs, report trace/validation CSVs, caches, raw evidence, and 
 
 Publication requires a PDF for every cataloged report. The downstream viewer should consume `report_catalog.json` and the finished documents only.
 
+## Private combined report library
+
+Private evidence reports are composed into the same catalog-driven library as
+ordinary reports, but remain outside `public/reports/`. The
+`evidence-report` target first renders the approved PM evidence report and then
+joins it with the exact-run ordinary report bundle under
+`out/private_report_bundles/<RUN_ID>/PM` (or the explicitly supplied private
+root). The join copies only catalog-referenced HTML/PDF files and the
+attachment allowlist entries, preserving their SHA-256 values. It does not
+copy manifests, CSVs, snapshots, or arbitrary directories.
+
+The ordinary public publication path is unchanged and never receives private
+evidence attachments.
+
 ## Commands
 
 Build reports from the selected exact run and its already-built metrics/treasury artifacts:
