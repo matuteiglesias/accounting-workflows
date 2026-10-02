@@ -108,6 +108,7 @@ help:
 	@echo "  make run-usd-ccl-management-flows RUN_ROOT=<exact-run> CCL_RATES=<local.csv>"
 	@echo ""
 	@echo "Publication / professional:"
+	@echo "  make evidence-report RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir>"
 	@echo "  make publish-latest"
 	@echo "  make publish-reports"
 	@echo "  make release-check"
