@@ -15,6 +15,7 @@ EXPECTED_PUBLIC_TARGETS = {
     "publish-latest",
     "publish-reports",
     "release-check",
+    "evidence-report",
     "smoke-ingest",
     "smoke-materialize",
     "smoke-core",
@@ -97,7 +98,7 @@ def test_one_make_invocation_freezes_one_run_identity() -> None:
 def test_readme_names_only_current_command_contract() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
-    for command in ["run-canonical", "run-debt", "run-metrics", "run-reports", "run-full"]:
+    for command in ["run-canonical", "run-debt", "run-metrics", "run-reports", "run-full", "evidence-report"]:
         assert f"make {command}" in readme
     for retired in [
         "run-accounting",
