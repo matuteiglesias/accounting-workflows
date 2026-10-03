@@ -27,6 +27,7 @@ from accounting.reports.pdf import render_pdf
 SCHEMA = "acct.transaction-evidence@1"
 REPORT_ID = "pm_payment_evidence"
 REPORT_TITLE = "Registro de comprobantes — Property Management"
+REPORT_DESCRIPTION = "Detalle de operaciones de Property Management y estado de su respaldo documental."
 PAYMENT_RELATIONS = {"payment_proof", "transfer_proof"}
 ALLOWED_RELATIONS = PAYMENT_RELATIONS | {
     "statement_context", "liability_source", "other_support"
@@ -229,9 +230,8 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         "matching_rerun": False,
     }
     (report_root / "report_manifest.json").write_text(json.dumps(report_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    catalog = build_report_catalog(source_run_id=source_run_id, scope_tag="PM_EVIDENCE", as_of_date=cutoff, generated_at_utc=generated_at, reports=[ReportCatalogItem(report_id=REPORT_ID, title=REPORT_TITLE, description="183 operaciones del universo congelado con estado documental y comprobantes aprobados.", period_label=f"Corte {cutoff}", sort_order=10, html=f"{REPORT_ID}/report.html", pdf=f"{REPORT_ID}/report.pdf", manifest=None, attachments=tuple(attachment_rows))])
+    catalog = build_report_catalog(source_run_id=source_run_id, scope_tag="PM_EVIDENCE", as_of_date=cutoff, generated_at_utc=generated_at, reports=[ReportCatalogItem(report_id=REPORT_ID, title=REPORT_TITLE, description=REPORT_DESCRIPTION, period_label=f"Corte {cutoff}", sort_order=10, html=f"{REPORT_ID}/report.html", pdf=f"{REPORT_ID}/report.pdf", manifest=None, attachments=tuple(attachment_rows))])
     catalog_path = Path(out_root).resolve() / "report_catalog.json"
     write_report_catalog(catalog_path, catalog)
     validate_catalog_files(catalog, bundle_root=Path(out_root).resolve())
     return {"catalog": catalog_path, "report_html": report_html, "report_pdf": report_pdf, "report_manifest": report_root / "report_manifest.json", "approved_attachments": len(approved_evidence), "required_rows": len(required), "approved_relations": len(approved), "candidate_relations": int((relations["status"] == "candidate").sum()), "approved_payment_coverage_tx": int(approved["tx_id"].nunique())}
-
