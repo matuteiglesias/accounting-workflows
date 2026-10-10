@@ -30,6 +30,7 @@ from accounting.reports.treasury_accountability.render import (
 from accounting.reports.treasury_transaction_tape.render import (
     render_report as render_tape,
 )
+from accounting.cutoff import load_run_cutoff_if_present
 
 
 def _csv_rows(path: Path) -> int:
@@ -100,6 +101,25 @@ def _treasury_period_label(accountability_path: Path) -> str:
     return f"{periods.min()} – {periods.max()}"
 
 
+def _effective_report_cutoff(run_root: Path) -> str:
+    """Use the latest effective canonical transaction date as report cutoff.
+
+    Debt stock may legitimately have no activity in the latest cash month, so
+    it is not a valid authority for the overall reporting horizon.
+    """
+
+    ledger_path = run_root / "ledger_canonical.csv"
+    ledger = pd.read_csv(ledger_path, usecols=["Date"])
+    dates = pd.to_datetime(ledger["Date"], errors="coerce").dropna()
+    if dates.empty:
+        raise ValueError("canonical ledger has no valid dates for report cutoff")
+    effective = dates.max().normalize()
+    governed = load_run_cutoff_if_present(run_root)
+    if governed is not None:
+        effective = min(effective, pd.Timestamp(governed.date))
+    return effective.date().isoformat()
+
+
 def _manifest_outputs(
     outputs: dict[str, Path],
     *,
@@ -116,7 +136,7 @@ def _build_pack_validation(*, run_id: str, scope_tag: str, as_of_date: str, annu
     rows: list[dict[str, str]] = []
     def add(check: str, ok: bool, detail: str) -> None:
         rows.append({"check": check, "status": "pass" if ok else "fail", "severity": "error", "detail": detail})
-    add("exact_release_identity", scope_tag == "FBPM" and run_id.endswith("_FBPM") and as_of_date == "2026-08-31", f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}")
+    add("exact_release_identity", scope_tag == "FBPM" and run_id.endswith("_FBPM") and bool(as_of_date), f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}")
     future_periods, household_box_rows = [], 0
     for path in source_paths:
         frame = pd.read_csv(path)
@@ -216,7 +236,8 @@ def build_report_bundle(
     latest_debt_dates = sorted(set(debt_dates.loc[debt_dates["period"].astype(str).eq(latest_debt_period), "as_of_date"].dropna().astype(str)))
     if len(latest_debt_dates) != 1:
         raise ValueError(f"debt report cutoff is not singular: {latest_debt_dates}")
-    as_of_date = latest_debt_dates[0]
+    as_of_date = _effective_report_cutoff(run_root)
+    debt_as_of_date = latest_debt_dates[0]
     treasury_period_label = _treasury_period_label(treasury_accountability)
     generated_at_utc = generated_at_utc or datetime.now(timezone.utc).isoformat()
 
@@ -267,7 +288,7 @@ def build_report_bundle(
         gaps_path=cost_gaps,
         gaps_qa_path=cost_gaps_qa,
         out_dir=debt_dir,
-        as_of_date=as_of_date,
+        as_of_date=debt_as_of_date,
     )
 
     specialized_outputs: dict[str, dict[str, Path]] = {}
@@ -336,7 +357,7 @@ def build_report_bundle(
         renderer_version="treasury_accountability.v1",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
-        as_of_date=as_of_date,
+        as_of_date=debt_as_of_date,
         sources=[
             _source(treasury_accountability, "run/monthly_cash_accountability.csv"),
             _source(treasury_qa, "run/monthly_cash_accountability_qa.csv"),
@@ -375,7 +396,7 @@ def build_report_bundle(
         renderer_version="debt_accountability.v1",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
-        as_of_date=as_of_date,
+        as_of_date=debt_as_of_date,
         sources=[
             _source(debt_position, "run/monthly_debt_position.csv"),
             _source(debt_position_qa, "run/monthly_debt_position_qa.csv"),

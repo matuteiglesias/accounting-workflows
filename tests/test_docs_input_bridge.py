@@ -325,6 +325,24 @@ def test_docs_input_bundle_projects_existing_authorities_without_semantic_drift(
         assert (run / filename).read_bytes() == before
 
 
+def test_docs_input_treats_empty_professional_population_as_empty(tmp_path: Path) -> None:
+    run = tmp_path / "20260917T000000Z_FBPM"
+    _write_core_sources(run)
+    pack = tmp_path / "professional_pack"
+    detail_dir = pack / "drilldown" / "details"
+    detail_dir.mkdir(parents=True)
+    (detail_dir / "empty.csv").write_text("", encoding="utf-8")
+    pd.DataFrame([{"metric_id": "EMPTY", "detail_csv_relpath": "drilldown/details/empty.csv"}]).to_csv(
+        pack / "drilldown" / "professional_drilldown_index.csv", index=False
+    )
+
+    paths = build_docs_input_bundle(run_root=run, out_dir=tmp_path / "docs", pack_dir=pack)
+
+    manifest = json.loads((tmp_path / "docs" / "docs_input_manifest.json").read_text())
+    assert manifest["coverage_status"] == "available"
+    coverage = pd.read_csv(paths["accounting_evidence_coverage"])
+    assert len(coverage) == 1
+    assert int(coverage.iloc[0]["transaction_rows"]) == 0
 def test_missing_evidence_sidecar_is_explicit_and_nonfatal(tmp_path: Path) -> None:
     run = tmp_path / "20260917T000000Z_FBPM"
     _write_core_sources(run)

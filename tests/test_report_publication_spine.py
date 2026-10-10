@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from accounting.reports.build import build_report_bundle
+from accounting.reports.build import _effective_report_cutoff, build_report_bundle
 from accounting.reports.pdf import render_pdf
 from accounting.reports.publish import publish_report_bundle
 from accounting.support.latest import assert_latest_targets_exist, update_scoped_latest
@@ -103,6 +103,21 @@ def _write_sources(run_root: Path, metrics_dir: Path) -> None:
         pd.DataFrame([{"check": name, "status": "pass", "severity": "error", "detail": "synthetic"}]).to_csv(run_root / name, index=False)
 
 
+def test_report_cutoff_follows_latest_effective_ledger_date(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    pd.DataFrame(
+        [
+            {"Date": "2026-08-31"},
+            {"Date": "2026-09-10"},
+            {"Date": "2026-10-10"},
+            {"Date": "2026-11-15"},
+        ]
+    ).to_csv(run_root / "ledger_canonical.csv", index=False)
+
+    assert _effective_report_cutoff(run_root) == "2026-11-15"
+
+
 def _fake_reporter(kind: str):
     def render(**kwargs):
         out_dir = Path(kwargs["out_dir"])
@@ -138,6 +153,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     metrics_dir = tmp_path / "out" / "metrics" / run_id
     out_dir = tmp_path / "out" / "reports" / run_id
     _write_sources(run_root, metrics_dir)
+    pd.DataFrame([{"Date": "2026-08-25"}]).to_csv(run_root / "ledger_canonical.csv", index=False)
 
     monkeypatch.setattr("accounting.reports.build.render_annual", _fake_reporter("annual"))
     monkeypatch.setattr("accounting.reports.build.render_treasury", _fake_reporter("treasury"))
