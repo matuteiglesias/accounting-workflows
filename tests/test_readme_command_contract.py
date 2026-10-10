@@ -15,6 +15,7 @@ EXPECTED_PUBLIC_TARGETS = {
     "publish-latest",
     "publish-reports",
     "release-check",
+    "evidence-report",
     "smoke-ingest",
     "smoke-materialize",
     "smoke-core",

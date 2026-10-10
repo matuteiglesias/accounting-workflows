@@ -51,6 +51,15 @@ def _relative_inside(root: Path, value: str) -> Path:
     return candidate
 
 
+def _attachment_extension(doc: Any) -> str:
+    """Preserve original evidence media types in the private report bundle."""
+    media_type = str(doc["media_type"])
+    allowed = {"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpeg"}
+    if media_type not in allowed:
+        raise ValueError(f"unsupported evidence media_type: {media_type!r}")
+    return allowed[media_type]
+
+
 def _required_hash(tx_ids: list[str]) -> str:
     return hashlib.sha256("\n".join(sorted(tx_ids)).encode()).hexdigest()
 
@@ -73,8 +82,8 @@ def _read_snapshot(snapshot_dir: Path, run_root: Path) -> tuple[pd.DataFrame, pd
         raise ValueError("required transaction count differs from snapshot manifest")
     if _required_hash(required_ids) != manifest.get("required_tx_ids_sha256"):
         raise ValueError("required transaction identity hash differs from snapshot manifest")
-    if len(required) != 183:
-        raise ValueError(f"PM evidence report requires the frozen 183 rows; got {len(required)}")
+    # Population size is a ledger-run property, not a renderer constant.
+    # Frozen universe identity and cardinality are checked against manifest above.
     expected_doc_columns = {"evidence_id", "content_sha256", "media_type", "display_name", "href"}
     expected_relation_columns = {"tx_id", "evidence_id", "relation", "status"}
     if not expected_doc_columns.issubset(docs.columns):
@@ -98,6 +107,7 @@ def _read_snapshot(snapshot_dir: Path, run_root: Path) -> tuple[pd.DataFrame, pd
         sha = str(doc["content_sha256"])
         if not SHA256_RE.fullmatch(evidence_id) or evidence_id.lower() != sha.lower():
             raise ValueError(f"evidence identity/hash mismatch: {evidence_id}")
+        _attachment_extension(doc)
         source = _relative_inside(snapshot_dir, str(doc["href"]))
         if _sha256(source) != sha.lower():
             raise ValueError(f"snapshot evidence hash mismatch: {evidence_id}")
@@ -122,7 +132,7 @@ def _format_links(tx_id: str, tx_links: list[dict[str, str]], docs: dict[str, di
             continue
         doc = docs[relation["evidence_id"]]
         links.append(
-            f'<a class="evidence-link" href="evidence/{html.escape(relation["evidence_id"], quote=True)}.pdf">'
+            f'<a class="evidence-link" href="evidence/{html.escape(relation["evidence_id"], quote=True)}.{_attachment_extension(doc)}">'
             f'Ver comprobante<span class="sr-only"> {html.escape(doc["display_name"])}</span></a>'
         )
     return "<br>".join(links) if links else "—"
@@ -173,7 +183,7 @@ def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *
 *{{box-sizing:border-box}}body{{margin:0;color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc}}main{{max-width:1500px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:28px}}h2{{font-size:18px;margin:24px 0 10px}}.meta,.note{{color:var(--muted)}}.panel{{background:white;border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.card{{border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:180px}}.card strong{{display:block;font-size:24px}}.filters{{display:flex;gap:10px;flex-wrap:wrap;align-items:end}}label{{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}}input,select{{font:inherit;padding:8px;border:1px solid #bcc7d3;border-radius:6px;background:white;color:var(--ink)}}table{{width:100%;border-collapse:collapse;background:white;font-size:13px}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}th{{position:sticky;top:0;background:#eef2f6;z-index:1}}.tx-id{{font-family:ui-monospace,SFMono-Regular,monospace;white-space:nowrap}}.amount{{text-align:right;white-space:nowrap}}.status{{display:inline-block;border-radius:999px;padding:3px 8px;white-space:nowrap;font-weight:650;font-size:12px}}.status-approved{{color:var(--green);background:var(--green-bg)}}.status-candidate{{color:var(--amber);background:var(--amber-bg)}}.status-missing{{color:var(--gray);background:var(--gray-bg)}}.evidence-link{{color:#0b5cad;font-weight:650;white-space:nowrap}}.sr-only{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}.hidden{{display:none!important}}@media print{{.filters{{display:none}}body{{background:white}}main{{padding:8px}}table{{font-size:9px}}th{{position:static}}.evidence-link{{color:#000}}}}
 </style></head><body><main>
 <header><h1>{html.escape(REPORT_TITLE)}</h1><p class="meta">Corrida contable: <strong>{html.escape(source_run_id)}</strong> · Corte contable: <strong>{html.escape(cutoff)}</strong> · Snapshot de evidencia: <strong>{html.escape(snapshot_id)}</strong></p></header>
-<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Candidatos pendientes</div><div class="card"><strong>{missing_count}</strong>Sin comprobante aprobado</div><div class="card"><strong>{attachment_count}</strong>PDFs únicos adjuntos</div></div><p class="note">Los estados reflejan únicamente relaciones de tipo <code>payment_proof</code> o <code>transfer_proof</code>. “Sin comprobante aprobado” no implica que la operación esté impaga.</p></section>
+<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Candidatos pendientes</div><div class="card"><strong>{missing_count}</strong>Sin comprobante aprobado</div><div class="card"><strong>{attachment_count}</strong>Archivos únicos adjuntos</div></div><p class="note">Los estados reflejan únicamente relaciones de tipo <code>payment_proof</code> o <code>transfer_proof</code>. “Sin comprobante aprobado” no implica que la operación esté impaga.</p></section>
 <section class="panel"><div class="filters"><label>Buscar<input id="search" type="search" placeholder="tx_id, concepto…"></label><label>Estado<select id="status"><option value="">Todos</option><option value="approved">Aprobado</option><option value="candidate">Candidato</option><option value="missing">Sin comprobante aprobado</option></select></label><label>Año<select id="year"><option value="">Todos</option></select></label><label>Payer<select id="payer"><option value="">Todos</option></select></label><label>Tipo<select id="tipo"><option value="">Todos</option></select></label></div></section>
 <section class="panel"><table id="transactions"><thead><tr><th>tx_id</th><th>Fecha</th><th>Payer</th><th>Tipo</th><th>Concepto / beneficiario</th><th>Importe</th><th>Moneda</th><th>Estado documental</th><th>Evidencia</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
 <script>(function(){{const table=document.querySelector('#transactions'), rows=[...table.tBodies[0].rows]; const fields={{status:document.querySelector('#status'),year:document.querySelector('#year'),payer:document.querySelector('#payer'),tipo:document.querySelector('#tipo'),search:document.querySelector('#search')}}; function fill(key){{const vals=[...new Set(rows.map(r=>r.dataset[key]).filter(Boolean))].sort(); for(const v of vals){{const o=document.createElement('option');o.value=v;o.textContent=v;fields[key].append(o)}}}} ['year','payer','tipo'].forEach(fill); function apply(){{const q=fields.search.value.toLowerCase();rows.forEach(r=>{{const hay=r.textContent.toLowerCase();const ok=(!fields.status.value||r.dataset.status===fields.status.value)&&(!fields.year.value||r.dataset.year===fields.year.value)&&(!fields.payer.value||r.dataset.payer===fields.payer.value)&&(!fields.tipo.value||r.dataset.tipo===fields.tipo.value)&&(!q||hay.includes(q));r.classList.toggle('hidden',!ok)}})}} Object.values(fields).forEach(e=>e.addEventListener('input',apply));}})();</script>
@@ -200,11 +210,11 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
     for evidence_id in approved_evidence:
         doc = docs_by_id[evidence_id]
         source = _relative_inside(snapshot_dir, str(doc["href"]))
-        target = evidence_root / f"{evidence_id}.pdf"
+        target = evidence_root / f"{evidence_id}.{_attachment_extension(doc)}"
         shutil.copy2(source, target)
         if _sha256(target) != evidence_id.lower():
             raise ValueError(f"copied attachment hash mismatch: {evidence_id}")
-        attachment_rows.append({"path": f"{REPORT_ID}/evidence/{evidence_id}.pdf", "sha256": evidence_id.lower()})
+        attachment_rows.append({"path": f"{REPORT_ID}/evidence/{evidence_id}.{_attachment_extension(doc)}", "sha256": evidence_id.lower()})
     report_html = report_root / "report.html"
     report_html.write_text(_html(required, docs, relations, source_run_id=source_run_id, cutoff=cutoff, snapshot_id=snapshot_id), encoding="utf-8")
     report_pdf = render_pdf(report_html, report_root / "report.pdf", browser_bin=browser_bin)

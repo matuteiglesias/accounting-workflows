@@ -112,6 +112,7 @@ help:
 	@echo "  make publish-reports"
 	@echo "  make release-check"
 	@echo "  make professional-drilldowns"
+	@echo "  make evidence-report RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE)"
 	@echo "  make professional-linked-digest"
 	@echo ""
 	@echo "Key vars: OUT=out RUN_ID=<exact-run-id> BOXES='Family Business,Property Management' REPORT_BROWSER_BIN=<chromium>"

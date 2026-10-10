@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from accounting.reports import payment_evidence
 
@@ -13,8 +14,14 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@pytest.mark.parametrize("population_size", [183, 214])
+@pytest.mark.parametrize("extension,media_type", [
+    ("pdf", "application/pdf"),
+    ("jpeg", "image/jpeg"),
+    ("png", "image/png"),
+])
 def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_payment_proof(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, extension: str, media_type: str, population_size: int
 ) -> None:
     run = tmp_path / "run" / "RUN_FBPM"
     snapshot = tmp_path / "snapshot" / "PM"
@@ -34,14 +41,14 @@ def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_pa
                 "Detalle": "synthetic",
                 "notes": "",
             }
-            for index in range(183)
+            for index in range(population_size)
         ]
     )
     ledger.to_csv(run / "ledger_canonical.csv", index=False)
     required = ledger.copy()
     required["status"] = "pagado"
     required.to_csv(snapshot / "required_transactions.csv", index=False)
-    source = snapshot / "evidence" / ("a" * 64 + ".pdf")
+    source = snapshot / "evidence" / ("a" * 64 + "." + extension)
     source.parent.mkdir()
     source.write_bytes(b"%PDF-approved")
     evidence_id = _sha(source)
@@ -49,8 +56,8 @@ def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_pa
         [{
             "evidence_id": evidence_id,
             "content_sha256": evidence_id,
-            "media_type": "application/pdf",
-            "display_name": "approved.pdf",
+            "media_type": media_type,
+            "display_name": "approved." + extension,
             "href": f"evidence/{source.name}",
         }]
     )
@@ -66,7 +73,7 @@ def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_pa
         "artifact": "acct.transaction-evidence@1",
         "snapshot_id": "PM",
         "source_ledger_sha256": _sha(run / "ledger_canonical.csv"),
-        "required_transaction_count": 183,
+        "required_transaction_count": population_size,
         "required_tx_ids_sha256": payment_evidence._required_hash(required.tx_id.tolist()),
     }
     (snapshot / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -80,8 +87,9 @@ def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_pa
         run_root=run, snapshot_dir=snapshot, out_root=tmp_path / "bundle"
     )
     report = Path(result["report_html"]).read_text(encoding="utf-8")
-    assert report.count('<tr data-status=') == 183
+    assert report.count('<tr data-status=') == population_size
     assert report.count('<span class="status status-approved">') == 1
     assert report.count('<span class="status status-candidate">') == 1
     assert report.count('href="evidence/') == 1
-    assert len(list((tmp_path / "bundle" / "pm_payment_evidence" / "evidence").glob("*.pdf"))) == 1
+    assert len(list((tmp_path / "bundle" / "pm_payment_evidence" / "evidence").glob("*." + extension))) == 1
+    assert f"evidence/{evidence_id}.{extension}" in report
