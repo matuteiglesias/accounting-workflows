@@ -82,8 +82,8 @@ def _read_snapshot(snapshot_dir: Path, run_root: Path) -> tuple[pd.DataFrame, pd
         raise ValueError("required transaction count differs from snapshot manifest")
     if _required_hash(required_ids) != manifest.get("required_tx_ids_sha256"):
         raise ValueError("required transaction identity hash differs from snapshot manifest")
-    if len(required) != 183:
-        raise ValueError(f"PM evidence report requires the frozen 183 rows; got {len(required)}")
+    # Population size is a ledger-run property, not a renderer constant.
+    # Frozen universe identity and cardinality are checked against manifest above.
     expected_doc_columns = {"evidence_id", "content_sha256", "media_type", "display_name", "href"}
     expected_relation_columns = {"tx_id", "evidence_id", "relation", "status"}
     if not expected_doc_columns.issubset(docs.columns):
