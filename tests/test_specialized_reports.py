@@ -174,3 +174,29 @@ def test_distributions_vs_rent_keeps_measures_separate(tmp_path: Path):
     values = dict(zip(view["concept"], view["value"]))
     assert values == {"Renta reconocida": 150, "Distribuciones registradas": 50}
     assert view["calculation_rule"].str.contains("no netting").all()
+
+
+def test_opex_by_category_uses_aligned_bars_without_changing_values(tmp_path: Path):
+    """Presentation change only; the governed annual OPEX population is untouched."""
+    spec = next(s for s in REPORT_SPECS if s.report_id == "opex_by_category")
+    assert "bars" in spec.section_plan
+    assert "pie" not in spec.section_plan
+    run, metrics, out = tmp_path / "run", tmp_path / "metrics", tmp_path / "out"
+    run.mkdir()
+    metrics.mkdir()
+    _write_round1_sources(run, metrics)
+    output = render_specialized(
+        report_id="opex_by_category",
+        run_root=run,
+        metrics_dir=metrics,
+        out_dir=out,
+        as_of_date="2026-08-31",
+        require_pdf=False,
+    )
+    document = output["html"].read_text(encoding="utf-8")
+    trace = pd.read_csv(output["trace"])
+    assert 'class="bar-list"' in document
+    assert 'class="bar-row"' in document
+    assert "<svg" not in document
+    assert trace["value"].sum() == 50
+    assert set(trace["display_label"]) == {"Impuestos", "Servicios"}
