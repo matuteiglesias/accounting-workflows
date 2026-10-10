@@ -295,7 +295,14 @@ def build_evidence_coverage(
         if not detail_relpath:
             continue
         detail_path = _resolve_inside(pack_root, detail_relpath)
-        detail = pd.read_csv(detail_path)
+        try:
+            detail = pd.read_csv(detail_path)
+        except pd.errors.EmptyDataError:
+            # A generated drilldown population may be empty when its source
+            # table has no rows. Preserve that as an empty population so the
+            # bridge can qualify coverage as unavailable/zero, rather than
+            # failing before it emits the governed manifest.
+            detail = pd.DataFrame()
         if "tx_id" in detail.columns:
             tx_rows = [
                 _clean_text(value)
