@@ -112,6 +112,23 @@ This writes `public/reports/latest_<SCOPE>/`. Accounting CSVs are not part of th
 
 See `notes/report_bundle_contract.md` for the exact report boundary and provenance rules.
 
+### Private payment evidence report (exact run)
+
+The optional `evidence-report` command consumes a **reviewed and frozen** transaction-evidence
+snapshot bound to the exact canonical ledger SHA-256. It does not edit ledger
+transactions, debt, metrics, or ordinary public reports:
+
+```bash
+make evidence-report RUN_ID=<exact-run-id> \
+  EVIDENCE_SNAPSHOT=out/evidence_links/<snapshot-id>/PM
+```
+
+It requires the ordinary report bundle for the same run and writes its combined
+output under `out/private_report_bundles/<RUN_ID>/`. Attachments may be PDF, JPEG,
+or PNG, and are SHA-256-verified against the snapshot. **Do not publish this
+bundle to an unauthenticated website**: private payment proofs require an
+independently verified access-control boundary.
+
 ### Professional evidence / drilldowns
 
 Professional evidence remains layered over governed artifacts:
