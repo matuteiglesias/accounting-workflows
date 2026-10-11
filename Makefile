@@ -115,6 +115,7 @@ help:
 	@echo "  make run-usd-ccl-treasury-report RUN_ROOT=<exact-run> CUTOFF_DATE=<YYYY-MM-DD>"
 	@echo ""
 	@echo "Publication / professional:"
+	@echo "  make evidence-report RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir>"
 	@echo "  make publish-latest"
 	@echo "  make publish-reports"
 	@echo "  make release-check"
