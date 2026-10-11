@@ -39,6 +39,14 @@ make run-reports    RUN_ID=<exact-run-id>
 
 `run-debt` owns the complete debt stage: resolution, balance views, monthly position/activity marts, and treasury accountability. `run-metrics` also asserts the governed annual dashboard outputs; there is no separate dashboard command. `run-reports` consumes the already-produced treasury and metrics artifacts for that exact run.
 
+The opt-in monthly treasury USD/CCL companion is an explicit three-step sidecar. It does not replace or mutate the native ARS/USD reports:
+
+```bash
+make export-ccl-snapshot CUTOFF_DATE=<YYYY-MM-DD>
+make run-usd-ccl-treasury RUN_ROOT=out/run/accounting/<exact-run-id> CUTOFF_DATE=<YYYY-MM-DD>
+make run-usd-ccl-treasury-report RUN_ROOT=out/run/accounting/<exact-run-id> CUTOFF_DATE=<YYYY-MM-DD>
+```
+
 A separate downstream docs-input projection can be built from one exact run without re-ingesting, moving latest pointers, publishing, or changing accounting authority:
 
 ```bash
@@ -111,6 +119,18 @@ make publish-reports
 This writes `public/reports/latest_<SCOPE>/`. Accounting CSVs are not part of that publication contract; the downstream viewer consumes the report catalog plus HTML/PDF documents rather than metric/debt schemas.
 
 See `notes/report_bundle_contract.md` for the exact report boundary and provenance rules.
+
+### Private payment-evidence report
+
+An approved evidence snapshot can be rendered against its exact canonical ledger without entering the public publication surface:
+
+```bash
+make evidence-report \\
+  RUN_ID=<exact-run-id> \\
+  EVIDENCE_SNAPSHOT=<snapshot-dir>
+```
+
+This writes `out/private_report_bundles/<RUN_ID>/pm_payment_evidence/`. The command validates the snapshot-to-ledger hash binding and packages only approved evidence. It does not re-ingest, rematch, change accounting authority, or publish the private bundle.
 
 ### Professional evidence / drilldowns
 
