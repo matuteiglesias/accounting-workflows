@@ -113,23 +113,49 @@ def _manifest_outputs(
 
 def _build_pack_validation(*, run_id: str, scope_tag: str, as_of_date: str, annual_metrics: Path, debt_position: Path, source_paths: list[Path], report_html: list[Path]) -> pd.DataFrame:
     cutoff = pd.Timestamp(as_of_date)
+    position = pd.read_csv(debt_position)
+    latest = position["period"].astype(str).max()
+    # Release identity is tied to the selected debt close, not an old fixed date.
+    # The run's UTC day bounds informational as_of_date stamps on produced facts.
+    import re
+    run_match = re.fullmatch(r"(\d{8})T\d{6}Z_([A-Za-z0-9]+)", run_id)
+    run_day = pd.to_datetime(run_match.group(1), format="%Y%m%d") if run_match else pd.NaT
+    try:
+        latest_month_close = pd.Period(latest, freq="M").end_time.normalize()
+    except (ValueError, TypeError):
+        latest_month_close = pd.NaT
     rows: list[dict[str, str]] = []
     def add(check: str, ok: bool, detail: str) -> None:
         rows.append({"check": check, "status": "pass" if ok else "fail", "severity": "error", "detail": detail})
-    add("exact_release_identity", scope_tag == "FBPM" and run_id.endswith("_FBPM") and as_of_date == "2026-08-31", f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}")
+    identity_ok = (
+        run_match is not None
+        and scope_tag == "FBPM"
+        and run_match.group(2) == scope_tag
+        and pd.notna(run_day)
+        and pd.notna(latest_month_close)
+        and cutoff == latest_month_close
+        and run_day >= cutoff
+    )
+    add("exact_release_identity", identity_ok, f"run_id={run_id}; scope={scope_tag}; cutoff={as_of_date}; debt_period={latest}")
     future_periods, household_box_rows = [], 0
     for path in source_paths:
         frame = pd.read_csv(path)
         for col in ("period", "cycle_start", "Date", "as_of_date"):
-            if col not in frame.columns: continue
+            if col not in frame.columns:
+                continue
             dates = pd.to_datetime(frame[col], errors="coerce") if col != "period" else pd.to_datetime(frame[col].astype(str)+"-01", errors="coerce")
-            future_periods.extend(f"{path.name}:{value}" for value in frame.loc[dates.gt(cutoff), col].astype(str).unique())
+            # Period membership must end at the accounting cutoff. Informational
+            # as_of_date timestamps may be later, but not later than the run day.
+            limit = run_day if col == "as_of_date" else cutoff
+            if pd.isna(limit):
+                future_periods.append(f"{path.name}:{col}:invalid_run_day")
+            else:
+                future_periods.extend(f"{path.name}:{value}" for value in frame.loc[dates.gt(limit), col].astype(str).unique())
         for box_col in ("Box", "target_box", "obligation_box"):
             if box_col in frame.columns:
                 household_box_rows += int(frame[box_col].astype(str).str.strip().eq("Household").sum())
     add("no_period_after_cutoff", not future_periods, f"future={future_periods[:10]}")
     add("no_household_reporting_box_membership", household_box_rows == 0, f"rows={household_box_rows}; Household remains allowed as a participant dimension")
-    position = pd.read_csv(debt_position); latest = position["period"].astype(str).max()
     debt_total = pd.to_numeric(position.loc[(position.period.astype(str)==latest)&position.component.eq("total"),"open_amount"],errors="coerce").sum()
     metrics = pd.read_csv(annual_metrics); year=as_of_date[:4]
     metric_period = metrics.period.astype(str).str.removesuffix(".0")
