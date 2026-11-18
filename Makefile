@@ -93,7 +93,8 @@ help:
 	@echo ""
 	@echo "Live operations:"
 	@echo "  make run-canonical      # live ingest -> governed materialization"
-	@echo "  make run-full           # ordered full live path -> reports -> publication"
+	@echo "  make run-compute        # live canonical -> debt -> metrics -> reports (NO publish)"
+	@echo "  make run-full           # run-compute, then explicit latest/publication/release"
 	@echo "  make run-env            # load ENV_FILE, then run-full"
 	@echo ""
 	@echo "Exact-run stage replay (set RUN_ID=<existing run id>):"
@@ -467,11 +468,15 @@ _run_reports_action:
 # Ordered live composite
 # ---------------------------------------------------------------------------
 
-.PHONY: run-full
-run-full: run-canonical
+# Calculation has no latest/public side effects. Release remains explicit.
+.PHONY: run-compute run-full
+run-compute: run-canonical
 	@$(MAKE) run-debt RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) run-metrics RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) run-reports RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)"
+	@echo "[RUN][COMPUTE] completed exact run $(RUN_ID); not published"
+
+run-full: run-compute
 	@$(MAKE) _update_latest RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) publish-latest OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) publish-reports OUT="$(OUT)" BOXES="$(BOXES)"

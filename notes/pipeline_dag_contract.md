@@ -5,7 +5,7 @@ Last reviewed: 2026-08-25
 
 This document defines orchestration only. Accounting classification, cash selection, debt position/activity, annual aggregation and FX membership remain governed by their dedicated contracts.
 
-For the first **observed report-product ownership audit** (26 outputs, 8 producer-attribution gaps as of 2026-11-18), see [report_product_ownership_20261118.md](report_product_ownership_20261118.md). That inventory is evidence about one exact run, not a second authoritative DAG or a declaration that unlisted artifacts are unused.
+For the first **observed report-product ownership audit** (26 outputs, 8 producer-attribution gaps as of 2026-11-18), see [report_product_ownership_20261118.md](report_product_ownership_20261118.md). That inventory is evidence about one exact run, not a second authoritative DAG or a declaration that unlisted artifacts are unused. The current execution-isolation and retention decisions are in [accounting_execution_retrofit_20261118.md](accounting_execution_retrofit_20261118.md).
 
 ## Intended DAG
 
@@ -33,11 +33,14 @@ run-reports RUN_ID=<exact-run-id>     [replayable]
     -> treasury_accountability HTML/PDF
     -> report_catalog.json
 
-run-full                              [live ordered composite]
+run-compute                           [live computation, NO publication]
   run-canonical
     -> run-debt
     -> run-metrics
     -> run-reports
+
+run-full                              [explicit live compute + release]
+  run-compute
     -> atomic latest alignment
     -> publish-latest + publish-reports
     -> release-check
@@ -62,10 +65,11 @@ There is no `run-marts` generic views stage, `run-debt-views` sub-pipeline, `run
 | `run-debt` | debt + treasury | existing exact-run all-status canonical ledger | debt resolution + position/activity + treasury | stock and movement remain distinct | no |
 | `run-metrics` | governed metrics | existing exact run | frontier, annual dashboard, flow membership, contracts | canonical sources only | no |
 | `run-reports` | report product | exact-run treasury + metrics | HTML/PDF/catalog/manifests | presentation only; same run identity | no |
+| `run-compute` | live compute (no publication) | live ledger | exact-run canonical, debt, metrics, reports | must not touch latest or public release | yes |
 | `publish-latest` | packaging | aligned latest metrics/debt | public machine bundle | no computation or legacy metric revival | no |
 | `publish-reports` | document packaging | aligned latest report bundle | public report bundle | documents only | no |
 | `release-check` | release | public bundle | readiness status | cash/debt/currency/publication checks | no |
-| `run-full` | full live | live env | aligned/published machine + report bundles | ordered canonical -> debt -> metrics -> reports -> publish | yes |
+| `run-full` | live compute and release | live env | aligned/published machine + report bundles | run-compute then latest -> publish -> release check | yes |
 
 ## Exact-run identity contract
 

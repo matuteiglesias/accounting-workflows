@@ -30,6 +30,7 @@ EXPECTED_PUBLIC_TARGETS = {
     "run-debt",
     "run-metrics",
     "run-reports",
+    "run-compute",
     "run-full",
     "professional-drilldowns",
     "professional-linked-digest",
@@ -84,7 +85,8 @@ def test_stage_targets_are_replayable_and_live_composites_are_explicit() -> None
     assert "run-metrics: _run_metrics_action" in makefile
     assert "run-reports: _run_reports_action" in makefile
     assert "run-canonical: run-ingest" in makefile
-    assert "run-full: run-canonical" in makefile
+    assert "run-compute: run-canonical" in makefile
+    assert "run-full: run-compute" in makefile
 
 
 def test_one_make_invocation_freezes_one_run_identity() -> None:
@@ -98,7 +100,7 @@ def test_one_make_invocation_freezes_one_run_identity() -> None:
 def test_readme_names_only_current_command_contract() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
-    for command in ["run-canonical", "run-debt", "run-metrics", "run-reports", "run-full"]:
+    for command in ["run-canonical", "run-debt", "run-metrics", "run-reports", "run-compute", "run-full"]:
         assert f"make {command}" in readme
     for retired in [
         "run-accounting",

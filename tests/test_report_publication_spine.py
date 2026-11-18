@@ -347,11 +347,20 @@ def test_makefile_wires_reports_into_one_atomic_latest_update() -> None:
     assert ".PHONY: run-reports _run_reports_action" in makefile
     assert "run-reports: _run_reports_action" in makefile
     assert "publish-reports:" in makefile
-    assert "run-full: run-canonical" in makefile
+    assert "run-compute: run-canonical" in makefile
+    assert "run-full: run-compute" in makefile
 
-    full = makefile.split("run-full: run-canonical\n", 1)[1].split("\n\n\n#", 1)[0]
-    for stage in ["run-debt", "run-metrics", "run-reports", "_update_latest", "publish-latest", "publish-reports", "release-check"]:
+    compute = makefile.split("run-compute: run-canonical\n", 1)[1].split("\n\nrun-full:", 1)[0]
+    for stage in ["run-debt", "run-metrics", "run-reports"]:
+        assert f"$(MAKE) {stage}" in compute
+    for forbidden in ["_update_latest", "publish-latest", "publish-reports", "release-check"]:
+        assert f"$(MAKE) {forbidden}" not in compute
+
+    full = makefile.split("run-full: run-compute\n", 1)[1].split("\n\n\n#", 1)[0]
+    for stage in ["_update_latest", "publish-latest", "publish-reports", "release-check"]:
         assert f"$(MAKE) {stage}" in full
+    for stage in ["run-debt", "run-metrics", "run-reports"]:
+        assert f"$(MAKE) {stage}" not in full
 
     latest = makefile.split("_update_latest:\n", 1)[1].split("\n\n.PHONY: publish-latest", 1)[0]
     assert '--base "$(RUN_REPORTS_BASE)"' in latest

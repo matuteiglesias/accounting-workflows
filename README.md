@@ -59,23 +59,28 @@ Optional inputs are explicit:
 
 The bridge emits `acct.docs-input@1` factual projections only. It does not infer legal responsibility, ownership, entitlement, fairness, or a distributable balance.
 
-### Full live and publication path
+### Compute and release (separate operations)
 
 ```bash
-make run-full
+make run-compute  # live ingest → materialize → debt → metrics → reports, NO publication
+make run-full     # same computation, followed by latest alignment + publication/release
 ```
 
 `run-full` is the ordered live composite:
 
 ```text
-run-canonical
+run-compute
+  -> run-canonical
   -> run-debt
   -> run-metrics
   -> run-reports
+then
   -> atomic latest alignment
   -> publish-latest + publish-reports
   -> release-check
 ```
+
+`run-compute` still reads live ledger inputs; **do not invoke it from a scenario**. Temporary scenario executions may invoke only explicit offline stage targets with isolated `OUT` and exact `RUN_ID`. They must not advance `latest` or publish.
 
 The docs-input stage is deliberately outside this live/publication composite. It is generated only when a downstream documentation/professional consumer needs the factual bridge.
 
