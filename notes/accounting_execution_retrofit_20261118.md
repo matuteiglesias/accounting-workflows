@@ -49,6 +49,8 @@ A failed compute run never advances latest or publishes because release occurs a
 
 ## Verification
 
+Checkpoint after implementation (2026-11-18): **35 focused tests passed** across producer provenance, core report source declarations, isolated execution, required-stage failure propagation and Make target contracts. **`make smoke-core` passed** in a uniquely named `/tmp/accounting-retrofit-smoke-*` directory (309 all-status fixture rows, 306 canonical rows; ingest/materialize QA passed); the workspace was removed on exit. Repository-wide `make validate` passed compilation and contract/schema checks, but its full pytest suite was **deliberately interrupted around 15%** after more than four minutes of costly integration tests; do not describe that full suite as green. No release or `latest` pointers were touched. End-to-end reproduction of a scenario report is NOT yet tested.
+
 - `tests/test_mart_producer_provenance.py`: same-run producer attribution, idempotency/replay revision, conflict detection.
 - `tests/test_report_product_ownership_audit.py`: report identity, declared sources, checksums, safety.
 - `tests/test_report_publication_spine.py`: report inputs declared; live release vs compute Make wiring.
