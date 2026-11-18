@@ -5,6 +5,8 @@ Last reviewed: 2026-08-25
 
 This document defines orchestration only. Accounting classification, cash selection, debt position/activity, annual aggregation and FX membership remain governed by their dedicated contracts.
 
+For the first **observed report-product ownership audit** (26 outputs, 8 producer-attribution gaps as of 2026-11-18), see [report_product_ownership_20261118.md](report_product_ownership_20261118.md). That inventory is evidence about one exact run, not a second authoritative DAG or a declaration that unlisted artifacts are unused.
+
 ## Intended DAG
 
 ```text
