@@ -1,0 +1,38 @@
+schema: accounting.scenario.v1
+id: chino_juan_no_paga_desde_2026_12
+description: >-
+  Hipótesis de riesgo: al vencer el contrato, Chino Juan deja de pagar
+  las cuotas planeadas de alquiler desde diciembre 2026.
+  No afirma que esto haya ocurrido; no modifica pagos realizados.
+base:
+  run_id: 20261118T210059Z_FBPM
+  all_status_sha256: 55b1ccc3b67a30529c9f75ce993ada1c5162efdca4e543cc5c153b41991f4885
+reports:
+  - treasury_accountability
+variants:
+  - id: base_planeada
+    description: El escenario con los cobros previstos tal como figuran en el ledger.
+    operations: []
+  - id: chino_no_paga
+    description: Se suprimen exclusivamente las ocho cuotas futuras Chino Juan.
+    operations:
+      - op: suppress_planned
+        equals:
+          Box: Property Management
+          payer: Inq
+          receiver: PM
+          Flujo: Cobros
+          Tipo: Renta
+          Lugar: CABA
+          Detalle: Chino Juan
+          status: planeado
+        tags:
+          - PM_RENT_CABA_CHINO_ARS
+          - PM_RENT_CABA_CHINO_USD
+        from_month: 2026-12
+        through_month: 2027-03
+        expect:
+          rows: 8
+          amount_by_currency:
+            ARS: 1600000
+            USD: 1520
