@@ -20,9 +20,9 @@ python3 -m accounting.scenarios.runner \
   --outbox ~/Desktop/MEMOS/10_accounting_family/08_scenarios/outbox
 ```
 
-El corredor valida el SHA256 de la fuente exacta, crea una copia temporal aislada por variante, reemplaza solo los datos autorizados, conserva el ledger `pagado` sin modificar, y ejecuta las cuatro etapas offline existentes: `run-materialize`, `run-debt`, `run-metrics`, `run-reports`. Nunca invoca ingestión desde Google Sheets, `run-full`, `latest` ni publicación.
+El corredor valida el SHA256 de la fuente exacta, crea una copia temporal aislada por variante, reemplaza solo los datos autorizados, conserva el ledger `pagado` sin modificar, y ejecuta las tres etapas offline estándar de cálculo: `run-materialize`, `run-debt`, `run-metrics`. Después llama únicamente al **renderizador oficial de tesorería** y al **motor PDF oficial**, sin modificar sus definiciones ni generar los otros 27 PDF del paquete general. El bundle completo (`run-reports`) fue descartado en este piloto tras fallar por un PDF especializado ajeno a la tesorería. Nunca invoca ingestión desde Google Sheets, `run-full`, `latest` ni publicación.
 
-Después de ambas ejecuciones válidas, exporta de manera conjunta **cuatro archivos y nada más** en el outbox (HTML/PDF de cada variante). Todos los CSVs, métricas, logs de ejecución y demás artefactos intermedios se borran junto a su espacio temporal. El propio YAML y este README se conservan en el repositorio como definiciones, no en el outbox.
+Después de ambas ejecuciones válidas, exporta de manera conjunta **cuatro archivos y nada más** en el outbox (HTML/PDF de cada variante). Todos los CSVs, métricas, logs de ejecución y demás artefactos intermedios se borran junto a su espacio temporal. El workspace se crea bajo `~/Desktop/MEMOS/10_accounting_family/08_scenarios/` (directorio contenedor del outbox), **no en `/tmp`**: Chromium como Snap usa otro espacio de `/tmp` y puede terminar con código 0 sin crear el PDF. Esta restricción de infraestructura se verificó con una prueba de renderización en ambas rutas. El propio YAML y este README se conservan en el repositorio como definiciones, no en el outbox.
 
 ## Interpretación importante
 

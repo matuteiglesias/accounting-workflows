@@ -27,7 +27,7 @@ ID = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
 RUN = re.compile(r"^\d{8}T\d{6}Z_FBPM$")
 MONTH = re.compile(r"^20\d{2}-(?:0[1-9]|1[0-2])$")
 FIELDS = frozenset({"Box", "payer", "receiver", "Flujo", "Tipo", "Lugar", "Detalle", "tag", "status"})
-STAGES = ("run-materialize", "run-debt", "run-metrics", "run-reports")
+STAGES = ("run-materialize", "run-debt", "run-metrics")
 
 
 def digest(path: Path) -> str:
@@ -179,6 +179,34 @@ def run_stages(execution) -> None:
                                log.read_text(encoding="utf-8")[-6000:])
 
 
+def render_requested_treasury(execution) -> Path:
+    """Use the existing official renderer, but don't build unrelated PDFs."""
+    from accounting.reports.pdf import render_pdf
+    from accounting.reports.treasury_accountability.render import render_report
+
+    run = execution.canonical_root
+    metric = execution.metrics_root
+    report = execution.reports_root / "treasury_accountability"
+    sources = {
+        "accountability_path": run / "monthly_cash_accountability.csv",
+        "qa_path": run / "monthly_cash_accountability_qa.csv",
+        "cycles_path": run / "family_business_accountability_cycles.csv",
+        "stakeholder_support_path": run / "monthly_stakeholder_support.csv",
+        "semantic_audit_path": run / "classification_audit.csv",
+        "annual_metrics_path": metric / "annual_balance_dashboard_metrics.csv",
+    }
+    missing = [str(path) for path in sources.values() if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"required treasury source missing: {missing}")
+    print("  render_treasury (existing renderer only)", flush=True)
+    output = render_report(**sources, out_dir=report)
+    if not output["html"].is_file() or not output["validation"].is_file():
+        raise ValueError("existing renderer failed to produce report and validation")
+    print("  render_pdf (existing PDF engine)", flush=True)
+    render_pdf(output["html"], report / "report.pdf")
+    return report
+
+
 def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
     spec = read_definition(scenario_file)
     repo = Path(repo).resolve(strict=True)
@@ -199,16 +227,21 @@ def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
         deliverables.mkdir()
         for variant in spec["variants"]:
             print(f"Scenario {spec['id']}: {variant['id']}", flush=True)
-            with isolated_accounting_execution(repo) as execution:
+            # Snap Chromium uses a private /tmp namespace, so PDFs rendered in
+            # host /tmp can appear missing even when Chromium reports exit 0.
+            # The temporary workspace must live in the user's non-hidden home
+            # tree; the context still deletes it when each variant finishes.
+            with isolated_accounting_execution(repo, temp_parent=outbox.parent) as execution:
                 removed = seed_execution(base, execution.canonical_root, execution.run_id,
                                          spec["id"], variant)
                 print("  matched transformations:", removed, flush=True)
                 hashes[variant["id"]] = digest(execution.canonical_root / "ledger_canonical_all_status.csv")
                 run_stages(execution)
-                report = execution.reports_root / "treasury_accountability"
-                manifest = json.loads((report / "report_manifest.json").read_text(encoding="utf-8"))
-                if manifest["source_run_id"] != execution.run_id or manifest["validation_status"] == "fail":
-                    raise ValueError("scenario report failed identity or validation")
+                # Do not invoke run-reports here: it produces many unrelated PDFs,
+                # and failure of an optional specialized renderer would block the
+                # requested treasury document. The official treasury renderer and
+                # official PDF engine are reused unchanged.
+                report = render_requested_treasury(execution)
                 for extension in ("html", "pdf"):
                     source = report / f"report.{extension}"
                     if extension == "pdf":

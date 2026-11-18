@@ -91,3 +91,38 @@ def test_operator_does_not_match_paid_even_with_same_tag(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="selected realized history"):
         transform_all_status(source, out, [op])
     assert not out.exists()
+
+
+def test_existing_treasury_renderer_is_only_report_producer(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+    from accounting.scenarios.runner import render_requested_treasury, STAGES
+    import accounting.reports.pdf as pdf_module
+    import accounting.reports.treasury_accountability.render as treasury_module
+
+    assert STAGES == ("run-materialize", "run-debt", "run-metrics")
+    root, metrics, reports = tmp_path / "run", tmp_path / "metrics", tmp_path / "reports"
+    root.mkdir()
+    metrics.mkdir()
+    for name in ("monthly_cash_accountability.csv", "monthly_cash_accountability_qa.csv",
+                 "family_business_accountability_cycles.csv", "monthly_stakeholder_support.csv",
+                 "classification_audit.csv"):
+        (root / name).write_text("a\n1\n", encoding="utf-8")
+    (metrics / "annual_balance_dashboard_metrics.csv").write_text("a\n1\n", encoding="utf-8")
+    called = []
+    def fake_render(*, out_dir, **kwargs):
+        called.append(("treasury", set(kwargs)))
+        out_dir.mkdir(parents=True)
+        (out_dir / "report.html").write_text("<html>existing report</html>", encoding="utf-8")
+        (out_dir / "report_validation.csv").write_text("status\npass\n", encoding="utf-8")
+        return {"html": out_dir / "report.html", "validation": out_dir / "report_validation.csv"}
+    def fake_pdf(html, pdf):
+        called.append(("pdf", html.name))
+        pdf.write_bytes(b"%PDF-1.4\ntest")
+    monkeypatch.setattr(treasury_module, "render_report", fake_render)
+    monkeypatch.setattr(pdf_module, "render_pdf", fake_pdf)
+    result = render_requested_treasury(SimpleNamespace(
+        canonical_root=root, metrics_root=metrics, reports_root=reports
+    ))
+    assert result == reports / "treasury_accountability"
+    assert [x[0] for x in called] == ["treasury", "pdf"]
+    assert (result / "report.pdf").read_bytes().startswith(b"%PDF-")
