@@ -50,7 +50,7 @@ The single-run critical path is sequential; prioritize the largest *exclusive bo
 
 ## Priority-ranked actions after measurement
 
-1. **P0/P1: replace `accounting.debt.balance_views.build_debt_balance_daily` daily repeated pandas operations with a mathematically equivalent event-sweep or vectorized cumulative balance.** First demonstrate exact parity for the 4 reference CSVs and existing tests, including opening/closing dates, allocations, and interest. Keep implementation separate until parity passes. Do not assume that debt can be skipped merely because the requested scenario only changes future rent.
+1. **DONE (commit `b06e5f4`): event-date recomputation of `accounting.debt.balance_views.build_debt_balance_daily`.** All four reference CSVs passed exact-byte parity. Unprofiled module time fell from 50.92 s to 5.26 s on pinned data (9.68×). See [debt_event_optimization_20261118.md](debt_event_optimization_20261118.md) for measurements, the subsequent full scenario audit and second-intervention recommendation.
 2. **P1: minimize redundant full-run work when inputs are provably invariant.** The current Chino case changes `planeado` data, but the treasury report reads a `pagado` subset. A scenario executor must eventually detect/declare when outputs are unaffected; avoid rebuilding identical marts and metrics in each variant only with explicit dependency/provenance proof.
 3. **P1: measure Stage D / metrics internals** with optional Pyinstrument once the debt bottleneck has been addressed; do not optimize on guesses.
 4. **P2: Make scope-tag parse overhead** should be addressed only with a validated fast path, preserving the consistency of BOXES and SCOPE_TAG.
