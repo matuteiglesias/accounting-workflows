@@ -25,46 +25,15 @@ class Round3ViewResult:
     table_columns: tuple[tuple[str, str], ...]
 
 
-SOURCE_LOCATIONS = {
-    "annual_metrics": ("metrics", "annual_balance_dashboard_metrics.csv"),
-    "semantic_split": ("run", "monthly_flow_semantic_split.csv"),
-    "semantic_audit": ("run", "classification_audit.csv"),
-    "stakeholder_support": ("run", "monthly_stakeholder_support.csv"),
-    "treasury_flow": ("run", "monthly_box_treasury_flow.csv"),
-    "cash_accountability": ("run", "monthly_cash_accountability.csv"),
-}
+from accounting.reports.specialized.source_contract import (
+    SOURCE_LOCATIONS as SOURCE_LOCATIONS,
+    VIEW_REQUIREMENTS as _ALL_VIEW_REQUIREMENTS,
+    ROUND3_VIEW_KEYS,
+    path_for as _path_for,
+    source_paths_for_view,
+)
 
-VIEW_REQUIREMENTS = {
-    "rent_annual_comparison": ("annual_metrics",),
-    "distributions_by_year": ("semantic_audit", "annual_metrics"),
-    "opex_monthly_evolution": ("semantic_split", "annual_metrics"),
-    "maintenance_by_property": ("semantic_split", "annual_metrics"),
-    "legal_costs_by_property": ("semantic_split", "annual_metrics"),
-    "support_by_obligation_category": ("stakeholder_support",),
-    "support_by_funding_channel": ("stakeholder_support",),
-    "support_by_settlement_nature": ("stakeholder_support",),
-    "physical_inflows_by_category": ("treasury_flow", "cash_accountability"),
-    "physical_outflows_by_category": ("treasury_flow", "cash_accountability"),
-    "cash_residuals": ("cash_accountability",),
-}
-
-
-def _path_for(source_key: str, run_root: Path, metrics_dir: Path) -> Path:
-    root_key, filename = SOURCE_LOCATIONS[source_key]
-    return (run_root if root_key == "run" else metrics_dir) / filename
-
-
-def source_paths_for_view(
-    view_key: str,
-    run_root: Path,
-    metrics_dir: Path,
-) -> tuple[tuple[Path, str], ...]:
-    paths: list[tuple[Path, str]] = []
-    for key in VIEW_REQUIREMENTS[view_key]:
-        path = _path_for(key, run_root, metrics_dir)
-        prefix = "run" if SOURCE_LOCATIONS[key][0] == "run" else "metrics"
-        paths.append((path, f"{prefix}/{path.name}"))
-    return tuple(paths)
+VIEW_REQUIREMENTS = {name: _ALL_VIEW_REQUIREMENTS[name] for name in ROUND3_VIEW_KEYS}
 
 
 def _read(source_key: str, run_root: Path, metrics_dir: Path) -> pd.DataFrame:

@@ -1,7 +1,7 @@
 # Makefile pipeline DAG contract
 
 Status: current authority
-Last reviewed: 2026-08-25
+Last reviewed: 2026-11-18
 
 This document defines orchestration only. Accounting classification, cash selection, debt position/activity, annual aggregation and FX membership remain governed by their dedicated contracts.
 

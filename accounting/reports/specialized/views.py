@@ -33,47 +33,15 @@ class SpecializedViewResult:
     source_paths: tuple[tuple[Path, str], ...]
 
 
-_SOURCE_LOCATIONS = {
-    "semantic_audit": ("run", "classification_audit.csv"),
-    "stakeholder_support": ("run", "monthly_stakeholder_support.csv"),
-    "semantic_split": ("run", "monthly_flow_semantic_split.csv"),
-    "annual_metrics": ("metrics", "annual_balance_dashboard_metrics.csv"),
-}
+from accounting.reports.specialized.source_contract import (
+    SOURCE_LOCATIONS as _SOURCE_LOCATIONS,
+    VIEW_REQUIREMENTS as _ALL_VIEW_REQUIREMENTS,
+    ROUND1_VIEW_KEYS,
+    path_for as _path_for,
+    source_paths_for_view,
+)
 
-_VIEW_REQUIREMENTS = {
-    "pm_tax_by_actor": ("semantic_audit",),
-    "pm_services_by_actor": ("semantic_audit",),
-    "pm_support_by_actor": ("stakeholder_support",),
-    "distributions_by_recipient": ("semantic_audit", "annual_metrics"),
-    "rent_by_property": ("annual_metrics",),
-    "rent_monthly_evolution": ("semantic_split", "annual_metrics"),
-    "opex_by_category": ("annual_metrics",),
-    "taxes_by_property": ("semantic_split", "annual_metrics"),
-    "services_by_property": ("semantic_split", "annual_metrics"),
-    "distributions_vs_rent": ("semantic_audit", "annual_metrics"),
-}
-
-
-def _path_for(source_key: str, run_root: Path, metrics_dir: Path) -> Path:
-    root_key, filename = _SOURCE_LOCATIONS[source_key]
-    return (run_root if root_key == "run" else metrics_dir) / filename
-
-
-def source_paths_for_view(
-    view_key: str,
-    run_root: Path,
-    metrics_dir: Path,
-) -> tuple[tuple[Path, str], ...]:
-    if view_key in _round3.VIEW_REQUIREMENTS:
-        return _round3.source_paths_for_view(view_key, run_root, metrics_dir)
-    if view_key in _round2.VIEW_REQUIREMENTS:
-        return _round2.source_paths_for_view(view_key, run_root, metrics_dir)
-    paths: list[tuple[Path, str]] = []
-    for key in _VIEW_REQUIREMENTS[view_key]:
-        path = _path_for(key, run_root, metrics_dir)
-        prefix = "run" if _SOURCE_LOCATIONS[key][0] == "run" else "metrics"
-        paths.append((path, f"{prefix}/{path.name}"))
-    return tuple(paths)
+_VIEW_REQUIREMENTS = {name: _ALL_VIEW_REQUIREMENTS[name] for name in ROUND1_VIEW_KEYS}
 
 
 def view_is_available(

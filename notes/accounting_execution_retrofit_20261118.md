@@ -57,3 +57,23 @@ Checkpoint after implementation (2026-11-18): **35 focused tests passed** across
 - `tests/test_isolated_execution_context.py`: tmp lifecycle, allowlist, scoped output, safe explicit export.
 - `tests/test_materialize_required_failure.py`: four required producers raise even with stale files.
 - `tests/test_readme_command_contract.py`: public Make command contract.
+
+## November 18 final architecture simplification: standard full calculation, optional cost boundary
+
+**Decision:** stop designing selective execution by requested downstream report. A run computes the **entire supported standard pipeline** (canonical → governed marts/debt/treasury → metrics → core and available specialized reports). Reuse the exact same code for real and, later, simulated runs; only execution roots and inputs differ. Do not invent a second DAG registry or automatically persist every simulation intermediate. The earlier isolated runner context remains a staging primitive, not a simulation implementation.
+
+**P1 failure semantics:** required producers (Stage D per-flow/per-party/loans/daily cash, cash and semantic outputs, downstream debt/metrics, required core reports and release gates) fail closed. Optional specialized reports with absent source/population may remain unavailable; errors from *existing but invalid* governed inputs must propagate. This is separate from timing: a mandatory producer taking >5 seconds must not be silently skipped.
+
+**P1 retention:** already classified in the retention table above: permanent governed real runs, intentional release documents, QA/provenance evidence, ephemeral simulated intermediates, explicitly saved selected simulations, and age-limited cleanup for orphaned scenario workspaces. No destructive garbage collector added. Temp scenario directories are cleaned by the context on ordinary exit/exception; publication remains explicitly gated.
+
+**P2 input consolidation:** `accounting/reports/specialized/source_contract.py` is now the sole owner of the 10 named source locations and 30 specialized view dependency tuples. `views.py`, `round2_views.py`, and `round3_views.py` own calculations/dispatch, and import the same source-path resolver. Their 10/9/11 view partitions do not overlap. `tests/test_specialized_source_contract.py` checks all published report specs, paths, non-overlap, and missing references. **28 views are published in `REPORT_SPECS`; 2 callable views (`rent_annual_comparison`, `distributions_by_year`) currently have no published report consumer.** They are explicitly `UNPUBLISHED_VIEW_KEYS` and are not automatically produced; don't delete them without a compatibility review.
+
+### High-resource products: policy, not yet automatic release wiring
+
+- **Eligibility:** only auxiliary, optional products may be excluded on runtime grounds. Never skip required accounting/QA or the official report/release contract because of runtime alone.
+- **Classification:** an optional product with observed wall-clock elapsed time **strictly greater than 5.0 seconds** on a representative exact run is classified `high_resource` until remeasured. A 5-second duration is a **measurement threshold**, not evidence that the implementation is efficient or inefficient. Record product name, exact run, machine, timestamp, and elapsed duration; revisit after optimization.
+- **Execution policy:** standard `run-compute` and `run-full` include all standard products. Optional high-resource extras are outside these paths by default and are intended to be enabled explicitly by `INCLUDE_HIGH_RESOURCE=1` at the appropriate *future* execution boundary. This flag is a **policy/design decision, not currently wired to Make**; do not advertise it as operational yet.
+- **Example:** `professional-drilldowns` is **already independent of `run-full`**. It currently consumes both `out/run/accounting/latest_FBPM` and `out/professional_pack/latest`. That latter pack is not guaranteed to correspond to the same exact run. **Do not connect the flag to run-full or the isolated scenario runner until exact-run alignment/provenance is enforced.**
+- **No premature DAG optimizer:** even if an optional output is slow, do not create selective dependency execution, per-report caches, or parallel artifact lineage at this stage.
+
+**Evidence:** 48 targeted tests passed after specialized source-map consolidation (2026-11-18). No live pipeline, real ledger, published artifact, or latest pointer was changed. Follow-up: harden professional-pack exact-run provenance, then implement a narrowly scoped high-resource flag with measured timings. Only after that run a no-hypothesis isolated end-to-end parity check before scenario functions.

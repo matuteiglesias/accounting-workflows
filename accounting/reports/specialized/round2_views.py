@@ -23,44 +23,15 @@ class Round2ViewResult:
     table_columns: tuple[tuple[str, str], ...]
 
 
-SOURCE_LOCATIONS = {
-    "stakeholder_support": ("run", "monthly_stakeholder_support.csv"),
-    "cash_accountability": ("run", "monthly_cash_accountability.csv"),
-    "accountability_cycles": ("run", "family_business_accountability_cycles.csv"),
-    "debt_position": ("run", "monthly_debt_position.csv"),
-    "debt_activity": ("run", "monthly_debt_activity.csv"),
-    "repayment_detail": ("run", "monthly_debt_repayment_detail.csv"),
-}
+from accounting.reports.specialized.source_contract import (
+    SOURCE_LOCATIONS as SOURCE_LOCATIONS,
+    VIEW_REQUIREMENTS as _ALL_VIEW_REQUIREMENTS,
+    ROUND2_VIEW_KEYS,
+    path_for as _path_for,
+    source_paths_for_view,
+)
 
-VIEW_REQUIREMENTS = {
-    "support_by_target_box": ("stakeholder_support",),
-    "prior_period_clearing": ("stakeholder_support",),
-    "physical_inflows_by_box": ("cash_accountability",),
-    "physical_outflows_by_box": ("cash_accountability",),
-    "accountability_balance": ("accountability_cycles",),
-    "accountability_cycles": ("accountability_cycles",),
-    "open_debt_positions": ("debt_position",),
-    "debt_activity": ("debt_activity",),
-    "repayment_allocations": ("repayment_detail",),
-}
-
-
-def _path_for(source_key: str, run_root: Path, metrics_dir: Path) -> Path:
-    root_key, filename = SOURCE_LOCATIONS[source_key]
-    return (run_root if root_key == "run" else metrics_dir) / filename
-
-
-def source_paths_for_view(
-    view_key: str,
-    run_root: Path,
-    metrics_dir: Path,
-) -> tuple[tuple[Path, str], ...]:
-    paths: list[tuple[Path, str]] = []
-    for key in VIEW_REQUIREMENTS[view_key]:
-        path = _path_for(key, run_root, metrics_dir)
-        prefix = "run" if SOURCE_LOCATIONS[key][0] == "run" else "metrics"
-        paths.append((path, f"{prefix}/{path.name}"))
-    return tuple(paths)
+VIEW_REQUIREMENTS = {name: _ALL_VIEW_REQUIREMENTS[name] for name in ROUND2_VIEW_KEYS}
 
 
 def _read(source_key: str, run_root: Path, metrics_dir: Path) -> pd.DataFrame:
