@@ -101,47 +101,67 @@ def build_debt_balance_daily(
         alloc["allocation_date"] = pd.to_datetime(alloc["allocation_date"], errors="coerce").dt.normalize()
         alloc["allocated_amount"] = pd.to_numeric(alloc["allocated_amount"], errors="coerce").fillna(0.0)
 
+    # Economic balances change only on openings, allocations, or closures
+    # (closures are relevant only when no allocations are supplied). We keep
+    # the daily output while reusing snapshots between event dates.
+    event_days = set(df["opened_at"].dropna())
+    if not alloc.empty:
+        event_days.update(alloc["allocation_date"].dropna())
+    else:
+        event_days.update(df["closed_at"].dropna())
+    event_days.add(days[0])  # Reconstruct carried stock for custom start_date.
+
     rows: list[dict] = []
+    cached_rows: list[tuple] = []
 
     for as_of_date in days:
-        known = df.loc[df["opened_at"] <= as_of_date].copy()
-        if known.empty:
-            continue
-        active = known.copy()
-        if not alloc.empty:
-            applied = alloc.loc[alloc["allocation_date"].le(as_of_date)].groupby("target_debt_id")["allocated_amount"].sum()
-            active["current_amount"] = active["original_amount"] - active["debt_id"].map(applied).fillna(0.0)
-        else:
-            active["current_amount"] = active["original_amount"].where(
-                active["closed_at"].isna() | active["closed_at"].gt(as_of_date), 0.0
-            )
-        active["current_amount"] = active["current_amount"].clip(lower=0.0)
+        if as_of_date in event_days:
+            known = df.loc[df["opened_at"] <= as_of_date].copy()
+            if known.empty:
+                cached_rows = []
+            else:
+                active = known.copy()
+                if not alloc.empty:
+                    applied = alloc.loc[alloc["allocation_date"].le(as_of_date)].groupby("target_debt_id")["allocated_amount"].sum()
+                    active["current_amount"] = active["original_amount"] - active["debt_id"].map(applied).fillna(0.0)
+                else:
+                    active["current_amount"] = active["original_amount"].where(
+                        active["closed_at"].isna() | active["closed_at"].gt(as_of_date), 0.0
+                    )
+                active["current_amount"] = active["current_amount"].clip(lower=0.0)
 
-        active_grouped = (
-            active.groupby(["debtor", "creditor", "currency", "item_type"], dropna=False)["current_amount"]
-            .sum()
-            .reset_index()
-            .rename(columns={"current_amount": "open_amount"})
-        )
-        known_keys = known[["debtor", "creditor", "currency", "item_type"]].drop_duplicates()
-        grouped = known_keys.merge(
-            active_grouped,
-            on=["debtor", "creditor", "currency", "item_type"],
-            how="left",
-        )
-        grouped["open_amount"] = pd.to_numeric(grouped["open_amount"], errors="coerce").fillna(0.0)
+                active_grouped = (
+                    active.groupby(["debtor", "creditor", "currency", "item_type"], dropna=False)["current_amount"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"current_amount": "open_amount"})
+                )
+                known_keys = known[["debtor", "creditor", "currency", "item_type"]].drop_duplicates()
+                grouped = known_keys.merge(
+                    active_grouped,
+                    on=["debtor", "creditor", "currency", "item_type"],
+                    how="left",
+                )
+                grouped["open_amount"] = pd.to_numeric(grouped["open_amount"], errors="coerce").fillna(0.0)
+                cached_rows = [
+                    (row["debtor"], row["creditor"], row["currency"], row["item_type"], float(row["open_amount"]))
+                    for _, row in grouped.iterrows()
+                ]
 
-        for _, row in grouped.iterrows():
+        # Carry stock, including zero balances, across no-event days so
+        # the downstream daily/monthly/quarterly/yearly contracts stay intact.
+        date = as_of_date.date().isoformat()
+        for debtor, creditor, currency, item_type, amount in cached_rows:
             rows.append(
                 {
-                    "as_of_date": as_of_date.date().isoformat(),
+                    "as_of_date": date,
                     "period_grain": "D",
-                    "period": as_of_date.date().isoformat(),
-                    "debtor": row["debtor"],
-                    "creditor": row["creditor"],
-                    "currency": row["currency"],
-                    "item_type": row["item_type"],
-                    "open_amount": float(row["open_amount"]),
+                    "period": date,
+                    "debtor": debtor,
+                    "creditor": creditor,
+                    "currency": currency,
+                    "item_type": item_type,
+                    "open_amount": amount,
                 }
             )
 
