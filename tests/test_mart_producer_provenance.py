@@ -46,14 +46,18 @@ def test_rejects_different_producer_for_same_artifact(tmp_path: Path) -> None:
     assert len(_log(root)) == 1
 
 
-def test_rejects_changed_output_for_same_run(tmp_path: Path) -> None:
+def test_same_producer_replay_records_changed_output_hash(tmp_path: Path) -> None:
     root = _root(tmp_path)
     a = _output(root, "monthly_debt_position.csv")
     register_mart_outputs(root, {"monthly_debt_position": a}, stage="E.debt_position")
     a.write_text("value\n2\n")
-    with pytest.raises(ValueError, match="same-run output changed"):
-        register_mart_outputs(root, {"monthly_debt_position": a}, stage="E.debt_position")
-    assert len(_log(root)) == 1
+    assert len(register_mart_outputs(root, {"monthly_debt_position": a}, stage="E.debt_position")) == 1
+    assert len(_log(root)) == 2
+    assert len({record["sha256"] for record in _log(root)}) == 2
+    assert register_mart_outputs(root, {"monthly_debt_position": a}, stage="E.debt_position") == []
+    a.write_text("value\n1\n", encoding="utf-8")
+    assert len(register_mart_outputs(root, {"monthly_debt_position": a}, stage="E.debt_position")) == 1
+    assert len(_log(root)) == 3  # Reverting to a prior hash is still a new revision.
 
 
 def test_preflight_prevents_partial_artifact_registration(tmp_path: Path) -> None:

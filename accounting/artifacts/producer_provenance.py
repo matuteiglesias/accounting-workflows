@@ -3,7 +3,9 @@ from __future__ import annotations
 """Record outputs from existing marts in the canonical run artifact log.
 
 This is an adapter to accounting.artifacts.manifest, not another registry.
-A retry is idempotent for identical outputs; contradictory provenance fails.
+Identical retries are idempotent; changed outputs from the same producer are
+recorded as new evidence revisions, matching existing stage replay semantics.
+A different producer claiming the same path is rejected.
 """
 
 import json
@@ -52,9 +54,10 @@ def register_mart_outputs(
         for record in prior:
             if record.get("stage") != stage or record.get("run_id") != root.name:
                 raise ValueError(f"conflicting producer for {candidate['relpath']}")
-            if record.get("sha256") != candidate["sha256"]:
-                raise ValueError(f"same-run output changed: {candidate['relpath']}")
-        if not prior:
+        # Existing stage manifests are append-only. A replay may legitimately
+        # update a derived table, so retain its new hash rather than claiming
+        # outputs within an exact run can never be rebuilt.
+        if not prior or prior[-1].get("sha256") != candidate["sha256"]:
             additions.append(candidate)
     if additions:
         append_artifacts(root / "meta", additions)
