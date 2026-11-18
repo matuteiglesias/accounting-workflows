@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from time import perf_counter
 
 import yaml
 
@@ -163,23 +164,36 @@ def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: d
     return removed
 
 
-def run_stages(execution) -> None:
+def run_stages(execution, *, measurements: list[dict] | None = None) -> None:
     log = execution.workspace / "stages.log"
+    python_timings = execution.workspace / "python_timings.jsonl"
     for stage in STAGES:
         print(f"  {stage}", flush=True)
+        command = execution.make_command(stage)
+        env = None
+        if measurements is not None:
+            # No dependency or instrumentation in ordinary execution. Make's
+            # existing $(PY) expansion becomes a transparent timed subprocess.
+            command.append("PY=python3 -m accounting.diagnostics.timed_python")
+            env = dict(os.environ, ACCOUNTING_TIMINGS_JSONL=str(python_timings))
+        start = perf_counter()
         with log.open("a", encoding="utf-8") as handle:
             handle.write(f"\n=== {stage} ===\n")
             handle.flush()
-            result = subprocess.run(
-                execution.make_command(stage), cwd=execution.repo_root,
-                stdout=handle, stderr=subprocess.STDOUT,
-            )
+            result = subprocess.run(command, cwd=execution.repo_root,
+                                    stdout=handle, stderr=subprocess.STDOUT, env=env)
+        if measurements is not None:
+            measurements.append({"kind": "make_stage", "stage": stage,
+                                 "elapsed_seconds": round(perf_counter() - start, 6),
+                                 "exit_code": result.returncode})
         if result.returncode:
             raise RuntimeError(f"{stage} failed (exit {result.returncode}):\n" +
                                log.read_text(encoding="utf-8")[-6000:])
+    if measurements is not None and python_timings.is_file():
+        measurements.extend(json.loads(line) for line in python_timings.read_text(encoding="utf-8").splitlines())
 
 
-def render_requested_treasury(execution) -> Path:
+def render_requested_treasury(execution, *, measurements: list[dict] | None = None) -> Path:
     """Use the existing official renderer, but don't build unrelated PDFs."""
     from accounting.reports.pdf import render_pdf
     from accounting.reports.treasury_accountability.render import render_report
@@ -199,15 +213,23 @@ def render_requested_treasury(execution) -> Path:
     if missing:
         raise FileNotFoundError(f"required treasury source missing: {missing}")
     print("  render_treasury (existing renderer only)", flush=True)
+    start = perf_counter()
     output = render_report(**sources, out_dir=report)
+    if measurements is not None:
+        measurements.append({"kind": "renderer", "stage": "treasury_html",
+                             "elapsed_seconds": round(perf_counter() - start, 6)})
     if not output["html"].is_file() or not output["validation"].is_file():
         raise ValueError("existing renderer failed to produce report and validation")
     print("  render_pdf (existing PDF engine)", flush=True)
+    start = perf_counter()
     render_pdf(output["html"], report / "report.pdf")
+    if measurements is not None:
+        measurements.append({"kind": "renderer", "stage": "treasury_pdf",
+                             "elapsed_seconds": round(perf_counter() - start, 6)})
     return report
 
 
-def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
+def execute(scenario_file: Path, repo: Path, outbox: Path, *, audit_file: Path | None = None) -> Path:
     spec = read_definition(scenario_file)
     repo = Path(repo).resolve(strict=True)
     base = repo / "out" / "run" / "accounting" / spec["base"]["run_id"]
@@ -218,10 +240,22 @@ def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
     outbox = Path(outbox).resolve()
     if any(outbox.is_relative_to(path.resolve()) for path in (repo / "out", repo / "public", repo / "scenarios")):
         raise ValueError("scenario outbox must be outside production and code")
+    # Validate the optional diagnostic destination *before* a costly execution.
+    audit_path = Path(audit_file).resolve() if audit_file is not None else None
+    if audit_path is not None:
+        if (audit_path.is_relative_to(outbox) or
+                audit_path.is_relative_to((repo / "out").resolve()) or
+                audit_path.is_relative_to((repo / "public").resolve()) or
+                audit_path.is_relative_to((repo / "scenarios").resolve())):
+            raise ValueError("performance audit must be outside outbox, production and YAML definitions")
+        if audit_path.exists():
+            raise FileExistsError(f"performance audit already exists: {audit_path}")
     outbox.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     final = outbox / f"{spec['id']}__{stamp}"
     hashes = {}
+    audit_events: list[dict] | None = [] if audit_file is not None else None
+    audit_start = perf_counter()
     with tempfile.TemporaryDirectory(prefix=".scenario-export-", dir=outbox) as folder:
         deliverables = Path(folder) / "deliverables"
         deliverables.mkdir()
@@ -232,16 +266,22 @@ def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
             # The temporary workspace must live in the user's non-hidden home
             # tree; the context still deletes it when each variant finishes.
             with isolated_accounting_execution(repo, temp_parent=outbox.parent) as execution:
+                variant_events: list[dict] | None = [] if audit_events is not None else None
+                variant_start = perf_counter()
+                start = perf_counter()
                 removed = seed_execution(base, execution.canonical_root, execution.run_id,
                                          spec["id"], variant)
+                if variant_events is not None:
+                    variant_events.append({"kind": "scenario", "stage": "seed_and_transform",
+                                           "elapsed_seconds": round(perf_counter() - start, 6)})
                 print("  matched transformations:", removed, flush=True)
                 hashes[variant["id"]] = digest(execution.canonical_root / "ledger_canonical_all_status.csv")
-                run_stages(execution)
+                run_stages(execution, measurements=variant_events)
                 # Do not invoke run-reports here: it produces many unrelated PDFs,
                 # and failure of an optional specialized renderer would block the
                 # requested treasury document. The official treasury renderer and
                 # official PDF engine are reused unchanged.
-                report = render_requested_treasury(execution)
+                report = render_requested_treasury(execution, measurements=variant_events)
                 for extension in ("html", "pdf"):
                     source = report / f"report.{extension}"
                     if extension == "pdf":
@@ -249,6 +289,10 @@ def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
                             if handle.read(5) != b"%PDF-":
                                 raise ValueError("invalid PDF")
                     execution.export(source, deliverables / f"SIMULACION__{spec['id']}__{variant['id']}.{extension}")
+                if audit_events is not None and variant_events is not None:
+                    audit_events.append({"variant": variant["id"], "run_id": execution.run_id,
+                                         "total_seconds": round(perf_counter() - variant_start, 6),
+                                         "events": variant_events})
         if len(set(hashes.values())) != 2:
             raise ValueError("scenario and baseline yielded identical input evidence")
         exports = list(deliverables.iterdir())
@@ -257,6 +301,14 @@ def execute(scenario_file: Path, repo: Path, outbox: Path) -> Path:
         if final.exists():
             raise FileExistsError(final)
         os.replace(deliverables, final)
+    if audit_path is not None:
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_path.write_text(json.dumps({
+            "schema": "accounting.scenario.perf.v1", "scenario_id": spec["id"],
+            "base_run_id": spec["base"]["run_id"],
+            "total_seconds": round(perf_counter() - audit_start, 6),
+            "variants": audit_events,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Four reports exported to {final}", flush=True)
     return final
 
@@ -266,8 +318,10 @@ def main() -> None:
     p.add_argument("--scenario", required=True, type=Path)
     p.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
     p.add_argument("--outbox", required=True, type=Path)
+    p.add_argument("--audit-file", type=Path, default=None,
+                   help="Optional JSON timings outside outbox; off by default")
     a = p.parse_args()
-    execute(a.scenario, a.repo_root, a.outbox)
+    execute(a.scenario, a.repo_root, a.outbox, audit_file=a.audit_file)
 
 
 if __name__ == "__main__":

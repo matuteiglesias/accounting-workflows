@@ -36,3 +36,27 @@ Al abrir/exportar fuera del visor, los archivos llevan `SIMULACION` en el nombre
 - La ampliación futura de los reportes, diseñada de forma independiente del corredor.
 - Generalizar los operadores declarativos (distribuciones, reasignaciones, costos imputados), con controles de conservación de recursos y compatibilidad.
 - Probar el runner aislado contra un fixture completo de extremo a extremo y revisar la política de cierre documental antes de automatizar decenas de escenarios.
+
+## Auditoría de tiempos (opcional, fuera del outbox)
+
+Para diagnosticar el costo de varias corridas sin alterar los HTML/PDF por defecto, agregar
+`--audit-file ~/Desktop/MEMOS/10_accounting_family/08_scenarios/diagnostics/<nombre-unico>.json`
+al comando del corredor. No repetir el nombre: la auditoría no sobreescribe archivos.
+
+El registro usa `perf_counter` en las etapas de Make y en los renderizadores HTML/PDF.
+Cuando está activado, además emplea `accounting.diagnostics.timed_python` como
+wrapper optativo de los comandos Python de Make, registrando módulos, tiempos y errores.
+No instala profilers adicionales.
+
+Para obtener un informe navegable:
+
+```bash
+python3 -m accounting.diagnostics.summarize_scenario_timings \
+  ~/Desktop/MEMOS/10_accounting_family/08_scenarios/diagnostics/<nombre-unico>.json \
+  --html ~/Desktop/MEMOS/10_accounting_family/08_scenarios/diagnostics/<nombre-unico>.html
+```
+
+Las duraciones de los subprocesos están **dentro** de las etapas de Make:
+no se suman como si fueran tareas adicionales. La auditoría es optativa;
+el outbox sigue conteniendo solamente los cuatro HTML/PDF. Primera medición
+y principal ineficiencia hallada en `notes/scenario_performance_audit_20261118.md`.
