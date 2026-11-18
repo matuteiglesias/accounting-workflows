@@ -42,7 +42,7 @@ This is a **specific instrumentation gap**, not an invitation to create a compet
 
 The audit proves consistency for **manifest-declared** sources. It does not yet prove that every renderer dependency is in its manifest.
 
-For example, the current render_treasury() invocation passes annual_metrics_path to the renderer, while the treasury report's source manifest does not list annual metrics. This should be reconciled before treating manifests as a complete dependency graph or using them to drive selective execution.
+In the audited 20261118T200115Z_FBPM snapshot, render_treasury() consumes annual_metrics_path while the treasury report's source manifest does not list annual metrics. **Follow-up code correction:** accounting/reports/build.py now records this dependency; regression coverage was added to tests/test_report_publication_spine.py. Historical manifests remain unchanged, by design. Other missing dependency declarations are still possible; don't yet use manifests as a complete selective-execution DAG.
 
 Likewise, artifacts not directly consumed by reports may still feed other marts, QA, diagnostics, or provenance. Do not delete them from a static nonconsumer list.
 

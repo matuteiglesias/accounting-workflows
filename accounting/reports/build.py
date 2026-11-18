@@ -369,6 +369,7 @@ def build_report_bundle(
             _source(accountability_cycles, "run/family_business_accountability_cycles.csv"),
             _source(stakeholder_support, "run/monthly_stakeholder_support.csv"),
             _source(stakeholder_support_qa, "run/monthly_stakeholder_support_qa.csv"),
+            _source(annual_metrics, "metrics/annual_balance_dashboard_metrics.csv"),
             *([_source(semantic_audit, "run/classification_audit.csv")] if semantic_audit.is_file() else []),
         ],
         outputs=_manifest_outputs(treasury_outputs, bundle_root=out_dir),

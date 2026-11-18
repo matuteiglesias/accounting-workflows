@@ -175,9 +175,10 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
         "run/monthly_debt_repayment_detail.csv",
     }
     treasury_manifest = json.loads(outputs["treasury_manifest"].read_text(encoding="utf-8"))
-    assert "run/family_business_accountability_cycles.csv" in {
-        source["path"] for source in treasury_manifest["sources"]
-    }
+    treasury_sources = {source["path"] for source in treasury_manifest["sources"]}
+    assert "run/family_business_accountability_cycles.csv" in treasury_sources
+    # The renderer reads annual metrics; the manifest must attribute this input.
+    assert "metrics/annual_balance_dashboard_metrics.csv" in treasury_sources
     debt_manifest = json.loads(outputs["debt_manifest"].read_text(encoding="utf-8"))
     assert len(debt_manifest["sources"]) == 7
     assert Path(outputs["annual_pdf"]).read_bytes().startswith(b"%PDF-")
