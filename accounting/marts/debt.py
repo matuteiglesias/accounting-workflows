@@ -12,6 +12,7 @@ from accounting.debt.position_authority import (
 )
 from accounting.debt.resolve import RULE_VERSION
 from accounting.cutoff import load_run_cutoff_if_present
+from accounting.artifacts.producer_provenance import register_mart_outputs
 
 DEBT_POSITION_COLUMNS = [
     "period",
@@ -1051,7 +1052,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    build_monthly_debt_position(Path(args.debt_dir), Path(args.write_dir))
+    write_dir = Path(args.write_dir)
+    products = build_monthly_debt_position(Path(args.debt_dir), write_dir)
+    register_mart_outputs(write_dir, products, stage="E.debt_position")
     return 0
 
 

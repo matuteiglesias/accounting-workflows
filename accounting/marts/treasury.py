@@ -16,6 +16,7 @@ import pandas as pd
 from accounting.cash_authority import select_validated_cash_period
 from accounting.cutoff import load_run_cutoff_if_present
 from accounting.marts.treasury_transaction_detail import write_treasury_transaction_detail
+from accounting.artifacts.producer_provenance import register_mart_outputs
 
 
 TREASURY_FLOW_COLUMNS = [
@@ -906,6 +907,7 @@ def main() -> None:
     paths = build_monthly_cash_accountability(
         Path(args.run_root), tolerance=args.tolerance
     )
+    register_mart_outputs(Path(args.run_root), paths, stage="E.treasury_accountability")
     for path in paths.values():
         print(f"Wrote: {path}")
 

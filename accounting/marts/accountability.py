@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 from accounting.cutoff import load_run_cutoff_if_present
+from accounting.artifacts.producer_provenance import register_mart_outputs
 
 
 CYCLE_FREQUENCY_MONTHS = 6
@@ -184,7 +185,9 @@ def main() -> None:
     parser.add_argument("--run-root", required=True, type=Path)
     parser.add_argument("--as-of-date")
     args = parser.parse_args()
-    for path in build_accountability_views(args.run_root, as_of_date=args.as_of_date).values():
+    paths = build_accountability_views(args.run_root, as_of_date=args.as_of_date)
+    register_mart_outputs(args.run_root, paths, stage="E.accountability_cycles")
+    for path in paths.values():
         print(f"Wrote: {path}")
 
 

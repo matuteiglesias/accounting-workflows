@@ -36,7 +36,7 @@ Run without rebuilding or publishing accounting artifacts:
 | run/monthly_cash_accountability_qa.csv | Same treasury stage | Same |
 | run/family_business_accountability_cycles.csv | Makefile run-debt → accounting.marts.accountability | Same |
 
-This is a **specific instrumentation gap**, not an invitation to create a competing product registry.
+This was a **specific instrumentation gap**, not an invitation to create a competing product registry. **Implementation added 2026-11-18:** the three CLI producers now append output identities and hashes via accounting/artifacts/producer_provenance.py into the existing meta/artifacts.jsonl, using stages E.debt_position, E.treasury_accountability and E.accountability_cycles. Duplicate identical registration is idempotent; conflicting run identity/producer or changed hash fails closed. The eight gaps listed above remain in the immutable historical run; new runs should resolve them. No historical file was backfilled.
 
 ## Important boundary: declared is not necessarily exhaustive
 
