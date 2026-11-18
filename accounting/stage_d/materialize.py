@@ -509,6 +509,7 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_per_flow")
         aggregates["per_flow_failed"] = {"error": "failed"}
+        raise
 
     # 2) per_party
     try:
@@ -517,6 +518,7 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_per_party")
         aggregates["per_party_failed"] = {"error": "failed"}
+        raise
 
     if _materialize_debug_enabled() and pp_df is not None:
         LOG.debug("materialize_all: per_party shape=%s cols=%s", pp_df.shape, list(pp_df.columns))
@@ -549,6 +551,7 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_loans")
         aggregates["loans_failed"] = {"error": "failed"}
+        raise
 
     # 4) daily cash
     try:
@@ -557,6 +560,7 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_daily_cash")
         aggregates["daily_cash_failed"] = {"error": "failed"}
+        raise
 
     # 4.1) monthly cash consumption wrapper with explicit suitability flags
     try:
