@@ -139,9 +139,23 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     out_dir = tmp_path / "out" / "reports" / run_id
     _write_sources(run_root, metrics_dir)
 
-    monkeypatch.setattr("accounting.reports.build.render_annual", _fake_reporter("annual"))
-    monkeypatch.setattr("accounting.reports.build.render_treasury", _fake_reporter("treasury"))
-    monkeypatch.setattr("accounting.reports.build.render_debt", _fake_reporter("debt"))
+    # Renderer input paths must be declared in their report manifest.
+    # Other manifest sources are allowed (QA gates for the enclosing bundle).
+    actual_renderer_inputs: dict[str, set[Path]] = {}
+    for kind, target in [
+        ("annual", "render_annual"),
+        ("treasury", "render_treasury"),
+        ("debt", "render_debt"),
+    ]:
+        reporter = _fake_reporter(kind)
+        def recording_renderer(*, _kind=kind, _reporter=reporter, **kwargs):
+            actual_renderer_inputs[_kind] = {
+                value.resolve()
+                for key, value in kwargs.items()
+                if key.endswith("_path") and isinstance(value, Path) and value.is_file()
+            }
+            return _reporter(**kwargs)
+        monkeypatch.setattr(f"accounting.reports.build.{target}", recording_renderer)
     monkeypatch.setattr("accounting.reports.build.render_pdf", _fake_pdf)
     monkeypatch.setattr("accounting.reports.build._build_pack_validation", lambda **kwargs: pd.DataFrame([{"check":"pack","status":"pass","severity":"error","detail":"synthetic"}]))
     # This fixture verifies the core bundle/catalog contract only. Specialized
@@ -181,6 +195,19 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert "metrics/annual_balance_dashboard_metrics.csv" in treasury_sources
     debt_manifest = json.loads(outputs["debt_manifest"].read_text(encoding="utf-8"))
     assert len(debt_manifest["sources"]) == 7
+    for kind, manifest in [
+        ("annual", annual_manifest),
+        ("treasury", treasury_manifest),
+        ("debt", debt_manifest),
+    ]:
+        declared_paths = {
+            ((run_root if source["path"].startswith("run/") else metrics_dir)
+             / source["path"].split("/", 1)[1]).resolve()
+            for source in manifest["sources"]
+        }
+        assert actual_renderer_inputs[kind] <= declared_paths, (
+            kind, actual_renderer_inputs[kind] - declared_paths
+        )
     assert Path(outputs["annual_pdf"]).read_bytes().startswith(b"%PDF-")
 
 
