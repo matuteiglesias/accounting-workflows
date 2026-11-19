@@ -692,7 +692,6 @@ def _build_derived_cell(
     audit: pd.DataFrame,
     stmt: pd.DataFrame,
     annual: pd.DataFrame,
-    cash_close: pd.DataFrame,
     debt_activity: pd.DataFrame,
     debt_position: pd.DataFrame,
     tolerance: float,
@@ -796,7 +795,6 @@ def _build_derived_cell(
             period=period,
             display_value=display_value,
             annual=annual,
-            cash_close=cash_close,
             box_motor=box_motor,
             tolerance=tolerance,
         )
@@ -820,7 +818,6 @@ def _build_derived_cell(
         audit=audit,
         stmt=stmt,
         annual=annual,
-        cash_close=cash_close,
         debt_activity=debt_activity,
         debt_position=debt_position,
         tolerance=tolerance,

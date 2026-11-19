@@ -996,7 +996,6 @@ def _build_derived_cell(
     audit: pd.DataFrame,
     stmt: pd.DataFrame,
     annual: pd.DataFrame,
-    cash_close: pd.DataFrame,
     debt_activity: pd.DataFrame,
     debt_position: pd.DataFrame,
     tolerance: float,
@@ -1196,25 +1195,6 @@ def _build_derived_cell(
             sections.append(("Debt position rows", debt_rows))
             detail = debt_rows if not debt_rows.empty else annual_rows
             lineage = "annual_to_governed_debt_position"
-
-        elif source_table == "monthly_cash_close.csv":
-            return (
-                STATUS_UNSUPPORTED,
-                0.0,
-                -display_value,
-                "unsupported",
-                "annual_balance_dashboard_metrics.csv",
-                {
-                    "unsupported": True,
-                    "reason": (
-                        "cash headline requires the typed cash-position route; "
-                        "generic annual compatibility cannot select cash"
-                    ),
-                },
-                "Cash stock is not re-selected by report compatibility.",
-                annual_rows,
-                sections,
-            )
 
         return (
             status,
@@ -1667,7 +1647,6 @@ def build_professional_flow_drilldowns(
                         audit=frames["audit"],
                         stmt=frames["stmt"],
                         annual=frames["annual"],
-                        cash_close=pd.DataFrame(),
                         box_motor=frames["box_motor"],
                         debt_activity=frames["debt_activity"],
                         debt_position=frames["debt_position"],

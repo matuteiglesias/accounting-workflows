@@ -29,7 +29,6 @@ def _call(row: dict, annual: pd.DataFrame, display: float):
         audit=pd.DataFrame(),
         stmt=pd.DataFrame(),
         annual=annual,
-        cash_close=pd.DataFrame(),
         debt_activity=pd.DataFrame(),
         debt_position=pd.DataFrame(),
         tolerance=1e-6,
@@ -126,38 +125,24 @@ def test_source_value_is_authority_and_formula_reconciliation_can_warn() -> None
     assert result[3] == "governed_source_value_with_formula_reconciliation"
 
 
-def _cash_rows(include_previous: bool = True) -> pd.DataFrame:
+def _motor_rows(include_previous: bool = True) -> pd.DataFrame:
     rows = [
         {
-            "period": "2026-02", "Currency": "ARS", "Box": "Property Management", "party": "",
-            "close_amount": 100.0, "position_type": "inferred_box_motor", "source_type": "inferred_box_motor",
-            "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2026-02-28",
-        },
-        {
-            "period": "2026-02", "Currency": "ARS", "Box": "Property Management", "party": "",
-            "close_amount": 1000.0, "position_type": "cash_close", "source_type": "bank_statement",
-            "cash_suitability": "frontend_safe", "is_frontend_safe": True, "as_of_date": "2026-02-28",
+            "TimePeriod": "2026-02", "TimePeriod_end": "2026-02-28", "Currency": "ARS", "Box": "Property Management", "cum_net": 100.0,
         },
     ]
     if include_previous:
         rows.extend(
             [
                 {
-                    "period": "2026-01", "Currency": "ARS", "Box": "Property Management", "party": "",
-                    "close_amount": 80.0, "position_type": "inferred_box_motor", "source_type": "inferred_box_motor",
-                    "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2026-01-31",
-                },
-                {
-                    "period": "2026-01", "Currency": "ARS", "Box": "Property Management", "party": "",
-                    "close_amount": 500.0, "position_type": "cash_close", "source_type": "bank_statement",
-                    "cash_suitability": "frontend_safe", "is_frontend_safe": True, "as_of_date": "2026-01-31",
+                    "TimePeriod": "2026-01", "TimePeriod_end": "2026-01-31", "Currency": "ARS", "Box": "Property Management", "cum_net": 80.0,
                 },
             ]
         )
     return pd.DataFrame(rows)
 
 
-def _diagnostic(cash: pd.DataFrame, display: float):
+def _diagnostic(box_motor: pd.DataFrame, display: float):
     return professional._build_derived_cell(
         table_id="monthly_tables_diagnostic_box_level_matrix",
         row=pd.Series(
@@ -174,26 +159,31 @@ def _diagnostic(cash: pd.DataFrame, display: float):
         audit=pd.DataFrame(),
         stmt=pd.DataFrame(),
         annual=pd.DataFrame(),
-        cash_close=cash,
+        box_motor=box_motor,
         debt_activity=pd.DataFrame(),
         debt_position=pd.DataFrame(),
         tolerance=1e-6,
     )
 
 
-def test_diagnostic_uses_only_inferred_control_not_blank_party_validated_cash() -> None:
-    cash = _cash_rows()
-    governed = _diagnostic(cash, 20.0)
+def test_diagnostic_uses_only_native_box_motor_cum_net() -> None:
+    governed = _diagnostic(_motor_rows(), 20.0)
     assert governed[0] == "ok"
     assert governed[1] == 20.0
-    assert governed[3] == "governed_inferred_box_control_period_delta"
-    assert governed[5]["validated_cash_fallback"] == "never"
+    assert governed[3] == "governed_box_motor_period_delta"
+    assert governed[4] == "box_balance_time_long.freq=M.csv"
 
 
 def test_diagnostic_missing_previous_is_unavailable_not_zero_baseline() -> None:
-    result = _diagnostic(_cash_rows(include_previous=False), 100.0)
+    result = _diagnostic(_motor_rows(include_previous=False), 100.0)
     assert result[0] == "unsupported"
-    assert "previous:unavailable:no_inferred_control_candidate" in result[5]["selection_reason"]
+    assert "previous:unavailable:no_box_motor_candidate" in result[5]["selection_reason"]
+
+
+def test_diagnostic_never_uses_cash_close_when_box_motor_is_missing() -> None:
+    result = _diagnostic(pd.DataFrame(), 100.0)
+    assert result[0] == "unsupported"
+    assert "current:unavailable:missing_source" in result[5]["selection_reason"]
 
 
 def test_full_orchestration_enriches_and_executes_modern_derived_rows(tmp_path: Path) -> None:

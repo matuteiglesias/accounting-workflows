@@ -34,7 +34,6 @@ def _derived(
         audit=_empty() if audit is None else audit,
         stmt=_empty(),
         annual=_empty(),
-        cash_close=_empty(),
         debt_activity=_empty(),
         debt_position=_empty(),
         tolerance=1e-6,
