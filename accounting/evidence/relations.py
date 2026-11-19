@@ -31,6 +31,21 @@ TRANSACTION_EVIDENCE_COLUMNS = (
     "relation",
     "status",
 )
+EVIDENCE_REKEY_FINGERPRINT_COLUMNS = (
+    "Date",
+    "amount_cents",
+    "Currency",
+    "payer",
+    "receiver",
+    "Flujo",
+    "Tipo",
+    "status",
+    "Box",
+    "source_file",
+    "Lugar",
+    "issuer",
+    "account_id",
+)
 
 SUPPORTED_MEDIA_TYPES = frozenset(
     {"application/pdf", "image/png", "image/jpeg"}
@@ -50,6 +65,120 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 class EvidenceContractError(ValueError):
     """Raised when an optional evidence artifact violates its contract."""
+
+
+def propose_evidence_rekeys(
+    prior_transactions: pd.DataFrame,
+    current_transactions: pd.DataFrame,
+    prior_relations: pd.DataFrame,
+) -> pd.DataFrame:
+    """Propose review-only evidence relation moves between transaction cohorts.
+
+    The cohorts are assumed to have already been scope-filtered. A proposal is
+    made only for a unique, non-empty stable ``transaction_id`` whose canonical
+    ``tx_id`` changed and whose complete authority fingerprint matches exactly.
+    Historical approved relation provenance is retained, while ``status`` is
+    always ``REVIEW_REQUIRED`` and is not loadable as an approved sidecar.
+    """
+
+    transaction_required = ("transaction_id", "tx_id", *EVIDENCE_REKEY_FINGERPRINT_COLUMNS)
+    _require_columns(
+        prior_transactions, transaction_required, name="prior_transactions"
+    )
+    _require_columns(
+        current_transactions, transaction_required, name="current_transactions"
+    )
+    _require_columns(prior_relations, TRANSACTION_EVIDENCE_COLUMNS, name="prior_relations")
+
+    def validated_cohort(df: pd.DataFrame, name: str) -> dict[str, tuple[str, tuple[object, ...]]]:
+        by_transaction: dict[str, tuple[str, tuple[object, ...]]] = {}
+        seen_tx_ids: dict[str, int] = {}
+        for row_number, (_, row) in enumerate(df.iterrows(), start=1):
+            transaction_id = _clean(
+                row["transaction_id"], field="transaction_id", row=row_number
+            )
+            tx_id = _clean(row["tx_id"], field="tx_id", row=row_number)
+            if tx_id in seen_tx_ids:
+                raise EvidenceContractError(
+                    f"{name} has duplicate tx_id at row {row_number}: {tx_id!r}"
+                )
+            seen_tx_ids[tx_id] = row_number
+            if transaction_id in by_transaction:
+                raise EvidenceContractError(
+                    f"{name} has duplicate transaction_id at row {row_number}: "
+                    f"{transaction_id!r}"
+                )
+            fingerprint: list[object] = []
+            for column in EVIDENCE_REKEY_FINGERPRINT_COLUMNS:
+                value = row[column]
+                if value is None or pd.isna(value):
+                    raise EvidenceContractError(
+                        f"{name} fingerprint column {column!r} must be non-null "
+                        f"at row {row_number}"
+                    )
+                fingerprint.append(value)
+            by_transaction[transaction_id] = (tx_id, tuple(fingerprint))
+        return by_transaction
+
+    prior = validated_cohort(prior_transactions, "prior_transactions")
+    current = validated_cohort(current_transactions, "current_transactions")
+
+    proposals: list[dict[str, object]] = []
+    seen_relations: set[tuple[str, str, str, str]] = set()
+    for row_number, (_, relation_row) in enumerate(prior_relations.iterrows(), start=1):
+        historical_tx_id = _clean(
+            relation_row["tx_id"], field="tx_id", row=row_number
+        )
+        evidence_id = _clean(
+            relation_row["evidence_id"], field="evidence_id", row=row_number
+        )
+        relation = _clean(relation_row["relation"], field="relation", row=row_number)
+        historical_status = _clean(
+            relation_row["status"], field="status", row=row_number
+        )
+        if historical_status not in SUPPORTED_STATUSES:
+            raise EvidenceContractError(
+                f"unsupported status at row {row_number}: {historical_status!r}"
+            )
+        if historical_status != "approved":
+            continue
+
+        for transaction_id, (prior_tx_id, prior_fingerprint) in prior.items():
+            if prior_tx_id != historical_tx_id or transaction_id not in current:
+                continue
+            current_tx_id, current_fingerprint = current[transaction_id]
+            if current_tx_id == prior_tx_id or prior_fingerprint != current_fingerprint:
+                continue
+            relation_key = (current_tx_id, evidence_id, relation, historical_status)
+            if relation_key in seen_relations:
+                continue
+            seen_relations.add(relation_key)
+            proposals.append(
+                {
+                    "transaction_id": transaction_id,
+                    "prior_tx_id": prior_tx_id,
+                    "current_tx_id": current_tx_id,
+                    "evidence_id": evidence_id,
+                    "relation": relation,
+                    "historical_status": historical_status,
+                    "status": "REVIEW_REQUIRED",
+                    "review_required": True,
+                }
+            )
+
+    columns = (
+        "transaction_id",
+        "prior_tx_id",
+        "current_tx_id",
+        "evidence_id",
+        "relation",
+        "historical_status",
+        "status",
+        "review_required",
+    )
+    return pd.DataFrame(proposals, columns=columns).sort_values(
+        by=list(columns[:6]), kind="mergesort", ignore_index=True
+    )
 
 
 def _require_columns(df: pd.DataFrame, required: tuple[str, ...], *, name: str) -> None:

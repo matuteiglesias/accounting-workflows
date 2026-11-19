@@ -9,6 +9,7 @@ import pytest
 from accounting.evidence.relations import (
     EvidenceContractError,
     TransactionEvidenceIndex,
+    propose_evidence_rekeys,
     prepare_evidence_html_frame,
 )
 from accounting.professional.drilldown import build_professional_flow_drilldowns
@@ -61,6 +62,149 @@ def _relations() -> pd.DataFrame:
             },
         ]
     )
+
+
+_REKEY_COLUMNS = (
+    "transaction_id",
+    "tx_id",
+    "Date",
+    "amount_cents",
+    "Currency",
+    "payer",
+    "receiver",
+    "Flujo",
+    "Tipo",
+    "status",
+    "Box",
+    "source_file",
+    "Lugar",
+    "issuer",
+    "account_id",
+)
+
+
+def _transaction(*, tx_id: str = "tx-old", transaction_id: str = "stable-1", **changes: object) -> dict:
+    row = {
+        "transaction_id": transaction_id,
+        "tx_id": tx_id,
+        "Date": "2026-01-15",
+        "amount_cents": 12500,
+        "Currency": "ARS",
+        "payer": "Alice",
+        "receiver": "Vendor",
+        "Flujo": "outflow",
+        "Tipo": "payment",
+        "status": "posted",
+        "Box": "Property Management",
+        "source_file": "synthetic.csv",
+        "Lugar": "Buenos Aires",
+        "issuer": "Bank A",
+        "account_id": "acct-1",
+    }
+    row.update(changes)
+    return row
+
+
+def _prior_relations(*rows: tuple[str, str, str, str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "tx_id": tx_id,
+                "evidence_id": evidence_id,
+                "relation": relation,
+                "status": status,
+            }
+            for tx_id, evidence_id, relation, status in rows
+        ],
+        columns=["tx_id", "evidence_id", "relation", "status"],
+    )
+
+
+def test_propose_evidence_rekey_requires_review_and_preserves_approved_provenance() -> None:
+    prior = pd.DataFrame([_transaction()])
+    current = pd.DataFrame([_transaction(tx_id="tx-new")])
+    proposals = propose_evidence_rekeys(
+        prior, current, _prior_relations(("tx-old", "ev-1", "payment_proof", "approved"))
+    )
+
+    assert len(proposals) == 1
+    assert proposals.iloc[0].to_dict() == {
+        "transaction_id": "stable-1",
+        "prior_tx_id": "tx-old",
+        "current_tx_id": "tx-new",
+        "evidence_id": "ev-1",
+        "relation": "payment_proof",
+        "historical_status": "approved",
+        "status": "REVIEW_REQUIRED",
+        "review_required": True,
+    }
+
+
+def test_propose_evidence_rekeys_fail_closed_for_identity_or_fingerprint_changes() -> None:
+    prior = pd.DataFrame([_transaction()])
+    assert propose_evidence_rekeys(
+        prior, pd.DataFrame([_transaction()]), _prior_relations(("tx-old", "ev", "other_support", "approved"))
+    ).empty
+    for field, value in {
+        "Box": "Other Box",
+        "payer": "Bob",
+        "amount_cents": 12501,
+        "account_id": "acct-2",
+        "issuer": "Bank B",
+        "Date": "2026-01-16",
+    }.items():
+        assert propose_evidence_rekeys(
+            prior,
+            pd.DataFrame([_transaction(tx_id="tx-new", **{field: value})]),
+            _prior_relations(("tx-old", "ev", "payment_proof", "approved")),
+        ).empty, field
+
+
+def test_propose_evidence_rekeys_is_fail_closed_for_bad_cohort_shape_and_identifiers() -> None:
+    prior = pd.DataFrame([_transaction()])
+    current = pd.DataFrame([_transaction(tx_id="tx-new")])
+    relations = _prior_relations(("tx-old", "ev", "payment_proof", "approved"))
+    with pytest.raises(EvidenceContractError, match="missing required columns"):
+        propose_evidence_rekeys(prior.drop(columns=["issuer"]), current, relations)
+    with pytest.raises(EvidenceContractError, match="duplicate transaction_id"):
+        propose_evidence_rekeys(pd.DataFrame([_transaction(), _transaction(tx_id="tx-2")]), current, relations)
+    with pytest.raises(EvidenceContractError, match="duplicate tx_id"):
+        propose_evidence_rekeys(prior, pd.DataFrame([_transaction(tx_id="tx-new"), _transaction(transaction_id="stable-2", tx_id="tx-new")]), relations)
+    with pytest.raises(EvidenceContractError, match="transaction_id must be non-empty"):
+        propose_evidence_rekeys(pd.DataFrame([_transaction(transaction_id=" ")]), current, relations)
+    with pytest.raises(EvidenceContractError, match="fingerprint column 'issuer'"):
+        propose_evidence_rekeys(prior, pd.DataFrame([_transaction(tx_id="tx-new", issuer=None)]), relations)
+
+
+def test_propose_evidence_rekeys_is_idempotent_immutable_and_deterministic() -> None:
+    prior = pd.DataFrame([_transaction()])
+    current = pd.DataFrame([_transaction(tx_id="tx-new")])
+    relations = _prior_relations(
+        ("tx-old", "ev-z", "transfer_proof", "approved"),
+        ("tx-old", "ev-a", "payment_proof", "approved"),
+        ("tx-old", "ev-a", "payment_proof", "approved"),
+        ("tx-old", "ev-rejected", "payment_proof", "rejected"),
+    )
+    prior_before, current_before, relations_before = prior.copy(), current.copy(), relations.copy()
+    first = propose_evidence_rekeys(prior, current, relations)
+    second = propose_evidence_rekeys(prior, current, relations)
+
+    pd.testing.assert_frame_equal(first, second)
+    assert first["evidence_id"].tolist() == ["ev-a", "ev-z"]
+    assert first["historical_status"].tolist() == ["approved", "approved"]
+    assert not first["evidence_id"].eq("ev-rejected").any()
+    pd.testing.assert_frame_equal(prior, prior_before)
+    pd.testing.assert_frame_equal(current, current_before)
+    pd.testing.assert_frame_equal(relations, relations_before)
+
+
+def test_propose_evidence_rekeys_only_intersecting_current_cohort() -> None:
+    prior = pd.DataFrame([_transaction()])
+    current = pd.DataFrame([_transaction(transaction_id="other", tx_id="tx-new")])
+    result = propose_evidence_rekeys(
+        prior, current, _prior_relations(("tx-old", "ev", "payment_proof", "approved"))
+    )
+    assert result.empty
 
 
 def test_transaction_evidence_is_optional_and_supports_pdf_and_image() -> None:
