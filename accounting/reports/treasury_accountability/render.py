@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from accounting.reports.treasury_accountability.time_series_inputs import cash_inout_chart
+from accounting.reports.time_series import TIMESERIES_CSS
 from accounting.reports.treasury_accountability.spec import (
     ALWAYS_SHOW,
     BOX_ORDER,
@@ -301,7 +303,7 @@ def _status_summary(group: pd.DataFrame) -> tuple[bool, float, int, int]:
     return bool(reconciled), float(max_gap or 0.0), reviews
 
 
-def _series_html(group: pd.DataFrame, *, projection_start_period: str | None = None) -> str:
+def _series_html(group: pd.DataFrame, *, projection_start_period: str | None = None, cash_chart: str = "") -> str:
     box = str(group["Box"].iloc[0])
     currency = str(group["Currency"].iloc[0])
     slug = box.lower().replace(" ", "-") + "-" + currency.lower()
@@ -327,6 +329,7 @@ def _series_html(group: pd.DataFrame, *, projection_start_period: str | None = N
         <span class="status-pill">Review-required: {reviews}</span>
         <span class="status-pill">Moneda: {_h(currency)}</span>
       </div>
+      {cash_chart}
       <div class="chart-card">
         <div class="chart-title">Control acumulado y flujo neto mensual · {_h(currency)}</div>
         <div class="chart-subtitle">{"Evolución observada hasta el cierre anterior; desde el mes en curso refleja transacciones pagadas y planeadas vigentes." if projected else "La línea es el control acumulado de origen cero; las barras muestran el movimiento neto que explica cada cambio."}</div>
@@ -687,13 +690,29 @@ def render_report(
 
     sections = []
     toc = []
+    inout_chart_traces = []
+    chart_cutoff = None
+    if not annual_metrics.empty and "as_of_date" in annual_metrics.columns:
+        cutoff_values = sorted(set(annual_metrics["as_of_date"].dropna().astype(str)))
+        if len(cutoff_values) == 1:
+            chart_cutoff = cutoff_values[0]
     for box in BOX_ORDER:
         series = []
         for currency in CURRENCY_ORDER:
             key = (box, currency)
             if key not in completed:
                 continue
-            series.append(_series_html(completed[key], projection_start_period=projection_start_period))
+            ts04_html = ""
+            if not projected and chart_cutoff:
+                ts04_html, ts04_trace = cash_inout_chart(
+                    completed[key], as_of_date=chart_cutoff
+                )
+                if ts04_html:
+                    inout_chart_traces.append(ts04_trace)
+            series.append(_series_html(
+                completed[key], projection_start_period=projection_start_period,
+                cash_chart=ts04_html,
+            ))
             slug = box.lower().replace(" ", "-") + "-" + currency.lower()
             toc.append((f"{box} · {currency}", f"#{slug}"))
         if series:
@@ -705,7 +724,7 @@ def render_report(
         f'<div class="qa-item"><strong>{_h(row["check"])} · {_h(str(row["status"]).upper())}</strong><span>{_h(row["detail"])}</span></div>'
         for _, row in validation.iterrows()
     )
-    css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
+    css = Path(__file__).with_name("report.css").read_text(encoding="utf-8") + TIMESERIES_CSS
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
       <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">{"Histórico registrado y proyección de pagos/cobros vigentes, por Box y moneda. Las filas prospectivas aparecen en gris; no son movimientos realizados." if projected else "Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre."}</div><div class="meta-row"><span>{"Último cierre observado: " + _h(observed_close) + "; evaluación: " + _h(projection_as_of_date) + "; horizonte proyectado: " + _h(projection_through_date) if projected else "Corte contable: " + _h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el control acumulado de origen cero en el motor del Box. {"Los meses grises son proyecciones bajo el supuesto de cumplimiento de planes, no evidencia física de pagos. La conciliación prueba solo consistencia de la simulación." if projected else "La reconciliación comprueba la aritmética del registro."} No constituyen saldos bancarios ni una afirmación sobre efectivo de terceros. ARS y USD se mantienen siempre separados.</div></header>
       {_cycle_html(cycles)}
@@ -741,12 +760,17 @@ def render_report(
             ),
         })
     pd.DataFrame(summary_rows).to_csv(summary_path, index=False)
+    outputs = {"html": html_path, "validation": validation_path, "summary": summary_path}
+    if inout_chart_traces:
+        trace_path = out_dir / "time_series_trace.csv"
+        pd.concat(inout_chart_traces, ignore_index=True).to_csv(trace_path, index=False)
+        outputs["time_series_trace"] = trace_path
 
     if not failures.empty:
         raise ValueError(
             f"treasury report validation failed with {len(failures)} hard failure(s); inspect report_validation.csv"
         )
-    return {"html": html_path, "validation": validation_path, "summary": summary_path}
+    return outputs
 
 
 def main() -> None:

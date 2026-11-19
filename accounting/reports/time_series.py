@@ -32,6 +32,7 @@ class TimeSeriesSpec:
     subtitle: str = ""
     note: str = ""
     max_points: int = 60
+    period_domain: tuple[str, ...] = ()  # visible missing periods, never zero-filled
 
     def __post_init__(self) -> None:
         if self.frequency not in ("M", "Y"):
@@ -80,8 +81,8 @@ def _prepare(spec: TimeSeriesSpec, points: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("duplicate time series point at period x series")
     if set(rows["unit"].astype(str)) != {spec.unit} or set(rows["scope"].astype(str)) != {spec.scope}:
         raise ValueError("time series mixes unit or scope")
-    if not rows["phase"].isin(("observed", "projected")).all():
-        raise ValueError("time series phase must be observed or projected")
+    if not rows["phase"].isin(("observed", "current", "projected")).all():
+        raise ValueError("time series phase must be observed, current or projected")
     if rows["source_table"].isna().any() or rows["source_table"].astype(str).str.strip().eq("").any():
         raise ValueError("missing governed source table")
     rows["value"] = pd.to_numeric(rows["value"], errors="coerce")
@@ -89,7 +90,12 @@ def _prepare(spec: TimeSeriesSpec, points: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("time series has invalid/nonfinite value; missing is not zero")
     if spec.mark in ("stacked_bars", "bars") and rows["value"].lt(0).any():
         raise ValueError("bar series must be nonnegative; use a line for signed cash flow")
-    periods = sorted(rows["period"].astype(str).unique())
+    present_periods = sorted(rows["period"].astype(str).unique())
+    periods = list(spec.period_domain) if spec.period_domain else present_periods
+    if periods != sorted(set(periods)) or any(not _period_valid(str(p), spec.frequency) for p in periods):
+        raise ValueError("period domain must be unique, sorted and of correct frequency")
+    if not set(present_periods).issubset(periods):
+        raise ValueError("chart values appear outside the declared period domain")
     if len(periods) > spec.max_points:
         raise ValueError("too many periods for a single panel")
     if len(periods) < 2:
@@ -111,7 +117,7 @@ def render_timeseries_svg(
     if width < 400 or height < 190:
         raise ValueError("chart dimensions too small for legible labels")
     rows = _prepare(spec, points)
-    periods = sorted(rows["period"].astype(str).unique())
+    periods = list(spec.period_domain) if spec.period_domain else sorted(rows["period"].astype(str).unique())
     count = len(periods)
     xmin, xmax = 92.0, float(width - 34)
     ymin, ymax = 28.0, float(height - 47)
@@ -122,7 +128,7 @@ def render_timeseries_svg(
     }
     vals = [float(v) for v in rows["value"]]
     if spec.mark == "stacked_bars":
-        ylim = max(sum(lookup[(p, s)][0] for s in spec.series_ids) for p in periods)
+        ylim = max(sum(lookup[(p, s)][0] for s in spec.series_ids) for p in periods if all((p, s) in lookup for s in spec.series_ids))
         bottom = 0.0
     else:
         ylim = max(vals + [0.0])
@@ -197,7 +203,7 @@ def render_timeseries_svg(
                 svg.append(
                     f'<rect x="{xx:.2f}" y="{min(base_y, bar_y):.2f}" '
                     f'width="{slot_width:.2f}" height="{max(abs(base_y - bar_y), .6):.2f}" '
-                    f'fill="{PALETTE[index]}" opacity="{.42 if phase == "projected" else .94}">'
+                    f'fill="{PALETTE[index]}" opacity="{.42 if phase == "projected" else .72 if phase == "current" else .94}">'
                     f'<title>{escape(series_id)} · {escape(period)} · {_compact(value, spec.unit)}</title></rect>'
                 )
     else:
@@ -221,7 +227,7 @@ def render_timeseries_svg(
                 svg.append(
                     f'<circle cx="{x(i):.2f}" cy="{y(value):.2f}" r="{4.3 if spec.mark == "dots" else 3.7}" '
                     f'fill="{PALETTE[index]}" stroke="white" stroke-width="1.4" '
-                    f'opacity="{.52 if phase == "projected" else 1.0}">'
+                    f'opacity="{.52 if phase == "projected" else .72 if phase == "current" else 1.0}">'
                     f'<title>{escape(series_id)} · {escape(period)} · {_compact(value, spec.unit)}</title></circle>'
                 )
     svg.append("</svg>")
@@ -236,7 +242,7 @@ def _append_line(svg: list[str], segments: list[tuple[str, float, float, str]], 
     for i in range(1, len(segments)):
         _, x0, y0, _ = segments[i - 1]
         _, x1, y1, phase = segments[i]
-        dash = ' stroke-dasharray="5 5"' if phase == "projected" else ""
+        dash = ' stroke-dasharray="5 5"' if phase in ("projected", "current") else ""
         svg.append(
             f'<path d="M{x0:.2f},{y0:.2f} L{x1:.2f},{y1:.2f}" '
             f'fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round"{dash}/>'

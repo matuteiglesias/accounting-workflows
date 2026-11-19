@@ -343,7 +343,7 @@ def build_report_bundle(
 
     annual_manifest = build_report_manifest(
         report_id="annual_management",
-        renderer_version="annual_management.v2",
+        renderer_version="annual_management.v3",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,
@@ -362,7 +362,7 @@ def build_report_bundle(
 
     treasury_manifest = build_report_manifest(
         report_id="treasury_accountability",
-        renderer_version="treasury_accountability.v1",
+        renderer_version="treasury_accountability.v3",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,
@@ -433,7 +433,7 @@ def build_report_bundle(
         ]
         manifest = build_report_manifest(
             report_id=specialized_spec.report_id,
-            renderer_version="specialized.v2",
+            renderer_version=("specialized.v3" if specialized_spec.report_id == "rent_monthly_evolution" else "specialized.v2"),
             source_run_id=source_run_id,
             scope_tag=scope_tag,
             as_of_date=as_of_date,

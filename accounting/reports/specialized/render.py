@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 
 from accounting.reports.charts import PieSpec, render_pie_svg
+from accounting.reports.time_series import TIMESERIES_CSS
+from accounting.reports.specialized.time_series_inputs import monthly_rent_chart
 from accounting.reports.pdf import render_pdf
 from accounting.reports.specialized.spec import REPORT_SPECS, SpecializedReportSpec
 from accounting.reports.specialized.views import SpecializedViewResult, build_specialized_view
@@ -222,8 +224,9 @@ def render_specialized(
         raise ValueError(f"specialized report has no governed rows for selected period: {report_id}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
+    css = Path(__file__).with_name("report.css").read_text(encoding="utf-8") + TIMESERIES_CSS
     traces = []
+    chart_traces = []
     currency_sections = []
 
     currencies = sorted(selected["Currency"].astype(str).dropna().unique())
@@ -235,6 +238,13 @@ def render_specialized(
         if current.empty:
             continue
         blocks = []
+        if report_id == "rent_monthly_evolution":
+            chart_html, chart_trace = monthly_rent_chart(
+                current, currency=currency, as_of_date=as_of_date
+            )
+            if chart_html:
+                blocks.append(chart_html)
+                chart_traces.append(chart_trace)
         if "summary" in spec.section_plan:
             blocks.append(_summary_html(current, currency, result.dimension))
         if "pie" in spec.section_plan:
@@ -300,6 +310,10 @@ def render_specialized(
     html_path = out_dir / "report.html"
     html_path.write_text(body, encoding="utf-8")
     outputs = {"html": html_path, "trace": trace_path, "validation": validation_path}
+    if chart_traces:
+        chart_trace_path = out_dir / "time_series_trace.csv"
+        pd.concat(chart_traces, ignore_index=True).to_csv(chart_trace_path, index=False)
+        outputs["time_series_trace"] = chart_trace_path
     if require_pdf:
         outputs["pdf"] = render_pdf(html_path, out_dir / "report.pdf", browser_bin=browser_bin)
     return outputs

@@ -53,15 +53,18 @@ def _fixture(tmp_path):
         {"period": "2026-11", "Box": "Family Business", "Currency": "ARS",
          "rent_in": 100, "net_cash_flow": 100, "funding_cash_in": 0,
          "taxes_out": 0, "services_out": 0, "maintenance_out": 0, "legal_out": 0,
-         "personal_draws_out": 0, "dividends_out": 0},
+         "personal_draws_out": 0, "dividends_out": 0,
+         "total_cash_in": 100, "total_cash_out": 0, "closing_control": 100},
         {"period": "2026-12", "Box": "Family Business", "Currency": "ARS",
          "rent_in": 2000, "net_cash_flow": 1750, "funding_cash_in": 0,
          "taxes_out": 250, "services_out": 0, "maintenance_out": 0, "legal_out": 0,
-         "personal_draws_out": 0, "dividends_out": 0},
+         "personal_draws_out": 0, "dividends_out": 0,
+         "total_cash_in": 2000, "total_cash_out": 250, "closing_control": 1850},
         {"period": "2027-01", "Box": "Family Business", "Currency": "ARS",
          "rent_in": 1700, "net_cash_flow": 1670, "funding_cash_in": 0,
          "taxes_out": 30, "services_out": 0, "maintenance_out": 0, "legal_out": 0,
-         "personal_draws_out": 0, "dividends_out": 0},
+         "personal_draws_out": 0, "dividends_out": 0,
+         "total_cash_in": 1700, "total_cash_out": 30, "closing_control": 3520},
     ]
     for period, cost in [("2026-12", 600), ("2027-01", 50), ("2027-02", 300)]:
         data.append({

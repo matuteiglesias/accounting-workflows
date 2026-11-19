@@ -10,6 +10,7 @@ import pandas as pd
 
 from accounting.reports.time_series import TIMESERIES_CSS
 from accounting.reports.annual_management.time_series_inputs import build_operating_chart_pair
+from accounting.reports.annual_management.distribution_time_series import operating_vs_distributions_chart
 from accounting.reports.annual_management.spec import (
     DEBT_RELATIONS,
     FUNDING_ACTORS,
@@ -373,12 +374,14 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + '<p class="caveat">Dividendos se muestran como categoría separada y no se restan una segunda vez del resultado post-retiros.</p></div>'
         + '<div class="span-5">'
         + _table("Puente de aplicación · USD", periods, model["application"]["bridge_usd"], compact=True)
-        + '<div class="panel"><h2>Ratios de aplicación</h2><div class="chart-slot"></div></div></div>'
+        + '</div>'
         + '<div class="span-7">'
         + _table("Funding por actor / origen", periods, model["application"]["funding"], compact=True)
         + '</div><div class="span-5">'
         + _table("Distribuciones ARS", periods, model["application"]["distributions_ars"], compact=True)
         + _table("Distribuciones USD", periods, model["application"]["distributions_usd"], compact=True)
+        + '</div><div class="span-12">'
+        + model["charts"].get("distributions_html", "")
         + '</div></div>'
         + _page_footer(meta, 3)
     )
@@ -828,6 +831,12 @@ def render_report(
             monthly, as_of_date=store.as_of_date()
         )
         model["charts"] = {"costs_html": cost_html, "cost_ratio_html": share_html}
+        dist_html, dist_trace = operating_vs_distributions_chart(
+            monthly, as_of_date=store.as_of_date()
+        )
+        if dist_html:
+            model["charts"]["distributions_html"] = dist_html
+            chart_trace = pd.concat((chart_trace, dist_trace), ignore_index=True)
     validations = validate_report(store)
     cells = pd.DataFrame(store.rendered).drop_duplicates()
 

@@ -101,6 +101,7 @@ def build_policy_inputs(
         "period", "Box", "Currency", "rent_in", "net_cash_flow", "funding_cash_in",
         "taxes_out", "services_out", "maintenance_out", "legal_out",
         "personal_draws_out", "dividends_out",
+        "total_cash_in", "total_cash_out", "closing_control",
     })
     detail = _load_csv(run_root / "box_treasury_transaction_detail.csv", {
         "tx_id", "Date", "period", "Box", "Currency", "cash_category", "movement_basis",
@@ -149,6 +150,7 @@ def build_policy_inputs(
     numeric = [
         "rent_in", "net_cash_flow", "funding_cash_in", "taxes_out", "services_out",
         "maintenance_out", "legal_out", "personal_draws_out", "dividends_out",
+        "total_cash_in", "total_cash_out", "closing_control",
     ]
     for col in numeric:
         treasury[col] = pd.to_numeric(treasury[col], errors="raise")
@@ -178,7 +180,10 @@ def build_policy_inputs(
                     else "partial_month" if period == as_of_month else "projected"),
                 "materialized_month": bool(existing),
                 "rent_in": _round(m["rent_in"]),
-                "net_cash_flow": _round(m["net_cash_flow"]),
+                "total_cash_in": _round(m["total_cash_in"]) if existing else None,
+                "total_cash_out": _round(m["total_cash_out"]) if existing else None,
+                "closing_control": _round(m["closing_control"]) if existing else None,
+                "net_cash_flow": _round(m["net_cash_flow"]) if existing else None,
                 "pre_distribution_cash_net": _round(pre_distribution_net),
                 "pre_distribution_operating_surplus": _round(operating_surplus),
                 "nonrent_funding_cash_in": _round(m["funding_cash_in"]),
