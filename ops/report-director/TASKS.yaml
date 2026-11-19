@@ -1,0 +1,104 @@
+schema: report_director.task_queue.v1
+status: READY_FOR_FIRST_SESSION
+autonomous_scheduler_enabled: false
+codex_dispatch_enabled: false
+source_of_truth: MISSION.md
+scope:
+  primary_repo: accounting-workflows
+  secondary_repo: accounting-viewer
+  input_policy: exact_run_or_approved_fixture
+  privacy: repo_public_private_context_ignored
+limits:
+  current_artifact_reviews: 1
+  codex_implementation_tasks: 1
+  open_prs_awaiting_decision: 1
+  iterations_without_material_gain_before_idle: 3
+priority_rule: "Highest consequence to stakeholder understanding per smallest verifiable intervention; revisit after each result."
+tasks:
+  - id: RD-001
+    status: READY
+    title: "Inspeccionar un informe real y emitir una crítica verificable"
+    mode: DIRECT_ANALYSIS_FIRST
+    trigger: "Arranque de la misión y un HTML/PDF existente con fuente y corte identificables."
+    target: "Elegir un informe de alta relevancia, preferentemente Treasury Accountability o TS09, sin duplicar producción."
+    decision_question: "¿Qué conclusión razonable podría extraer un stakeholder, y qué inferencia incorrecta sugiere?"
+    input_requirements:
+      - "Reporte HTML/PDF de una corrida exacta o preview identificado."
+      - "Fuente/trace y manifest cuando existan."
+      - "Audience definida y límites de confidencialidad."
+    deliverable: "Tarjeta de crítica: intended_claim, observed_chart, source_check, audience_misread, impact, smallest_fix, test_plan, recommendation."
+    acceptance:
+      - "La interpretación se comprueba contra al menos una tabla/trace/source."
+      - "Se examina la representación realmente renderizada, no sólo el código."
+      - "Hay una recomendación acotada, o NO_OP si no se encuentra una falla relevante."
+    blocked_by: []
+  - id: RD-002
+    status: HOLD
+    title: "Corregir la primera falla de comunicación confirmada"
+    mode: CHANGE_ONLY_IF_JUSTIFIED
+    trigger: "RD-001 descubre una lectura errónea, contradicción u obstáculo material."
+    target: "Título/leyenda/copy/orden/tablas existentes o, sólo si hace falta, código del renderer."
+    deliverable: "Antes/después y un diff mínimo; test de regresión; preview privado; lista de impactos."
+    acceptance:
+      - "Los inputs y la semántica contable permanecen idénticos o se escala la decisión."
+      - "El PDF y HTML muestran el cambio correcto sin recortes."
+      - "El lector puede responder la pregunta sin asumir banco, derecho o dato inexistente."
+    blocked_by: ["RD-001: falla específica y owner/branch claramente identificado"]
+  - id: RD-003
+    status: HOLD
+    title: "Auditar coherencia entre informes de una misma decisión"
+    mode: DIRECT_ANALYSIS
+    trigger: "Dos artefactos usados juntos presentan diferencias de corte, concepto o audiencia."
+    target: "Por ejemplo, Treasury vs TS09 vs distribución; separando hechos observados de escenarios."
+    deliverable: "Mapa de afirmaciones compatibles, incompatibilidades reales y cambio mínimo recomendado."
+    acceptance:
+      - "Comparabilidad por Box, currency, grain, run y as-of explicitada."
+      - "Diferencias semánticas correctas permanecen, no se fuerza igualdad artificial."
+    blocked_by: ["Caso y dos artefactos concretos"]
+  - id: RD-004
+    status: HOLD
+    title: "Probar el recorrido del Accounting Viewer"
+    mode: USER_JOURNEY_REVIEW
+    trigger: "Un lector no encuentra el informe o interpreta el índice como evidencia que no contiene."
+    target: "Revisar Panorama → Administración → Rendición → Decisiones usando el catálogo aceptado."
+    deliverable: "Prueba del recorrido y, si hay fallo probado, ajuste editorial acotado sin cómputo nuevo."
+    acceptance:
+      - "Navegación depende del catálogo y no inventa reportes publicados."
+      - "Distinción entre artefactos privados y públicos; navegación sin datos crudos."
+      - "No pisa ediciones en curso del Viewer."
+    blocked_by: ["Aprobación de intervenir sobre un worktree Viewer posiblemente modificado"]
+  - id: RD-005
+    status: HOLD
+    title: "Mejorar controles reproducibles de reportes"
+    mode: CODEX_BUILDER_ONLY_AFTER_BUG
+    trigger: "Una falla recurrente de QA se reproduce con fixture."
+    target: "Sólo el test o renderer que habilita la corrección necesaria."
+    deliverable: "PR pequeño + fixture que falla antes y pasa después."
+    acceptance:
+      - "No crea un engine alternativo ni un pipeline de publicación."
+      - "Conserva manifiestos, source hashes, missing-vs-zero y cifras."
+      - "Tests y visual post-render aprobados."
+    blocked_by: ["Falla observada y scope de modificación autorizado"]
+  - id: RD-006
+    status: HOLD
+    title: "Mejorar la rendición visual de comprobantes"
+    mode: DIRECT_REVIEW_FIRST
+    trigger: "Nueva biblioteca de comprobantes aprobada o feedback documental del Evidence Leader."
+    target: "Entendibilidad, navegación, estado documental y links de pm_payment_evidence."
+    deliverable: "Crítica y ajuste de lectura sin aprobar o divulgar documentos."
+    acceptance:
+      - "Corte de evidencia separado de corte contable y visible."
+      - "Ausencia de proof no se presenta como impago."
+      - "No se publican adjuntos privados por inferencia."
+    blocked_by: ["Snapshot de comprobantes seleccionado y política de acceso validada"]
+  - id: RD-007
+    status: EVENT_TRIGGERED
+    title: "Mantenimiento y regresión"
+    mode: REPAIR_OR_NO_OP
+    trigger: "Nueva corrida, cambio en narrativa, report regression, o feedback real."
+    target: "Detectar diferencia material respecto de un artefacto aprobado, no producir churn cosmético."
+    deliverable: "Una reparación acotada o NO_OP con explicación."
+    acceptance:
+      - "Existe un fallo material reproducible, no sólo preferencia estética."
+      - "Sin cambios a ledger/publicación, salvo autorización separada."
+    blocked_by: []
