@@ -45,7 +45,7 @@ def test_professional_drilldown_is_reunified_without_wave_facade() -> None:
     assert "execute_annual_funding_support" in text
     assert "execute_monthly_debt_position" in text
     assert "execute_monthly_debt_activity" in text
-    assert "execute_monthly_cash_position" in text
+    assert "execute_monthly_cash_position" not in text
     assert "resolve_fx_drilldown" in text
 
     module = importlib.import_module("accounting.professional.drilldown")
