@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from accounting.debt.position_authority import (
     select_debt_position,
@@ -59,3 +60,44 @@ def test_selector_preserves_native_currency_scope_and_never_aggregates() -> None
     selected = selected_debt_position_rows(usd, selection)
     assert set(selected["Currency"]) == {"USD"}
     assert selected.iloc[0]["open_amount"] == 850.0
+
+
+@pytest.mark.parametrize(
+    "observation,requested,annual,available,selected_period,valid_count,reason",
+    [
+        ("2025-04-30", "2025-04", False, True, "2025-04", 1, "latest valid as_of_date selected"),
+        ("2025-04-30", "2025", True, True, "2025-04", 1, "latest valid as_of_date selected"),
+        ("invalid-date", "2025-04", False, False, "2025-04", 0, "no valid as_of_date in selected monthly debt-position candidates"),
+        ("invalid-date", "2025", True, False, "2025-04", 0, "latest debt-position period has no valid as_of_date; prior periods are not substituted"),
+        ("2025-04-30", "2025-03", False, False, "", 0, "no debt-position candidates in requested period scope"),
+        ("2025-04-30", "2024", True, False, "", 0, "no debt-position candidates in requested period scope"),
+        (pd.NA, "2025-04", False, False, "2025-04", 0, "no valid as_of_date in selected monthly debt-position candidates"),
+    ],
+)
+def test_single_snapshot_fast_path_preserves_governed_selection(
+    observation, requested, annual, available, selected_period, valid_count, reason
+):
+    frame = pd.DataFrame([{
+        "period": "2025-04", "as_of_date": observation,
+        "debtor": "PM", "creditor": "MI", "Currency": "USD", "open_total": 15,
+    }])
+    selection = select_debt_position(frame, period=requested, annual=annual)
+    assert selection.available is available
+    assert selection.selected_period == selected_period
+    assert selection.valid_as_of_rows == valid_count
+    assert selection.candidate_rows == (1 if selected_period else 0)
+    assert selection.reason == reason
+    selected = selected_debt_position_rows(frame, selection)
+    assert len(selected) == int(available)
+    if available:
+        assert selection.selected_positions == (0,)
+        assert selection.selected_as_of_date == "2025-04-30"
+        pd.testing.assert_frame_equal(selected, frame)
+
+
+def test_single_snapshot_with_missing_period_cannot_be_selected():
+    frame = pd.DataFrame([{"period": pd.NA, "as_of_date": "2025-04-30"}])
+    selection = select_debt_position(frame)
+    assert not selection.available
+    assert selection.reason == "no usable debt-position period"
+    assert selection.candidate_rows == 1

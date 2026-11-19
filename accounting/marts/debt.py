@@ -792,16 +792,24 @@ def build_monthly_debt_position(debt_dir: Path, write_dir: Path) -> Dict[str, Pa
                 .reset_index(name="n_open_items")
             )
 
+    # Item counts are already unique at this four-column grain. Index once
+    # instead of rescanning the complete counts frame for every month/pair.
+    # Keep the previous null-key behavior (Series.eq(null) never matched).
+    counts_lookup = {
+        (period, debtor, creditor, currency): int(n)
+        for period, debtor, creditor, currency, n in counts[
+            ["period", "debtor", "creditor", "Currency", "n_open_items"]
+        ].itertuples(index=False, name=None)
+        if all(pd.notna(value) for value in (period, debtor, creditor, currency))
+    }
     rows = []
     for _, row in unique.iterrows():
-        n_match = counts.loc[
-            counts["period"].eq(row["period"])
-            & counts["debtor"].eq(row["debtor"])
-            & counts["creditor"].eq(row["creditor"])
-            & counts["Currency"].eq(row["Currency"]),
-            "n_open_items",
-        ]
-        n_open_items = int(n_match.iloc[0]) if not n_match.empty else 0
+        count_key = (row["period"], row["debtor"], row["creditor"], row["Currency"])
+        n_open_items = (
+            counts_lookup.get(count_key, 0)
+            if all(pd.notna(value) for value in count_key)
+            else 0
+        )
         available = str(row.get("position_status", "available")) == "available"
         for component, amount_col in [
             ("principal", "open_principal"),

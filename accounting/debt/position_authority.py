@@ -82,6 +82,36 @@ def select_debt_position(
             (),
         )
 
+    # Common monthly-mart case: its grouping often produces one observation.
+    # Avoid constructing multiple short-lived pandas masks and DataFrames just
+    # to select that sole row. Keep exactly the governed period/date rules.
+    if len(rows) == 1:
+        raw_period = rows["period"].iloc[0]
+        observed_period = "" if pd.isna(raw_period) else str(raw_period)
+        requested = str(period).strip()
+        in_scope = (
+            observed_period.startswith(requested[:4]) if annual else observed_period == requested
+        ) if requested else True
+        if not in_scope:
+            return DebtPositionSelection(
+                False, "", "", "no debt-position candidates in requested period scope", 0, 0, ()
+            )
+        if not observed_period:
+            return DebtPositionSelection(
+                False, "", "", "no usable debt-position period", 1, 0, ()
+            )
+        parsed = pd.to_datetime(rows[as_of_field].iloc[0], errors="coerce")
+        if pd.isna(parsed):
+            reason = (
+                "latest debt-position period has no valid as_of_date; prior periods are not substituted"
+                if annual else "no valid as_of_date in selected monthly debt-position candidates"
+            )
+            return DebtPositionSelection(False, observed_period, "", reason, 1, 0, ())
+        return DebtPositionSelection(
+            True, observed_period, pd.Timestamp(parsed).date().isoformat(),
+            "latest valid as_of_date selected", 1, 1, (0,),
+        )
+
     scope = rows.copy()
     if period:
         scope = scope.loc[_period_mask(scope, period, annual=annual)].copy()
@@ -159,6 +189,10 @@ def selected_debt_position_rows(
 
     if rows is None or rows.empty or not selection.available:
         return rows.iloc[0:0].copy() if rows is not None else pd.DataFrame()
+    if len(rows) == 1 and selection.selected_positions == (0,):
+        raw_period = rows["period"].iloc[0]
+        if pd.notna(raw_period) and str(raw_period) == selection.selected_period:
+            return rows.copy()
     closing = rows.loc[
         rows["period"].fillna("").astype(str).eq(selection.selected_period)
     ].copy()
