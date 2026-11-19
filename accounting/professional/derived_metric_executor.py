@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from accounting.cash_authority import (
+from accounting.box_control import (
     inferred_control_schema_supported,
     select_inferred_box_control_period,
 )

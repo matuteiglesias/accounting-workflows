@@ -13,15 +13,21 @@ from typing import Final
 import pandas as pd
 
 from accounting.contracts.cash_position_control import (
-    InferredBoxControlSpec,
     ValidatedCashPositionSpec,
-    resolve_inferred_box_control_spec,
     resolve_validated_cash_position_spec,
+)
+from accounting.box_control import (
+    INFERRED_SPEC_ID,
+    _base_scope,
+    _partition_exclusions,
+    _text,
+    _truth,
+    inferred_control_schema_supported,
+    select_inferred_box_control_period,
 )
 
 
 VALIDATED_SPEC_ID: Final = "cash.position.validated"
-INFERRED_SPEC_ID: Final = "cash.control.inferred_box_motor"
 
 _VALIDATED_REQUIRED_COLUMNS: Final[set[str]] = {
     "period",
@@ -35,17 +41,6 @@ _VALIDATED_REQUIRED_COLUMNS: Final[set[str]] = {
     "validation_status",
     "validated_by",
     "source_type",
-    "as_of_date",
-}
-_INFERRED_REQUIRED_COLUMNS: Final[set[str]] = {
-    "period",
-    "Currency",
-    "Box",
-    "close_amount",
-    "position_type",
-    "source_type",
-    "cash_suitability",
-    "is_frontend_safe",
     "as_of_date",
 }
 
@@ -69,48 +64,8 @@ class CashSelection:
         return self.status == "available"
 
 
-def _text(series: pd.Series) -> pd.Series:
-    return series.fillna("").astype(str).str.strip()
-
-
-def _truth(series: pd.Series) -> pd.Series:
-    return _text(series).str.lower().isin({"true", "1", "yes", "y"})
-
-
-def _base_scope(
-    cash: pd.DataFrame,
-    *,
-    period: str,
-    currency: str,
-    box: str = "",
-) -> pd.DataFrame:
-    if cash is None or cash.empty:
-        return pd.DataFrame(columns=[] if cash is None else cash.columns)
-    if not {"period", "Currency", "Box"}.issubset(cash.columns):
-        return cash.iloc[0:0].copy()
-    mask = _text(cash["period"]).eq(str(period).strip())
-    mask &= _text(cash["Currency"]).eq(str(currency).strip())
-    if str(box).strip():
-        mask &= _text(cash["Box"]).eq(str(box).strip())
-    return cash.loc[mask].copy()
-
-
 def validated_cash_schema_supported(cash: pd.DataFrame) -> bool:
     return cash is not None and _VALIDATED_REQUIRED_COLUMNS.issubset(cash.columns)
-
-
-def inferred_control_schema_supported(cash: pd.DataFrame) -> bool:
-    return cash is not None and _INFERRED_REQUIRED_COLUMNS.issubset(cash.columns)
-
-
-def _partition_exclusions(scope: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    if scope.empty or "position_type" not in scope.columns:
-        return pd.DataFrame(), pd.DataFrame(), scope.copy()
-    position = _text(scope["position_type"])
-    inferred = scope.loc[position.eq("inferred_box_motor")].copy()
-    internal = scope.loc[position.eq("internal_balance")].copy()
-    other = scope.loc[~position.isin({"inferred_box_motor", "internal_balance", "cash_close"})].copy()
-    return inferred, internal, other
 
 
 def _validated_eligibility_mask(scope: pd.DataFrame, spec: ValidatedCashPositionSpec) -> pd.Series:
@@ -271,64 +226,4 @@ def select_validated_cash_year(
         period=candidate_periods[-1],
         currency=currency,
         box=box,
-    )
-
-
-def select_inferred_box_control_period(
-    cash: pd.DataFrame,
-    *,
-    period: str,
-    currency: str,
-    box: str,
-) -> CashSelection:
-    """Select the governed inferred box-motor control snapshot.
-
-    This primitive is intentionally separate from validated cash and can never
-    be used as a cash-headline fallback.
-    """
-
-    spec = resolve_inferred_box_control_spec(INFERRED_SPEC_ID)
-    if spec is None:  # pragma: no cover
-        raise RuntimeError(f"Missing inferred control contract: {INFERRED_SPEC_ID}")
-    period, currency, box = str(period).strip(), str(currency).strip(), str(box).strip()
-    empty = pd.DataFrame(columns=[] if cash is None else cash.columns)
-    if not currency or not box:
-        return CashSelection("unavailable", "missing_currency_or_box", None, period, currency, box, empty, empty, empty, empty, empty)
-    if cash is None or cash.empty:
-        return CashSelection("unavailable", "missing_source", None, period, currency, box, empty, empty, empty, empty, empty)
-    if not inferred_control_schema_supported(cash):
-        return CashSelection("unsupported", "legacy_or_incomplete_cash_schema", None, period, currency, box, empty, empty, empty, empty, cash.copy())
-
-    scope = _base_scope(cash, period=period, currency=currency, box=box)
-    inferred, internal, other = _partition_exclusions(scope)
-    mask = _text(scope["position_type"]).eq(spec.position_type)
-    mask &= _text(scope["source_type"]).eq(spec.source_type)
-    mask &= _text(scope["cash_suitability"]).eq(spec.cash_suitability)
-    mask &= ~_truth(scope["is_frontend_safe"])
-    candidates = scope.loc[mask].copy()
-    if candidates.empty:
-        return CashSelection("unavailable", "no_inferred_control_candidate", None, period, currency, box, empty, candidates, inferred, internal, other)
-    candidates["__as_of_date"] = pd.to_datetime(candidates[spec.as_of_field], errors="coerce")
-    valid = candidates.loc[candidates["__as_of_date"].notna()].copy()
-    if valid.empty:
-        return CashSelection("unavailable", "no_valid_inferred_as_of", None, period, currency, box, empty, candidates.drop(columns=["__as_of_date"], errors="ignore"), inferred, internal, other)
-    latest_as_of = valid["__as_of_date"].max()
-    selected = valid.loc[valid["__as_of_date"].eq(latest_as_of)].copy()
-    if len(selected) != 1:
-        return CashSelection("unavailable", "duplicate_inferred_snapshot", None, period, currency, box, empty, candidates.drop(columns=["__as_of_date"], errors="ignore"), inferred, internal, other)
-    value = pd.to_numeric(selected.iloc[0].get(spec.value_ref), errors="coerce")
-    if pd.isna(value):
-        return CashSelection("unavailable", "selected_control_value_not_numeric", None, period, currency, box, empty, candidates.drop(columns=["__as_of_date"], errors="ignore"), inferred, internal, other)
-    return CashSelection(
-        "available",
-        "",
-        float(value),
-        period,
-        currency,
-        box,
-        selected.drop(columns=["__as_of_date"], errors="ignore"),
-        candidates.drop(columns=["__as_of_date"], errors="ignore"),
-        inferred,
-        internal,
-        other,
     )
