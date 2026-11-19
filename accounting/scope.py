@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 BOX_CODES = {
@@ -134,6 +136,9 @@ def assert_frame_within_scope(
 def box_scope_mask(df: pd.DataFrame, boxes: set[str]) -> pd.Series:
     """Return rows whose owning Box belongs to a materialized run's universe."""
     if "Box" not in df.columns:
+        # Only this uncommon legacy fallback needs pandas at runtime.
+        # Scope-tag parsing in Make must not import pandas just to print FBPM.
+        import pandas as pd
         # Legacy drilldown fixtures and historical extracts can predate the
         # Box dimension. They are already run-scoped and cannot be narrowed
         # further without silently dropping their entire evidence set.
