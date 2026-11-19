@@ -62,6 +62,9 @@ RUN_DEBT_DIR := $(OUT)/debt_resolution/$(RUN_ID)
 RUN_REPORTS_BASE := $(OUT)/reports
 RUN_REPORTS_DIR := $(RUN_REPORTS_BASE)/$(RUN_ID)
 REPORT_BROWSER_BIN ?=
+# Private evidence is strictly opt-in. Never emitted in public/reports/latest_*.
+VIEWER_REPO ?= $(ROOT)/../accounting-viewer
+PRIVATE_VIEWER_ROOT ?= $(OUT)/private_viewers/$(RUN_ID)
 
 DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
@@ -116,6 +119,8 @@ help:
 	@echo "  make release-check"
 	@echo "  make professional-drilldowns"
 	@echo "  make evidence-report RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE)"
+	@echo "  make private-evidence-viewer RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE; builds missing downstream reports)"
+	@echo "  make run-compute EVIDENCE_SNAPSHOT=<same-run-snapshot>  # optional private viewer after reports"
 	@echo "  make professional-linked-digest"
 	@echo ""
 	@echo "Key vars: OUT=out RUN_ID=<exact-run-id> BOXES='Family Business,Property Management' REPORT_BROWSER_BIN=<chromium>"
@@ -200,6 +205,32 @@ publish-reports:
 release-check:
 	@$(PY) scripts/check_release.py --public-root "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
 
+
+# ---------------------------------------------------------------------------
+# On-demand private evidence viewer: exact-run, never part of public latest.
+# Ordinary upstream reports are built only if the selected run lacks them.
+# A supplied EVIDENCE_SNAPSHOT to run-compute triggers this after run-reports.
+# ---------------------------------------------------------------------------
+
+.PHONY: private-evidence-viewer
+private-evidence-viewer:
+	@$(call require_var,EVIDENCE_SNAPSHOT)
+	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: missing exact-run canonical ledger $(RUN_ID)"; exit 2)
+	@test -s "$(EVIDENCE_SNAPSHOT)/manifest.json" || (echo "ERROR: missing evidence snapshot"; exit 2)
+	@test -f "$(VIEWER_REPO)/scripts/build_site.py" || (echo "ERROR: missing VIEWER_REPO=$(VIEWER_REPO)"; exit 2)
+	@$(PY) scripts/check_private_evidence_source.py --run-root "$(RUN_OUT)" --snapshot "$(EVIDENCE_SNAPSHOT)"
+	@if [ ! -s "$(RUN_REPORTS_DIR)/report_catalog.json" ]; then \
+		echo "[EVIDENCE] Missing ordinary reports for $(RUN_ID); building governed downstream stages, no ingest/publish"; \
+		$(MAKE) run-debt RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"; \
+		$(MAKE) run-metrics RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"; \
+		$(MAKE) run-reports RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)"; \
+	fi
+	@$(MAKE) evidence-report RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" \
+		EVIDENCE_SNAPSHOT="$(EVIDENCE_SNAPSHOT)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)" \
+		PRIVATE_REPORT_BUNDLE_ROOT="$(PRIVATE_REPORT_BUNDLE_ROOT)"
+	@$(MAKE) -C "$(VIEWER_REPO)" accept-guides \
+		REPORTS_ROOT="$(ROOT)/$(PRIVATE_REPORT_BUNDLE_ROOT)" DIST="$(ROOT)/$(PRIVATE_VIEWER_ROOT)"
+	@echo "[EVIDENCE] PRIVATE viewer ready: $(ROOT)/$(PRIVATE_VIEWER_ROOT)/index.html (S1/, L0/). NOT PUBLISHED."
 
 # ---------------------------------------------------------------------------
 # Fixture / smoke path
@@ -481,6 +512,10 @@ run-compute: run-canonical
 	@$(MAKE) run-debt RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) run-metrics RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)"
 	@$(MAKE) run-reports RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)"
+	@if [ -n "$(strip $(EVIDENCE_SNAPSHOT))" ]; then \
+		$(MAKE) private-evidence-viewer RUN_ID="$(RUN_ID)" OUT="$(OUT)" BOXES="$(BOXES)" \
+			EVIDENCE_SNAPSHOT="$(EVIDENCE_SNAPSHOT)" REPORT_BROWSER_BIN="$(REPORT_BROWSER_BIN)"; \
+	fi
 	@echo "[RUN][COMPUTE] completed exact run $(RUN_ID); not published"
 
 run-full: run-compute

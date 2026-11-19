@@ -69,6 +69,14 @@ def publish_report_bundle(
         raise ValueError(
             f"report catalog scope mismatch: expected={scope_tag} actual={catalog.get('scope_tag')}"
         )
+    # Public publication never accepts private documentary attachments, even
+    # if a composed bundle carries the ordinary FBPM scope tag. This guard
+    # must run *before* creating/removing any public destination directory.
+    if any(
+        report.get("report_id") == "pm_payment_evidence" or report.get("attachments")
+        for report in catalog.get("reports", [])
+    ):
+        raise ValueError("private evidence reports/attachments cannot be published to public reports")
     validate_catalog_files(catalog, bundle_root=source_root)
     missing_pdf = [
         report.get("report_id", "")

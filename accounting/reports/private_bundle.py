@@ -78,6 +78,14 @@ def compose_private_report_bundle(
     evidence_catalog = _load_catalog(evidence_reports_root)
     validate_catalog_files(normal_catalog, bundle_root=normal_reports_root)
     validate_catalog_files(evidence_catalog, bundle_root=evidence_reports_root)
+    # Never combine a newer evidence snapshot with older accounting reports.
+    # This is the viewer-facing proof of an exact-run, scope-isolated bundle.
+    if normal_catalog.get("source_run_id") != evidence_catalog.get("source_run_id"):
+        raise ValueError("private evidence and ordinary reports must use the same source run")
+    if normal_catalog.get("scope_tag") != "FBPM" or evidence_catalog.get("scope_tag") != "PM_EVIDENCE":
+        raise ValueError("private PM evidence requires FBPM ordinary reports and PM_EVIDENCE scope")
+    if any(item.get("report_id") != "pm_payment_evidence" for item in evidence_catalog["reports"]):
+        raise ValueError("unrecognized evidence report in private bundle")
     normal_items = list(_items(normal_catalog))
     evidence_items = list(_items(evidence_catalog))
     next_sort_order = max((item.sort_order for item in normal_items), default=0) + 1
