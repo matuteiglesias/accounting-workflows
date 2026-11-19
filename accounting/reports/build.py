@@ -197,6 +197,7 @@ def build_report_bundle(
     annual_metrics = metrics_dir / "annual_balance_dashboard_metrics.csv"
     annual_contract = metrics_dir / "annual_balance_dashboard_contract.csv"
     annual_qa = metrics_dir / "annual_balance_dashboard_qa.csv"
+    operating_monthly = run_root / "monthly_operating_statement.csv"
     treasury_accountability = run_root / "monthly_cash_accountability.csv"
     treasury_qa = run_root / "monthly_cash_accountability_qa.csv"
     treasury_detail = run_root / "box_treasury_transaction_detail.csv"
@@ -263,6 +264,7 @@ def build_report_bundle(
         qa_path=annual_qa,
         out_dir=annual_dir,
         repayment_detail_path=repayment_detail,
+        monthly_operating_path=operating_monthly if operating_monthly.is_file() else None,
     )
     treasury_outputs = render_treasury(
         accountability_path=treasury_accountability,
@@ -341,7 +343,7 @@ def build_report_bundle(
 
     annual_manifest = build_report_manifest(
         report_id="annual_management",
-        renderer_version="annual_management.v1",
+        renderer_version="annual_management.v2",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,
@@ -350,6 +352,7 @@ def build_report_bundle(
             _source(annual_contract, "metrics/annual_balance_dashboard_contract.csv"),
             _source(annual_qa, "metrics/annual_balance_dashboard_qa.csv"),
             _source(repayment_detail, "run/monthly_debt_repayment_detail.csv"),
+            *([_source(operating_monthly, "run/monthly_operating_statement.csv")] if operating_monthly.is_file() else []),
         ],
         outputs=_manifest_outputs(annual_outputs, bundle_root=out_dir),
         validation_status=annual_status,
@@ -399,7 +402,7 @@ def build_report_bundle(
 
     debt_manifest = build_report_manifest(
         report_id="debt_accountability",
-        renderer_version="debt_accountability.v1",
+        renderer_version="debt_accountability.v2",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,

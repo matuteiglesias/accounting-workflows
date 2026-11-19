@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 
+from accounting.reports.time_series import TIMESERIES_CSS
+from accounting.reports.annual_management.time_series_inputs import build_operating_chart_pair
 from accounting.reports.annual_management.spec import (
     DEBT_RELATIONS,
     FUNDING_ACTORS,
@@ -332,8 +334,7 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         )
         + f'<div class="kpi-grid kpi-grid-5">{kpis}</div><div class="page-grid">'
         + f'<div class="span-8">{_table("Tabla resumen", periods, model["summary"]["rows"])}</div>'
-        + '<div class="span-4"><div class="panel"><h2>Ratios clave</h2><div class="chart-slot"></div></div>'
-        + '<div class="panel compact-note"><h2>Lectura</h2><p>Resumen de generación operativa, aplicación del resultado y posición. ARS y USD se muestran por separado.</p></div></div></div>'
+        + '<div class="span-4">' + model["charts"].get("cost_ratio_html", '<div class="panel"><h2>Ratios clave</h2><p>Gráfico no disponible en este paquete.</p></div>') + '</div></div></div>'
         + _page_footer(meta, 1)
     )
 
@@ -350,8 +351,10 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         )
         + '<div class="page-grid">'
         + f'<div class="span-7">{_table("Estado operativo · ARS nominales", periods, model["operations"]["rows"])}</div>'
-        + '<div class="span-5"><div class="panel"><h2>Composición de rentas</h2><div class="chart-slot tall"></div></div>'
+        + '<div class="span-5">'
         + _table("Portfolio actual · " + meta["last_period_label"], ["Renta", "%"], portfolio_rows, compact=True)
+        + '</div><div class="span-12">'
+        + model["charts"].get("costs_html", '<div class="panel"><h2>Tendencia de costos</h2><p>Gráfico no disponible en este paquete.</p></div>')
         + '</div><div class="span-12">'
         + _table("Operación en USD", periods, model["operations"]["usd_rows"], compact=True)
         + '</div></div>'
@@ -803,6 +806,7 @@ def render_report(
     qa_path: Path | None,
     out_dir: Path,
     repayment_detail_path: Path | None = None,
+    monthly_operating_path: Path | None = None,
 ) -> dict[str, Path]:
     metrics = pd.read_csv(metrics_path)
     contract = pd.read_csv(contract_path)
@@ -816,6 +820,14 @@ def render_report(
 
     store = MetricStore(metrics, contract)
     model = build_report_model(store, qa, repayment_detail)
+    model["charts"] = {}
+    chart_trace = None
+    if monthly_operating_path is not None:
+        monthly = pd.read_csv(monthly_operating_path)
+        cost_html, share_html, chart_trace = build_operating_chart_pair(
+            monthly, as_of_date=store.as_of_date()
+        )
+        model["charts"] = {"costs_html": cost_html, "cost_ratio_html": share_html}
     validations = validate_report(store)
     cells = pd.DataFrame(store.rendered).drop_duplicates()
 
@@ -825,17 +837,18 @@ def render_report(
     cells.to_csv(cells_path, index=False)
     validations.to_csv(validation_path, index=False)
     css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
-    html_path.write_text(_render_html(model, css), encoding="utf-8")
+    html_path.write_text(_render_html(model, css + TIMESERIES_CSS), encoding="utf-8")
+    if chart_trace is not None:
+        chart_trace.to_csv(out_dir / "time_series_trace.csv", index=False)
 
     if (validations["status"] == "fail").any():
         raise ValueError(
             "annual management report validation failed; inspect report_validation.csv"
         )
-    return {
-        "html": html_path,
-        "cells": cells_path,
-        "validation": validation_path,
-    }
+    outputs = {"html": html_path, "cells": cells_path, "validation": validation_path}
+    if chart_trace is not None:
+        outputs["time_series_trace"] = out_dir / "time_series_trace.csv"
+    return outputs
 
 
 def main() -> None:
@@ -846,12 +859,14 @@ def main() -> None:
     parser.add_argument("--contract", required=True, type=Path)
     parser.add_argument("--qa", type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--monthly-operating", type=Path)
     args = parser.parse_args()
     outputs = render_report(
         metrics_path=args.metrics,
         contract_path=args.contract,
         qa_path=args.qa,
         out_dir=args.out_dir,
+        monthly_operating_path=args.monthly_operating,
     )
     for path in outputs.values():
         print(path)

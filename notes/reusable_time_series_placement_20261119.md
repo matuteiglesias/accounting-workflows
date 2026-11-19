@@ -1,6 +1,6 @@
 # Time-series graphics across accounting reports and Family Strategy artifacts
 
-**Design study:** 2026-11-19. **Status:** PROPOSED, not implemented / no changes to report output, Viewer, or production ledger.
+**Design study:** 2026-11-19. **Status:** initial TS01, TS02 and TS07 renderer implementation committed separately; remaining placements are proposals. No production publication, ledger changes or Viewer changes.
 
 ## Goal and verified interface constraints
 
@@ -114,3 +114,18 @@ This is **not** a causal measure of management quality, a constant-price real in
 ## No-op boundaries
 
 The design exercise does not alter: canonical ledger, accounting classifications, debt positions, legitimate rights, scenario YAML operators, existing HTML/PDF reports, the Viewer or deployment. Code implementation is a separate, small task.
+
+## Implementation slice — 2026-11-19
+
+Three charts are now rendered from governed upstream sources using a common inline-SVG component:
+
+- `accounting/reports/time_series.py`: `TimeSeriesSpec`, `render_timeseries_svg`, `timeseries_figure`, `TIMESERIES_CSS`. Bar, stacked-bar, line and point primitives, M/Y only; source-trace output. Rejects invalid/mixed units, duplicate grain, nonfinite values, mixed phases inside period, too-many periods and incomplete stacked component domains.
+- `accounting/reports/annual_management/time_series_inputs.py`: TS01 true OPEX costs by category; TS02 ratio of the *same* OPEX population to rent. Equal comparison window January through last fully closed month of all years; 2026-11-19 means January–October of 2022–2026. The current partial month is excluded. Validates complete source components, classified amounts and exact reconciliation.
+- `accounting/reports/debt_accountability/time_series_inputs.py`: TS07 monthly open debt **stock**, USD in checked data, total plus at most two top relationships from a rolling 24-month window; zero is not inferred when a relation is unobserved.
+- `annual_management/render.py` now embeds TS02 on page 1 and TS01 full-width on page 2; the old narrow/misplaced 'Lectura' box was removed. `debt_accountability/render.py` embeds TS07 in the historical-evolution section. The existing small Treasury time-series chart, pie charts and report tables were not changed.
+- `accounting/reports/build.py` supplies the existing `monthly_operating_statement.csv` input when present, adds it to the annual report source manifest, and uses revised renderer versions. Both report renderers write optional `time_series_trace.csv`; the trace is included in report outputs and **never** passed through the Viewer catalog as a public artifact.
+- Tests: `tests/test_time_series_reporting.py`; validated with report and publication contract tests (33 passing in focused regression batch).
+- Local **nonpublished** real-data preview: `~/Desktop/MEMOS/10_accounting_family/08_scenarios/chart_previews/20261119T043349Z_FBPM_TS01_TS02_TS07/`, with `annual_management/report.{html,pdf}` and `debt_accountability/report.{html,pdf}`. Actual annual print accepted **6 A4 pages**; debt chart appears clearly on page 2 of the **8-page** PDF. No pages visibly overflow or clip charts in inspected screenshots.
+- Preview input run `20261119T043349Z_FBPM`, monthly operating cut 2026-11-19. Open debt latest source position 2026-10-31. This is a pinned existing run, not a refreshed/published production report.
+
+**Pending:** TS03–TS06 and TS08–TS10 remain proposed; no new helper TS or scenario policies were implemented by this chart-only slice. Optional chart traces should remain internal provenance, and separate publication approval applies to any eventual refreshed Viewer bundle.
