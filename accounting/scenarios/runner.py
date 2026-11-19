@@ -2,8 +2,9 @@ from __future__ import annotations
 """YAML -> isolated ledger clones -> existing offline accounting -> HTML/PDF only.
 
 YAML is a reviewable business declaration, never Python to execute.
-The pilot deliberately leaves the paid-only canonical history unchanged:
-future `planeado` items occur only in the all-status evidence stream.
+The production paid-only canonical history remains unchanged. Isolated
+simulations derive an analytic ledger from paid rows plus eligible future plans,
+retaining each row's status; the same accounting stages and report renderer run.
 """
 import argparse
 import csv
@@ -15,13 +16,14 @@ import re
 import shutil
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from time import perf_counter
 
 import yaml
 
 from accounting.artifacts.manifest import artifact_from_path, append_artifacts, write_stage_manifest
 from accounting.support.isolated_execution import isolated_accounting_execution
+from accounting.scenarios.projection import build_projection_ledger
 
 SCHEMA = "accounting.scenario.v1"
 ID = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
@@ -50,6 +52,14 @@ def read_definition(path: Path) -> dict:
         raise ValueError("scenario base must be one exact FBPM run, not latest")
     if not re.fullmatch(r"[a-f0-9]{64}", str(base.get("all_status_sha256", ""))):
         raise ValueError("YAML must pin the base all-status ledger SHA256")
+    projection = obj.get("projection")
+    if projection is not None:
+        if not isinstance(projection, dict) or set(projection) != {"as_of_date", "through_date"}:
+            raise ValueError("projection needs exact as_of_date and through_date")
+        start = date.fromisoformat(projection["as_of_date"])
+        end = date.fromisoformat(projection["through_date"])
+        if start > end or end.year > start.year + 3:
+            raise ValueError("invalid projection horizon")
     if obj.get("reports") != ["treasury_accountability"]:
         raise ValueError("pilot supports the existing treasury_accountability report")
     variants = obj.get("variants")
@@ -125,16 +135,23 @@ def transform_all_status(source: Path, output: Path, operations: list[dict]) -> 
     return audit
 
 
-def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: dict) -> list[dict]:
+def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: dict, *, projection: dict | None = None) -> list[dict]:
     out.mkdir(parents=True, exist_ok=False)
     meta = out / "meta"
     meta.mkdir()
     paid_source = base / "ledger_canonical.csv"
     all_source = base / "ledger_canonical_all_status.csv"
-    shutil.copy2(paid_source, out / paid_source.name)
     removed = transform_all_status(all_source, out / all_source.name, variant.get("operations", []))
-    if digest(out / paid_source.name) != digest(paid_source):
-        raise ValueError("paid-only historical ledger was modified")
+    if projection:
+        summary = build_projection_ledger(
+            paid_source, out / all_source.name, out / paid_source.name,
+            as_of_date=projection["as_of_date"], through_date=projection["through_date"],
+        )
+        print("  analytic simulation ledger:", summary, flush=True)
+    else:
+        shutil.copy2(paid_source, out / paid_source.name)
+        if digest(out / paid_source.name) != digest(paid_source):
+            raise ValueError("paid-only historical ledger was modified")
     original = json.loads((base / "meta" / "stage_A_ingest.json").read_text(encoding="utf-8"))
     if original.get("run_id") != base.name:
         raise ValueError("base Stage A manifest identity mismatch")
@@ -149,6 +166,13 @@ def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: d
         "simulation": True, "scenario_id": scenario,
         "scenario_variant": variant["id"], "base_run_id": base.name,
     })
+    if projection:
+        original["params"].update({
+            "only_status": ["pagado", "planeado"],
+            "projection_as_of_date": projection["as_of_date"],
+            "projection_through_date": projection["through_date"],
+            "projection_semantics": "paid_observed_plus_future_planned_not_realized",
+        })
     artifacts = [
         artifact_from_path(name=name.removesuffix(".csv"), path=out / name, stage="A.ingest",
                            mode="run", run_id=run_id, role="output", root_dir=out)
@@ -193,7 +217,7 @@ def run_stages(execution, *, measurements: list[dict] | None = None) -> None:
         measurements.extend(json.loads(line) for line in python_timings.read_text(encoding="utf-8").splitlines())
 
 
-def render_requested_treasury(execution, *, measurements: list[dict] | None = None) -> Path:
+def render_requested_treasury(execution, *, measurements: list[dict] | None = None, projection: dict | None = None) -> Path:
     """Use the existing official renderer, but don't build unrelated PDFs."""
     from accounting.reports.pdf import render_pdf
     from accounting.reports.treasury_accountability.render import render_report
@@ -214,7 +238,16 @@ def render_requested_treasury(execution, *, measurements: list[dict] | None = No
         raise FileNotFoundError(f"required treasury source missing: {missing}")
     print("  render_treasury (existing renderer only)", flush=True)
     start = perf_counter()
-    output = render_report(**sources, out_dir=report)
+    if projection:
+        # These optional sections have observed-evidence contracts; the single
+        # monthly treasury renderer remains the authority for projected rows.
+        for key in ("cycles_path", "stakeholder_support_path", "semantic_audit_path", "annual_metrics_path"):
+            sources.pop(key)
+    output = render_report(
+        **sources, out_dir=report,
+        **({"projection_as_of_date": projection["as_of_date"],
+            "projection_through_date": projection["through_date"]} if projection else {}),
+    )
     if measurements is not None:
         measurements.append({"kind": "renderer", "stage": "treasury_html",
                              "elapsed_seconds": round(perf_counter() - start, 6)})
@@ -270,7 +303,7 @@ def execute(scenario_file: Path, repo: Path, outbox: Path, *, audit_file: Path |
                 variant_start = perf_counter()
                 start = perf_counter()
                 removed = seed_execution(base, execution.canonical_root, execution.run_id,
-                                         spec["id"], variant)
+                                         spec["id"], variant, projection=spec.get("projection"))
                 if variant_events is not None:
                     variant_events.append({"kind": "scenario", "stage": "seed_and_transform",
                                            "elapsed_seconds": round(perf_counter() - start, 6)})
@@ -281,7 +314,7 @@ def execute(scenario_file: Path, repo: Path, outbox: Path, *, audit_file: Path |
                 # and failure of an optional specialized renderer would block the
                 # requested treasury document. The official treasury renderer and
                 # official PDF engine are reused unchanged.
-                report = render_requested_treasury(execution, measurements=variant_events)
+                report = render_requested_treasury(execution, measurements=variant_events, projection=spec.get("projection"))
                 for extension in ("html", "pdf"):
                     source = report / f"report.{extension}"
                     if extension == "pdf":

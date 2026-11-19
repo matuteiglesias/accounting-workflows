@@ -5,8 +5,11 @@ description: >-
   las cuotas planeadas de alquiler desde diciembre 2026.
   No afirma que esto haya ocurrido; no modifica pagos realizados.
 base:
-  run_id: 20261118T210059Z_FBPM
-  all_status_sha256: 55b1ccc3b67a30529c9f75ce993ada1c5162efdca4e543cc5c153b41991f4885
+  run_id: 20261119T043349Z_FBPM
+  all_status_sha256: c371e6f342ed41a40e3443d6b6b496bc419d6a247918a8a7859a0120fb91f4d5
+projection:
+  as_of_date: "2026-11-19"
+  through_date: "2027-03-31"
 reports:
   - treasury_accountability
 variants:

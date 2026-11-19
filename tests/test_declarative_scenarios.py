@@ -126,3 +126,35 @@ def test_existing_treasury_renderer_is_only_report_producer(tmp_path: Path, monk
     assert result == reports / "treasury_accountability"
     assert [x[0] for x in called] == ["treasury", "pdf"]
     assert (result / "report.pdf").read_bytes().startswith(b"%PDF-")
+
+
+def test_projection_ledger_preserves_paid_and_selects_only_current_plans(tmp_path: Path) -> None:
+    from accounting.scenarios.projection import build_projection_ledger
+
+    paid_path, all_path, out = (tmp_path / name for name in ('paid.csv', 'all.csv', 'analytic.csv'))
+    paid = _sample()[-1]
+    stale = dict(paid, tx_id='stale', Date='2026-11-10', status='planeado')
+    failed = dict(paid, tx_id='failed', Date='2026-12-11', status='F')
+    deleted = dict(paid, tx_id='deleted', Date='2026-12-12', status='X')
+    _write(paid_path, [paid])
+    _write(all_path, [paid, stale, failed, deleted] + _sample()[:-1])
+    summary = build_projection_ledger(paid_path, all_path, out,
+        as_of_date='2026-11-19', through_date='2027-03-31')
+    assert summary == {'paid': 1, 'planned': 8, 'projected_total': 9}
+    with out.open(encoding='utf-8', newline='') as stream:
+        rows = list(csv.DictReader(stream))
+    assert [row['tx_id'] for row in rows] == ['real_payment'] + [r['tx_id'] for r in _sample()[:-1]]
+    assert {row['status'] for row in rows} == {'pagado', 'planeado'}
+
+
+def test_projection_rejects_future_claimed_paid(tmp_path: Path) -> None:
+    from accounting.scenarios.projection import build_projection_ledger
+
+    paid_path, all_path, out = (tmp_path / name for name in ('paid.csv', 'all.csv', 'analytic.csv'))
+    paid = dict(_sample()[-1], Date='2027-01-10')
+    _write(paid_path, [paid])
+    _write(all_path, [paid])
+    with pytest.raises(ValueError, match='future paid'):
+        build_projection_ledger(paid_path, all_path, out,
+            as_of_date='2026-11-19', through_date='2027-03-31')
+    assert not out.exists()

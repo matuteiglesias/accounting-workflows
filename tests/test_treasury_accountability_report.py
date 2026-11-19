@@ -156,3 +156,28 @@ def test_treasury_report_rejects_non_reconciled_source(tmp_path: Path) -> None:
             out_dir=tmp_path / "report",
             start_period="2026-01",
         )
+
+
+def test_future_months_are_grey_in_same_treasury_table(tmp_path: Path) -> None:
+    data = pd.DataFrame([
+        _row(period='2026-10', box='Property Management', currency='ARS', opening=0,
+             rent=100, funding=0, taxes=0, dividends=0, repayment=0),
+        _row(period='2026-12', box='Property Management', currency='ARS', opening=100,
+             rent=200, funding=0, taxes=0, dividends=0, repayment=0),
+    ])
+    source = tmp_path / 'monthly_cash_accountability.csv'
+    data.to_csv(source, index=False)
+    result = render_report(
+        accountability_path=source, qa_path=None, out_dir=tmp_path/'report',
+        start_period='2026-10', projection_as_of_date='2026-11-19',
+        projection_through_date='2027-03-31',
+    )
+    html = result['html'].read_text(encoding='utf-8')
+    assert 'Último cierre observado: 31/10/2026' in html
+    assert 'horizonte proyectado: 2027-03-31' in html
+    assert 'class="future"><td class="month">2026-11</td>' in html
+    assert 'class="future"><td class="month">2026-12</td>' in html
+    assert 'class="future"><td class="month">2027-03</td>' in html
+    assert 'class="future"><td class="month">2026-10</td>' not in html
+    assert 'tr.future td' in html
+    assert not (pd.read_csv(result['validation']).status == 'fail').any()

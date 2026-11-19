@@ -69,6 +69,9 @@ table.treasury tbody tr.subtotal.total-period td { background: #e3ebf5; border-t
 table.treasury tbody tr:hover td { background: #fafbfd; }
 table.treasury td.zero { color: #aab2bf; text-align: center; }
 table.treasury td.net-pos, table.treasury td.net-neg, table.treasury td.close { font-weight: 720; }
+/* Prospective months remain in the same monthly table, visually de-emphasized. */
+table.treasury tbody tr.future td { color: #8d949d; background: #f4f5f7; }
+table.treasury tbody tr.future td.close { color: #737b86; background: #edf0f3; }
 table.treasury td.net-pos { color: var(--blue); }
 table.treasury td.net-neg { color: #384252; }
 table.treasury td.close { color: var(--navy); background: #fafcff; }
