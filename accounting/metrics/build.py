@@ -27,6 +27,7 @@ CANONICAL_SOURCE_NAMES = [
     "monthly_flow_semantic_split.csv",
     "monthly_operating_statement.csv",
     "monthly_cash_close.csv",
+    "monthly_cash_accountability.csv",
     "monthly_debt_position.csv",
     "monthly_debt_activity.csv",
 ]

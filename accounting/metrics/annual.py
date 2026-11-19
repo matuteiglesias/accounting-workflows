@@ -25,6 +25,11 @@ from accounting.contracts.funding_support import (
 )
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.metrics import annual_legacy as _legacy
+from accounting.metrics.cash_control_adapter import (
+    SOURCE_TABLE as CASH_CONTROL_SOURCE,
+    annual_rows as cash_control_annual_rows,
+    read_source as read_cash_control_source,
+)
 
 
 LEGACY_COMPAT_EXPORTS = (
@@ -296,6 +301,52 @@ def _rewrite_cash_metrics(
     ), projections, True
 
 
+def _rewrite_cash_control_metrics(
+    metrics: pd.DataFrame,
+    source: pd.DataFrame | None,
+    *,
+    run_id: str,
+    as_of_date: str,
+) -> tuple[pd.DataFrame, bool]:
+    """Add annual movement/control rows from the governed treasury source."""
+
+    ids = {"CTRL.BOX.NET_MOVEMENT", "CTRL.BOX.CUM_NET"}
+    out = metrics.loc[~metrics["metric_id"].astype(str).isin(ids)].copy()
+    caveat = (
+        "Recorded Box movement/control only: cumulative control is the latest "
+        "zero-origin month-end value, not actual cash or liquidity; unknown opening "
+        "balances remain unknown; no FX or cross-Box aggregation."
+    )
+    rows: list[dict[str, object]] = []
+    if source is not None and not source.empty:
+        for row in cash_control_annual_rows(source, run_id=run_id, as_of_date=as_of_date):
+            rows.append(
+                _legacy._base(
+                    row["metric_id"], row["period"], row["Currency"], row["value"],
+                    "available", "flow" if row["metric_id"] == "CTRL.BOX.NET_MOVEMENT" else "stock",
+                    "cash_control", "3. Cash and liquidity", CASH_CONTROL_SOURCE,
+                    "cash_control_specs_v1; dimension=Box",
+                    "annual flow = sum monthly net_cash_flow by year/Box/Currency; "
+                    "annual control = latest month-end closing_control by year/Box/Currency",
+                    run_id, as_of_date, dim_name="Box", dim_value=str(row["Box"]),
+                    suit="safe_with_caveat", caveat=row["caveat"],
+                )
+            )
+    else:
+        for metric_id, flow in [("CTRL.BOX.NET_MOVEMENT", "flow"), ("CTRL.BOX.CUM_NET", "stock")]:
+            rows.append(
+                _legacy._base(
+                    metric_id, "", "", pd.NA, "unavailable", flow, "unavailable",
+                    "3. Cash and liquidity", CASH_CONTROL_SOURCE, "", "unavailable: source absent",
+                    run_id, as_of_date, suit="unavailable", validation="warn",
+                    caveat="Source absent; no synthetic cash-control series emitted.",
+                )
+            )
+    return pd.concat(
+        [out, pd.DataFrame(rows, columns=_legacy.ANNUAL_METRICS_COLUMNS)], ignore_index=True
+    ), True
+
+
 def build_annual_balance_dashboard(
     run_root: Path,
     metrics_dir: Path,
@@ -318,13 +369,18 @@ def build_annual_balance_dashboard(
         metrics, split, run_id=run_id, as_of_date=as_of_date
     )
 
+    cash_control = read_cash_control_source(run_root)
+    metrics, cash_control_rewritten = _rewrite_cash_control_metrics(
+        metrics, cash_control, run_id=run_id, as_of_date=as_of_date
+    )
+
     cash_path = run_root / "monthly_cash_close.csv"
     cash = pd.read_csv(cash_path) if cash_path.exists() else None
     metrics, projections, cash_rewritten = _rewrite_cash_metrics(
         metrics, cash, run_id=run_id, as_of_date=as_of_date
     )
 
-    if not funding_rewritten and not cash_rewritten:
+    if not funding_rewritten and not cash_rewritten and not cash_control_rewritten:
         return paths
 
     contract = _legacy._contract_from_rows(metrics)
@@ -370,6 +426,15 @@ def build_annual_balance_dashboard(
                     "severity": "error",
                 },
             ]
+        )
+    if cash_control_rewritten:
+        extra_qa.append(
+            {
+                "check": "annual_cash_controls_use_governed_accountability",
+                "status": "pass",
+                "detail": "monthly_cash_accountability.csv; flows summed and cumulative controls selected at latest month-end; no FX or cross-Box aggregation",
+                "severity": "error",
+            }
         )
     if extra_qa:
         qa = pd.concat(

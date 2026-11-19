@@ -15,6 +15,11 @@ import pandas as pd
 from accounting.artifacts.manifest import artifact_contract_for_name
 from accounting.cash_authority import validated_cash_schema_supported
 from accounting.cash_projection import iter_validated_monthly_cash_positions
+from accounting.metrics.cash_control_adapter import (
+    SOURCE_TABLE as CASH_CONTROL_SOURCE,
+    monthly_rows as cash_control_monthly_rows,
+    read_source as read_cash_control_source,
+)
 
 FRONTIER_COLUMNS = [
     "metric_id", "label", "semantic_category", "flow_or_stock", "period_grain", "currency_mode",
@@ -31,6 +36,7 @@ CANONICAL_FRONTIER_SOURCES = {
     "monthly_operating_statement.csv",
     "monthly_flow_semantic_split.csv",
     "monthly_cash_close.csv",
+    "monthly_cash_accountability.csv",
     "monthly_debt_position.csv",
     "monthly_debt_activity.csv",
 }
@@ -53,6 +59,7 @@ def load_frontier_sources(run_root: Path) -> dict[str, pd.DataFrame | None]:
         "monthly_flow_semantic_split": _read_csv(run_root / "monthly_flow_semantic_split.csv"),
         "monthly_operating_statement": _read_csv(run_root / "monthly_operating_statement.csv"),
         "monthly_cash_close": _read_csv(run_root / "monthly_cash_close.csv"),
+        "monthly_cash_accountability": read_cash_control_source(run_root),
         "monthly_debt_position": _read_csv(run_root / "monthly_debt_position.csv"),
         "monthly_debt_activity": _read_csv(run_root / "monthly_debt_activity.csv"),
     }
@@ -196,6 +203,7 @@ def _build_metrics_frontier_baseline(
     split = sources["monthly_flow_semantic_split"]
     statement = sources["monthly_operating_statement"]
     cash = sources["monthly_cash_close"]
+    cash_control = sources["monthly_cash_accountability"]
     debt = sources["monthly_debt_position"]
     debt_activity = sources["monthly_debt_activity"]
 
@@ -521,6 +529,35 @@ def _build_metrics_frontier_baseline(
             notes="compatibility contract only; no dashboard series emitted yet",
         )
     )
+
+    control_caveat = (
+        "Recorded Box movement/control only: cumulative control uses the defined "
+        "zero origin and is not actual cash or liquidity; unknown opening balances "
+        "remain unknown; native currency and per-Box transfer legs are preserved."
+    )
+    for metric_id, label, flow_or_stock, rule in [
+        ("CTRL.BOX.NET_MOVEMENT", "Recorded Box net movement", "flow", "sum monthly net_cash_flow"),
+        ("CTRL.BOX.CUM_NET", "Recorded Box cumulative control", "stock", "closing_control at month-end"),
+    ]:
+        rows.append(
+            _contract_row(
+                metric_id, label, "cash_control", flow_or_stock, CASH_CONTROL_SOURCE, rule,
+                suitability="safe_with_caveat" if cash_control is not None else "unavailable",
+                caveat=control_caveat if cash_control is not None else "Source absent; no synthetic cash-control series emitted.",
+                status="active" if cash_control is not None else "unavailable",
+                validation="ok" if cash_control is not None else "warn",
+                notes="dimension_name=Box; native currency; zero-origin control is not actual cash/liquidity",
+            )
+        )
+    if cash_control is not None and not cash_control.empty:
+        for row in cash_control_monthly_rows(cash_control, run_id=run_id, as_of_date=as_of_date):
+            series.append(
+                _series_row(
+                    row["metric_id"], row["period"], row["period_end"], row["Currency"], row["value"],
+                    CASH_CONTROL_SOURCE, run_id, as_of_date, "safe_with_caveat", True, False, False,
+                    row["caveat"], dimension_name="Box", dimension_value=str(row["Box"]),
+                )
+            )
 
     frontier = pd.DataFrame(rows, columns=FRONTIER_COLUMNS).drop_duplicates(
         ["metric_id"], keep="first"
