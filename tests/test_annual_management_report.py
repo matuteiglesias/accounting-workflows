@@ -52,7 +52,6 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     add("DIST.DIVIDENDS", 10.0)
     add("COV.NET.AFTER_DRAWS", 10.0)
     add("COV.SAVINGS_RATE", 0.10)
-    add("BS.CASH.TOTAL", None, status="unavailable")
     add("IS.RENT.TOTAL", 25.0, currency="USD")
     add("IS.NET.OPERATING", 25.0, currency="USD")
     add("DIST.DIVIDENDS", 5.0, currency="USD")
@@ -114,11 +113,99 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
         & (cells["dimension_value"] == "CABA")
         & (cells["value_status"] == "structural_zero")
     ).any()
+    assert "Control acumulado de movimientos" in html
+    assert "origen cero" in html
+    assert "Caja validada" not in html
+    assert not cells["metric_id"].isin(
+        ["BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"]
+    ).any()
     assert (
-        (cells["metric_id"] == "BS.CASH.TOTAL")
-        & (cells["Currency"] == "ARS")
+        (cells["metric_id"] == "CTRL.BOX.CUM_NET")
+        & (cells["value_status"] == "unavailable")
         & (cells["display_value"] == "No disponible")
     ).any()
+
+
+def test_annual_report_renders_box_controls_by_native_currency_without_total(
+    tmp_path: Path,
+) -> None:
+    rows = []
+
+    def add(
+        metric_id: str,
+        value: float,
+        currency: str = "ARS",
+        dimension_value: str = "",
+    ) -> None:
+        rows.append(
+            {
+                "metric_id": metric_id,
+                "period": "2026",
+                "Currency": currency,
+                "dimension_name": "Box" if dimension_value else "",
+                "dimension_value": dimension_value,
+                "value": value,
+                "value_status": "available",
+                "source_table": "annual_balance_dashboard_metrics.csv",
+                "run_id": "synthetic_FBPM",
+                "as_of_date": "2026-12-31",
+            }
+        )
+
+    for metric_id, value in [
+        ("IS.REVENUE.OPERATING", 100),
+        ("IS.RENT.TOTAL", 100),
+        ("IS.OPEX.PROPERTY", 20),
+        ("IS.NET.OPERATING", 80),
+        ("FUND.CONTRIB.TOTAL", 0),
+        ("DIST.DRAWS.PERSONAL", 70),
+        ("DIST.DIVIDENDS", 10),
+        ("COV.NET.AFTER_DRAWS", 10),
+        ("COV.SAVINGS_RATE", 0.1),
+    ]:
+        add(metric_id, value)
+    for metric_id, value in [
+        ("IS.RENT.TOTAL", 25),
+        ("IS.NET.OPERATING", 25),
+        ("DIST.DIVIDENDS", 5),
+        ("COV.NET.AFTER_DRAWS", 20),
+    ]:
+        add(metric_id, value, "USD")
+    for box, ars_flow, ars_cum, usd_flow, usd_cum in [
+        ("Family Business", 100, 500, 10, 40),
+        ("Property Management", -25, 75, -2, 8),
+    ]:
+        add("CTRL.BOX.NET_MOVEMENT", ars_flow, dimension_value=box)
+        add("CTRL.BOX.CUM_NET", ars_cum, dimension_value=box)
+        add("CTRL.BOX.NET_MOVEMENT", usd_flow, "USD", box)
+        add("CTRL.BOX.CUM_NET", usd_cum, "USD", box)
+
+    metrics_path = tmp_path / "metrics.csv"
+    contract_path = tmp_path / "contract.csv"
+    pd.DataFrame(rows).to_csv(metrics_path, index=False)
+    _contract(sorted(pd.DataFrame(rows)["metric_id"].unique())).to_csv(
+        contract_path, index=False
+    )
+
+    outputs = render_report(
+        metrics_path=metrics_path,
+        contract_path=contract_path,
+        qa_path=None,
+        out_dir=tmp_path / "report",
+    )
+    html = outputs["html"].read_text(encoding="utf-8")
+    cells = pd.read_csv(outputs["cells"])
+
+    assert "Movimiento neto registrado" in html
+    assert "Control acumulado de movimientos" in html
+    assert "No es saldo bancario" in html or "no es saldo bancario" in html
+    control_cells = cells.loc[cells["metric_id"].fillna("").str.startswith("CTRL.BOX")]
+    assert set(control_cells["Currency"]) == {"ARS", "USD"}
+    assert set(control_cells["dimension_value"]) == {
+        "Family Business", "Property Management"
+    }
+    assert not cells["metric_id"].isin({"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX"}).any()
+    assert "TOTAL ARS" not in html and "TOTAL USD" not in html
 
 
 def test_annual_report_fails_on_duplicate_metric_grain(tmp_path: Path) -> None:

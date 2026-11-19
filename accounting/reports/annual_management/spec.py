@@ -21,8 +21,6 @@ SUMMARY_ROWS = [
     {"label": "Distribuciones registradas", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
     {"label": "Resultado post-retiros", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS", "role": "major"},
     {"label": "Tasa de ahorro / retención", "metric_id": "COV.SAVINGS_RATE", "currency": "ARS", "format": "ratio"},
-    {"label": "Caja validada ARS", "metric_id": "BS.CASH.TOTAL", "currency": "ARS"},
-    {"label": "Caja validada USD", "metric_id": "BS.CASH.TOTAL", "currency": "USD", "format": "usd"},
     {"label": "Posición neta PM USD", "metric_id": "ID.DEBT.NET_PM_POSITION", "currency": "USD", "format": "usd"},
 ]
 
@@ -63,7 +61,6 @@ DEBT_RELATIONS = ["PM -> MI", "PM -> Primos", "Alejandro -> PM", "Alejandro -> M
 QUALITY_METRICS = [
     {"label": "Coverage clasificación", "metric_id": "DQ.CLASSIFICATION.COVERAGE"},
     {"label": "Monto unknown / review", "metric_id": "DQ.UNKNOWN.AMOUNT"},
-    {"label": "Cash frontend-safe", "metric_id": "DQ.CASH.FRONTEND_SAFE"},
     {"label": "Reconciliación actividad deuda", "metric_id": "DQ.DEBT.ACTIVITY.RECONCILIATION"},
     {"label": "FX missing-rate", "metric_id": "DQ.FX.MISSING_RATE.AMOUNT"},
     {"label": "FX one-sided", "metric_id": "DQ.FX.ONE_SIDED.AMOUNT"},

@@ -384,15 +384,17 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         _page_header(
             meta,
             4,
-            "CAJA Y TESORERÍA",
-            "¿Qué liquidez verificable tenemos y cómo la administramos?",
+            "MOVIMIENTOS Y CONTROL DE TESORERÍA",
+            "¿Qué movimientos registra cada Box y qué control acumulado implican?",
         )
         + '<div class="page-grid"><div class="span-7">'
-        + _table("Posición de caja validada · ARS", periods, model["treasury"]["cash_ars"], compact=True)
-        + _table("Posición de caja validada · USD", periods, model["treasury"]["cash_usd"], compact=True)
+        + _table("Movimiento neto registrado · ARS (flujo neto mensual acumulado del año)", periods, model["treasury"]["movement_ars"], compact=True)
+        + _table("Control acumulado de movimientos · ARS (stock; origen cero; no es saldo bancario)", periods, model["treasury"]["cumulative_ars"], compact=True)
+        + _table("Movimiento neto registrado · USD (flujo neto mensual acumulado del año)", periods, model["treasury"]["movement_usd"], compact=True)
+        + _table("Control acumulado de movimientos · USD (stock; origen cero; no es saldo bancario)", periods, model["treasury"]["cumulative_usd"], compact=True)
         + '</div><div class="span-5"><div class="panel"><h2>Estado de caja</h2>'
-        + '<div class="status-big">No disponible si no existe snapshot validado</div>'
-        + '<p class="caveat">La ausencia de posición validada nunca se convierte en cero ni usa caja inferida como fallback.</p></div></div>'
+        + '<div class="status-big">Control contable, no saldo bancario</div>'
+        + '<p class="caveat">El control acumulado usa origen cero y no es saldo bancario ni liquidez verificada. Si faltan las filas CTRL, se muestra No disponible; no se reutilizan métricas de caja anteriores.</p></div></div>'
         + '<div class="span-7">'
         + _table("Operaciones de tesorería / FX", periods, model["treasury"]["fx"], compact=True)
         + '</div><div class="span-5"><div class="panel"><h2>Espacio de tendencia FX</h2><div class="chart-slot tall"></div></div></div></div>'
@@ -572,15 +574,22 @@ def build_report_model(
         {"label": "Retiros personales USD", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "USD", "format": "usd", "missing_policy": "zero"},
         {"label": "Dividendos USD", "metric_id": "DIST.DIVIDENDS", "currency": "USD", "format": "usd", "missing_policy": "zero"},
     ]
-    cash_ars = [
-        {"label": "Family Business", "metric_id": "BS.CASH.CLOSE.BOX", "currency": "ARS", "dimension_name": "Box", "dimension_value": "Family Business"},
-        {"label": "Property Management", "metric_id": "BS.CASH.CLOSE.BOX", "currency": "ARS", "dimension_name": "Box", "dimension_value": "Property Management"},
-        {"label": "TOTAL ARS", "metric_id": "BS.CASH.TOTAL", "currency": "ARS", "role": "major"},
+    boxes = ["Family Business", "Property Management"]
+    movement_ars = [
+        {"label": box, "metric_id": "CTRL.BOX.NET_MOVEMENT", "currency": "ARS", "dimension_name": "Box", "dimension_value": box}
+        for box in boxes
     ]
-    cash_usd = [
-        {"label": "Family Business", "metric_id": "BS.CASH.CLOSE.BOX", "currency": "USD", "dimension_name": "Box", "dimension_value": "Family Business", "format": "usd"},
-        {"label": "Property Management", "metric_id": "BS.CASH.CLOSE.BOX", "currency": "USD", "dimension_name": "Box", "dimension_value": "Property Management", "format": "usd"},
-        {"label": "TOTAL USD", "metric_id": "BS.CASH.TOTAL", "currency": "USD", "format": "usd", "role": "major"},
+    movement_usd = [
+        {"label": box, "metric_id": "CTRL.BOX.NET_MOVEMENT", "currency": "USD", "dimension_name": "Box", "dimension_value": box, "format": "usd"}
+        for box in boxes
+    ]
+    cumulative_ars = [
+        {"label": box, "metric_id": "CTRL.BOX.CUM_NET", "currency": "ARS", "dimension_name": "Box", "dimension_value": box}
+        for box in boxes
+    ]
+    cumulative_usd = [
+        {"label": box, "metric_id": "CTRL.BOX.CUM_NET", "currency": "USD", "dimension_name": "Box", "dimension_value": box, "format": "usd"}
+        for box in boxes
     ]
     fx = []
     for metric_id, label in [
@@ -691,8 +700,10 @@ def build_report_model(
             "distributions_usd": _rows(store, distributions_usd, periods, "application", "dist_usd"),
         },
         "treasury": {
-            "cash_ars": _rows(store, cash_ars, periods, "treasury", "cash_ars"),
-            "cash_usd": _rows(store, cash_usd, periods, "treasury", "cash_usd"),
+            "movement_ars": _rows(store, movement_ars, periods, "treasury", "movement_ars"),
+            "movement_usd": _rows(store, movement_usd, periods, "treasury", "movement_usd"),
+            "cumulative_ars": _rows(store, cumulative_ars, periods, "treasury", "cumulative_ars"),
+            "cumulative_usd": _rows(store, cumulative_usd, periods, "treasury", "cumulative_usd"),
             "fx": _rows(store, fx, periods, "treasury", "fx"),
         },
         "debt": {
