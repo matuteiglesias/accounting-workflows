@@ -530,7 +530,6 @@ def build_semantic_dashboard_coverage() -> pd.DataFrame:
         ("Cobertura después de retiros", "coverage", "coverage_after_draws", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line coverage_after_draws."),
         ("Unknown / review-required", "unknown", "review_required", "Currency", "monthly_operating_statement.csv", "supported", "", "Statement line unknown_or_ambiguous_outflows plus audit rows."),
         ("Treasury FX", "treasury_fx", "*", "Currency,Box", "monthly_operating_statement.csv", "supported", "", "Treasury FX bridge lines; excluded from operating result, funding, draws, debt, and property OPEX."),
-        ("Caja FB", "cash", "cash_close", "cash mart", "monthly_cash_close.csv", "not_semantic_mart", "cash mart responsibility", "Semantic mart does not validate cash."),
         ("Deuda fin", "debt", "debt_position", "debt mart", "monthly_debt_position.csv", "not_semantic_mart", "debt mart responsibility", "Semantic mart only excludes debt movement from OPEX."),
     ]
     return pd.DataFrame(rows, columns=["dashboard_line", "required_semantic_bucket", "required_semantic_subbucket", "required_dimension", "source_output", "status", "missing_reason", "notes"])

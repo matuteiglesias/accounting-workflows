@@ -18,7 +18,6 @@ from accounting.debt.balance_views import (
     build_debt_balance_daily,
     resolve_effective_end_date,
 )
-from accounting.marts.cash import build_monthly_cash_close
 from accounting.support.latest import (
     assert_latest_target_publishable,
     update_scoped_latest,
@@ -123,48 +122,6 @@ def test_fully_closed_relation_defaults_to_month_end_zero_without_explicit_cutof
     yearly = _last_snapshot_by_period(daily, "Y", "Y")
     assert yearly.iloc[0]["as_of_date"].date().isoformat() == "2026-08-31"
     assert yearly.iloc[0]["open_total"] == 0.0
-
-
-def _validated_cash_row(as_of_date: str) -> dict[str, object]:
-    period = as_of_date[:7]
-    period_end = pd.Period(period, freq="M").end_time.date().isoformat()
-    return {
-        "period": period,
-        "period_end": period_end,
-        "as_of_date": as_of_date,
-        "Box": "Property Management",
-        "account_id": "bank-usd",
-        "account_name": "Bank USD",
-        "Currency": "USD",
-        "close_amount": 250.0,
-        "source_type": "account_snapshot",
-        "source_reference": "fixture",
-        "validation_status": "validated",
-        "validated_by": "controller",
-        "notes": "fixture",
-    }
-
-
-def test_validated_cash_cannot_reintroduce_future_evidence(tmp_path):
-    _write_cutoff_manifest(tmp_path)
-    pd.DataFrame([_validated_cash_row("2026-08-01")]).to_csv(
-        tmp_path / "validated_cash_close.csv", index=False
-    )
-    with pytest.raises(ValueError, match="after immutable Stage A cutoff"):
-        build_monthly_cash_close(tmp_path)
-
-
-def test_validated_cash_at_cutoff_remains_frontend_safe(tmp_path):
-    _write_cutoff_manifest(tmp_path)
-    pd.DataFrame([_validated_cash_row("2026-07-31")]).to_csv(
-        tmp_path / "validated_cash_close.csv", index=False
-    )
-    paths = build_monthly_cash_close(tmp_path)
-    cash = pd.read_csv(paths["monthly_cash_close"])
-    selected = cash.loc[cash["account_id"].astype(str).eq("bank-usd")]
-    assert len(selected) == 1
-    assert selected.iloc[0]["as_of_date"] == "2026-07-31"
-    assert bool(selected.iloc[0]["is_frontend_safe"]) is True
 
 
 def test_cutoff_run_cannot_silently_replace_latest_pointers(tmp_path):

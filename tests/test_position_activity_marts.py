@@ -4,44 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.debt import build_monthly_debt_position
 
 
 def _write(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(path, index=False)
-
-
-def _build_cash_fixture(tmp_path: Path) -> pd.DataFrame:
-    root = tmp_path / "cash"
-    _write(
-        root / "daily_cash_position.csv",
-        [
-            {"Date": "2025-12-31", "Box": "Property Management", "party": "Alice", "Currency": "ARS", "balance": 30},
-            {"Date": "2025-12-31", "Box": "Property Management", "party": "Bob", "Currency": "ARS", "balance": 20},
-            {"Date": "2026-01-31", "Box": "Property Management", "party": "Alice", "Currency": "ARS", "balance": 40},
-            {"Date": "2026-01-31", "Box": "Property Management", "party": "Bob", "Currency": "ARS", "balance": 10},
-        ],
-    )
-    _write(
-        root / "box_balance_time_long.freq=M.csv",
-        [
-            {"TimePeriod": "2025-12", "TimePeriod_end": "2025-12-31", "Box": "Property Management", "Currency": "ARS", "cum_net": 80},
-            {"TimePeriod": "2026-01", "TimePeriod_end": "2026-01-31", "Box": "Property Management", "Currency": "ARS", "cum_net": 100},
-        ],
-    )
-    _write(
-        root / "validated_cash_close.csv",
-        [
-            {"period": "2025-12", "period_end": "2025-12-31", "as_of_date": "2025-12-31", "Box": "Property Management", "account_id": "bank-a", "account_name": "Bank A", "Currency": "ARS", "close_amount": 50, "source_type": "bank_statement", "source_reference": "stmt-a-dec", "validation_status": "validated", "validated_by": "fixture-controller", "notes": ""},
-            {"period": "2025-12", "period_end": "2025-12-31", "as_of_date": "2025-12-31", "Box": "Property Management", "account_id": "bank-b", "account_name": "Bank B", "Currency": "ARS", "close_amount": 30, "source_type": "bank_statement", "source_reference": "stmt-b-dec", "validation_status": "validated", "validated_by": "fixture-controller", "notes": ""},
-            {"period": "2026-01", "period_end": "2026-01-31", "as_of_date": "2026-01-31", "Box": "Property Management", "account_id": "bank-a", "account_name": "Bank A", "Currency": "ARS", "close_amount": 70, "source_type": "bank_statement", "source_reference": "stmt-a-jan", "validation_status": "validated", "validated_by": "fixture-controller", "notes": ""},
-            {"period": "2026-01", "period_end": "2026-01-31", "as_of_date": "2026-01-31", "Box": "Property Management", "account_id": "bank-b", "account_name": "Bank B", "Currency": "ARS", "close_amount": 30, "source_type": "bank_statement", "source_reference": "stmt-b-jan", "validation_status": "validated", "validated_by": "fixture-controller", "notes": ""},
-        ],
-    )
-    paths = build_monthly_cash_close(root)
-    return pd.read_csv(paths["monthly_cash_close"])
 
 
 def _build_debt_fixture(tmp_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -76,24 +44,6 @@ def _build_debt_fixture(tmp_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         pd.read_csv(paths["monthly_debt_position"]),
         pd.read_csv(paths["monthly_debt_activity"]),
     )
-
-
-def test_cash_mart_preserves_three_distinct_position_populations(tmp_path: Path) -> None:
-    cash = _build_cash_fixture(tmp_path)
-
-    assert set(cash["position_type"]) == {
-        "internal_balance",
-        "inferred_box_motor",
-        "cash_close",
-    }
-    assert len(cash[cash["position_type"].eq("internal_balance")]) == 4
-    assert len(cash[cash["position_type"].eq("inferred_box_motor")]) == 2
-    validated = cash[cash["position_type"].eq("cash_close")]
-    assert len(validated) == 4
-    assert validated["is_frontend_safe"].astype(bool).all()
-    assert not cash.loc[
-        ~cash["position_type"].eq("cash_close"), "is_frontend_safe"
-    ].astype(bool).any()
 
 
 def test_debt_position_builder_selects_latest_valid_snapshot_and_exposes_component_contract(

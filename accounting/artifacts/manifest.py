@@ -241,7 +241,7 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "currency_policy": "by_currency",
             "frontend_suitability": "safe_with_caveat",
             "source_authority": "derived_treasury_accountability",
-            "notes": "Monthly treasury accountability composed from governed treasury flow, inferred Box control, validated cash selection, and debt activity cross-checks.",
+            "notes": "Monthly treasury accountability composed from governed treasury flow, inferred Box control, and debt activity cross-checks.",
         }
     if key == "family_business_accountability_cycles.csv":
         return {
@@ -251,7 +251,7 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "currency_policy": "by_currency",
             "frontend_suitability": "safe_with_caveat",
             "source_authority": "derived_treasury_accountability",
-            "notes": "Family Business Mar-Aug / Sep-Feb accountability bridge; closing balance is not actual cash and liquidity gap is unavailable without validated cash.",
+            "notes": "Family Business Mar-Aug / Sep-Feb accountability bridge; closing balance is a recorded-movement control, not actual cash.",
         }
     if key == "household_monthly_control.csv":
         return {
@@ -282,26 +282,6 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "safe_with_caveat",
             "source_authority": "source_of_truth",
             "notes": "Canonical monthly operating statement.",
-        }
-    if key == "monthly_cash_close.csv":
-        return {
-            "artifact_role": "canonical_source",
-            "accounting_nature": "stock",
-            "grain": "period_close",
-            "currency_policy": "by_currency",
-            "frontend_suitability": "row_level",
-            "source_authority": "source_of_truth_for_cash_only_when_is_frontend_safe_true",
-            "notes": "Cash contract is frontend-safe only for rows where is_frontend_safe=true.",
-        }
-    if key == "validated_cash_close.csv":
-        return {
-            "artifact_role": "canonical_source",
-            "accounting_nature": "stock",
-            "grain": "period_close",
-            "currency_policy": "by_currency",
-            "frontend_suitability": "safe",
-            "source_authority": "source_of_truth",
-            "notes": "Optional explicitly validated account-level cash close input; may feed monthly_cash_close frontend-safe rows.",
         }
     if key == "monthly_debt_activity.csv":
         return {

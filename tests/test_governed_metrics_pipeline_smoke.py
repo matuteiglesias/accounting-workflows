@@ -141,6 +141,14 @@ def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(
     assert all(not (metrics_dir / name).exists() for name in RETIRED_OUTPUTS)
     assert all(not (metrics_dir / name).exists() for name in RETIRED_OUTPUT_DIRS)
     assert not (run_root / "views").exists()
+    assert all(
+        not (run_root / name).exists()
+        for name in (
+            "monthly_cash_close.csv",
+            "monthly_cash_close_qa.csv",
+            "validated_cash_close.csv",
+        )
+    )
 
     frontier = pd.read_csv(metrics_dir / "metric_contract_frontier.csv")
     series = pd.read_csv(metrics_dir / "frontend_metric_series.csv")
@@ -171,17 +179,4 @@ def test_smoke_pipeline_builds_governed_metrics_without_legacy_views(
             _statement_year_currency(stmt, statement_line),
         )
 
-    available_cash = annual.loc[
-        annual["metric_id"].astype(str).str.startswith("BS.CASH")
-        & annual["value_status"].astype(str).eq("available")
-    ]
-    if not available_cash.empty:
-        assert available_cash["source_table"].astype(str).eq(
-            "monthly_cash_close.csv"
-        ).all()
-        assert available_cash["calculation_rule"].astype(str).str.contains(
-            "never sum monthly positions", case=False, regex=False
-        ).all()
-        assert available_cash["source_filter"].astype(str).str.contains(
-            "fallback_to_inferred=never", case=False, regex=False
-        ).all()
+    assert not annual["source_table"].astype(str).eq("monthly_cash_close.csv").any()

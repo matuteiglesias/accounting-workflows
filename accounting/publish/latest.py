@@ -50,7 +50,6 @@ RUN_FILES_BY_CLASS = {
     "canonical_dashboard": [
         "monthly_operating_statement.csv",
         "monthly_flow_semantic_split.csv",
-        "monthly_cash_close.csv",
         "monthly_debt_position.csv",
         "monthly_debt_activity.csv",
     ],

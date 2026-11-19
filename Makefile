@@ -4,7 +4,7 @@
 #
 # Only run-ingest/run-canonical/run-full pull live source inputs. Downstream stage
 # targets operate on the exact RUN_ID selected by the caller and are replayable.
-# Materialization owns the canonical monthly semantic and cash artifacts.
+# Materialization owns the canonical monthly semantic, Box-motor, and daily-cash artifacts.
 # Reports consume governed artifacts and do not introduce accounting authority.
 # There is no generic views stage, parallel metric_values engine, or command alias layer.
 
@@ -219,11 +219,9 @@ smoke-materialize: smoke-ingest
 	@test -s "$(SMOKE_OUT)/monthly_operating_statement.csv"
 	@test -s "$(SMOKE_OUT)/monthly_operating_statement_qa.csv"
 	@test -s "$(SMOKE_OUT)/semantic_leakage_qa.csv"
-	@test -s "$(SMOKE_OUT)/monthly_cash_close.csv"
-	@test -s "$(SMOKE_OUT)/monthly_cash_close_qa.csv"
 
 smoke-core: smoke-materialize
-	@echo "smoke-core passed fixture ingest/materialize semantic and cash checks"
+	@echo "smoke-core passed fixture ingest/materialize semantic, Box-motor, and daily-cash checks"
 
 smoke-full: smoke-core validate
 	@$(PY) -m accounting.publish.latest --project-root "$(ROOT)" --dry-run >/dev/null
@@ -336,8 +334,6 @@ _run_materialize_action:
 	@test -s "$(RUN_OUT)/monthly_operating_statement.csv"
 	@test -s "$(RUN_OUT)/monthly_operating_statement_qa.csv"
 	@test -s "$(RUN_OUT)/semantic_leakage_qa.csv"
-	@test -s "$(RUN_OUT)/monthly_cash_close.csv"
-	@test -s "$(RUN_OUT)/monthly_cash_close_qa.csv"
 
 run-canonical: run-ingest
 	@$(MAKE) run-materialize RUN_ID="$(RUN_ID)" OUT="$(OUT)" FREQ="$(FREQ)" BOXES="$(BOXES)"
@@ -412,7 +408,6 @@ _run_metrics_action:
 	@$(call _guard_out_dir,$(RUN_OUT))
 	@test -s "$(RUN_OUT)/monthly_flow_semantic_split.csv" || (echo "ERROR: missing governed semantic split at $(RUN_OUT)"; exit 2)
 	@test -s "$(RUN_OUT)/monthly_operating_statement.csv" || (echo "ERROR: missing governed operating statement at $(RUN_OUT)"; exit 2)
-	@test -s "$(RUN_OUT)/monthly_cash_close.csv" || (echo "ERROR: missing governed cash close at $(RUN_OUT)"; exit 2)
 	@mkdir -p "$(RUN_METRICS_DIR)"
 	@$(PY) -m accounting.metrics.build \
 		--run-root "$(RUN_OUT)" \

@@ -22,7 +22,6 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
 from accounting.box_cash import box_party_match_masks, infer_box_party
-from accounting.marts.cash import build_monthly_cash_close
 from accounting.marts.semantic import build_monthly_operating_statement, build_semantic_outputs
 from accounting.scope import assert_frame_within_scope, load_run_scope, load_run_scope_if_present
 from accounting.core.timeseries import (
@@ -560,15 +559,6 @@ def materialize_all(
     except Exception:
         LOG.exception("Failed materialize_daily_cash")
         aggregates["daily_cash_failed"] = {"error": "failed"}
-        raise
-
-    # 4.1) monthly cash consumption wrapper with explicit suitability flags
-    try:
-        cash_paths = build_monthly_cash_close(out_dir=out_dir, freq=freq)
-        for name, path in cash_paths.items():
-            aggregates[path.name] = {"path": str(path), "rows": None, "sha256": _safe_sha256(path)}
-    except Exception:
-        LOG.exception("Failed monthly cash close build")
         raise
 
     # 4.5) conservative semantic classification mart and monthly operating statement

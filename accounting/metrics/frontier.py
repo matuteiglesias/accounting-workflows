@@ -33,7 +33,6 @@ QA_COLUMNS = ["check", "status", "detail", "severity"]
 CANONICAL_FRONTIER_SOURCES = {
     "monthly_operating_statement.csv",
     "monthly_flow_semantic_split.csv",
-    "monthly_cash_close.csv",
     "monthly_cash_accountability.csv",
     "monthly_debt_position.csv",
     "monthly_debt_activity.csv",
@@ -57,7 +56,6 @@ def load_frontier_sources(run_root: Path) -> dict[str, pd.DataFrame | None]:
     return {
         "monthly_flow_semantic_split": _read_csv(run_root / "monthly_flow_semantic_split.csv"),
         "monthly_operating_statement": _read_csv(run_root / "monthly_operating_statement.csv"),
-        "monthly_cash_close": _read_csv(run_root / "monthly_cash_close.csv"),
         "monthly_cash_accountability": read_cash_control_source(run_root),
         "monthly_debt_position": _read_csv(run_root / "monthly_debt_position.csv"),
         "monthly_debt_activity": _read_csv(run_root / "monthly_debt_activity.csv"),
@@ -193,7 +191,6 @@ def _build_metrics_frontier_baseline(
     sources = load_frontier_sources(run_root)
     split = sources["monthly_flow_semantic_split"]
     statement = sources["monthly_operating_statement"]
-    cash = sources["monthly_cash_close"]
     cash_control = sources["monthly_cash_accountability"]
     debt = sources["monthly_debt_position"]
     debt_activity = sources["monthly_debt_activity"]
@@ -208,7 +205,6 @@ def _build_metrics_frontier_baseline(
 
     stmt_status, stmt_validation, stmt_caveat = source_status(statement)
     split_status, split_validation, split_caveat = source_status(split)
-    cash_status, cash_validation, cash_caveat = source_status(cash)
     debt_status, debt_validation, debt_caveat = source_status(debt)
     debt_activity_status, debt_activity_validation, debt_activity_caveat = source_status(debt_activity)
 
@@ -468,7 +464,7 @@ def _build_metrics_frontier_baseline(
         ["metric_id"], keep="first"
     )
     series_df = pd.DataFrame(series, columns=SERIES_COLUMNS)
-    qa = build_frontier_qa(frontier, series_df, cash)
+    qa = build_frontier_qa(frontier, series_df)
 
     paths = {
         "metric_contract_frontier": metrics_dir / "metric_contract_frontier.csv",
@@ -486,7 +482,6 @@ def _build_metrics_frontier_baseline(
 def build_frontier_qa(
     frontier: pd.DataFrame,
     series: pd.DataFrame,
-    cash: pd.DataFrame | None,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
 
@@ -627,7 +622,7 @@ def build_frontier_qa(
     add(
         "legacy_metric_universe_not_loaded",
         True,
-        "frontier consumes only governed monthly semantic/cash/debt artifacts",
+        "frontier consumes only governed monthly semantic, treasury, and debt artifacts",
     )
     add(
         "publish_frontier_files_present",

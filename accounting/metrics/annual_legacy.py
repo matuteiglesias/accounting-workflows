@@ -25,7 +25,7 @@ ANNUAL_CONTRACT_COLUMNS = [
 ]
 QA_COLUMNS = ["check","status","detail","severity"]
 CANONICAL = {
-    "monthly_operating_statement.csv","monthly_flow_semantic_split.csv","monthly_cash_close.csv",
+    "monthly_operating_statement.csv","monthly_flow_semantic_split.csv",
     "monthly_cash_accountability.csv",
     "monthly_debt_position.csv","monthly_debt_activity.csv","semantic_leakage_qa.csv",
     "semantic_dashboard_coverage.csv","metric_contract_frontier.csv","frontend_metric_series.csv",
@@ -104,12 +104,11 @@ def _contract_from_rows(metrics: pd.DataFrame) -> pd.DataFrame:
 def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: str, as_of_date: str) -> dict[str, Path]:
     run_root, metrics_dir = Path(run_root), Path(metrics_dir); metrics_dir.mkdir(parents=True, exist_ok=True)
     stmt = _read(run_root/"monthly_operating_statement.csv"); split = _read(run_root/"monthly_flow_semantic_split.csv")
-    cash = _read(run_root/"monthly_cash_close.csv"); debt = _read(run_root/"monthly_debt_position.csv"); act = _read(run_root/"monthly_debt_activity.csv"); leak = _read(run_root/"semantic_leakage_qa.csv")
+    debt = _read(run_root/"monthly_debt_position.csv"); act = _read(run_root/"monthly_debt_activity.csv"); leak = _read(run_root/"semantic_leakage_qa.csv")
     run_scope = load_run_scope_if_present(run_root)
     if run_scope is not None:
         for source_name, frame in [
             ("monthly_flow_semantic_split.csv", split),
-            ("monthly_cash_close.csv", cash),
         ]:
             if frame is not None:
                 assert_frame_within_scope(frame, run_scope, source=source_name)
