@@ -1,0 +1,257 @@
+# Idea catalog only: not accepted by accounting.scenario.v1 runner.
+schema: family_strategy_scenario_ideas.v0
+status: DRAFT_NOT_EXECUTABLE
+mined_on: "2026-11-19"
+source_repo: "matuteiglesias/family-strategy-lab"
+source_world: "world.v6 (as_of 2026-09-24)"
+source_surfaces:
+  - "docs/governance/PROPERTY_CASH_WATERFALL.md"
+  - "docs/accounting/COST_RESPONSIBILITY_MATRIX.md"
+  - "docs/disputes/RECIPROCAL_ACCOUNTABILITY.md"
+  - "docs/governance/HANDOVER_ACCEPTANCE_TEST.md"
+  - "docs/game/COOPERATION_FRONTIER.md"
+  - "docs/intake/2026-10_EVIDENCE_AND_PROTECTIVE_GOVERNANCE.md"
+  - "world/state.yaml"
+report_registry:
+  existing: [treasury_accountability, annual_management, debt_accountability, treasury_transaction_tape]
+  ad_hoc_prefix: "ad_hoc_"
+notes:
+  - "This is a hypothesis catalog, not verified legal or payment evidence."
+  - "Historical cash, proposed economic incidence and legal attribution must remain distinct."
+  - "Existing runner only implements guarded suppress_planned and exactly two variants."
+  - "Post-2026-11-19 Long Ledger changes need fresh pinned accounting ingest before new simulations."
+ideas:
+  - id: "D01"
+    title: "Distribuir todo saldo contable FB"
+    study: "Solicitudes de retiro completo contra gastos futuros y necesidad de fondos iniciales"
+    rule_concept: "propose_distribution: amount=control_cierre_FBM (ilustrativo; no caja validada)"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: NEEDS_CUSTODY
+  - id: "D02"
+    title: "Distribución anticipada del cierre del mes siguiente"
+    study: "Qué pasa si se distribuye en t lo que parece sobrar en t+1"
+    rule_concept: "policy_distribution: based_on=projected_closing_next_month; cap=eligible_cash"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: NEEDS_CUSTODY
+  - id: "D03"
+    title: "Cuota fija mensual"
+    study: "Repartir monto mensual fijo frente a cargos extraordinarios"
+    rule_concept: "add_future: tipo=distribution; amount=fixed; months=selected"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: RULE_EXTENSION
+  - id: "D04"
+    title: "Porcentaje de rentas"
+    study: "Distribuir 25/50/75/100% de renta efectiva prevista"
+    rule_concept: "policy_distribution: rate=0.25|0.5|0.75|1.0; base=rents"
+    reports: ["treasury_accountability", "ad_hoc_distribution_schedule"]
+    readiness: RULE_EXTENSION
+  - id: "D05"
+    title: "Reserva 0/30/60/90 días"
+    study: "Comparar faltantes, inmovilización de frutos y cobertura"
+    rule_concept: "policy_reserve: horizon_days=0|30|60|90"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: RULE_EXTENSION
+  - id: "D06"
+    title: "Reserva dinámica por obligaciones"
+    study: "Usar calendario de cargas y mantenimiento documentados"
+    rule_concept: "policy_reserve: forecast_obligations_minus_dedicated_cash"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: NEEDS_CUSTODY
+  - id: "D07"
+    title: "Primero gastos o primero distribución"
+    study: "Cambiar orden de operaciones sin cambiar ingresos anuales"
+    rule_concept: "policy_order: charges_first|distribution_first"
+    reports: ["treasury_accountability", "ad_hoc_payment_delay"]
+    readiness: RULE_EXTENSION
+  - id: "D08"
+    title: "Reparto excesivo: umbral crítico"
+    study: "Calcular retiro máximo compatible con costos futuros bajo escenario"
+    rule_concept: "sweep_parameter: monthly_distribution; bound=minimum_funding_required"
+    reports: ["treasury_accountability", "ad_hoc_threshold_curve"]
+    readiness: NEEDS_CUSTODY
+  - id: "I01"
+    title: "Chino Juan deja de pagar"
+    study: "Comparar rentas base con 8 cuotas futuras suprimidas"
+    rule_concept: "suppress_planned: tags=PM_RENT_CABA_CHINO_ARS|PM_RENT_CABA_CHINO_USD; months=2026-12..2027-03"
+    reports: ["treasury_accountability"]
+    readiness: EXISTING_PILOT
+  - id: "I02"
+    title: "Chino Juan paga tarde"
+    study: "Separar pérdida definitiva de retraso de cobro"
+    rule_concept: "shift_future: rent_dates+=30|60 days"
+    reports: ["treasury_accountability", "ad_hoc_rent_aging"]
+    readiness: RULE_EXTENSION
+  - id: "I03"
+    title: "Fernando desocupa"
+    study: "Renta de Tigre 28 cae a cero y eventual vacancia prolongada"
+    rule_concept: "scale_future: place=Tigre28; tenant=Fernando; multiplier=0 for chosen months"
+    reports: ["treasury_accountability", "ad_hoc_rent_aging"]
+    readiness: NEEDS_FUTURE_RENTS
+  - id: "I04"
+    title: "Renovación contractual fallida"
+    study: "Efecto de contrato que no renueva al final de vigencia"
+    rule_concept: "truncate_future: rent_contract=selected; through=expiry"
+    reports: ["treasury_accountability", "ad_hoc_rent_aging"]
+    readiness: NEEDS_CONTRACT
+  - id: "I05"
+    title: "Alquiler congelado o ajustado"
+    study: "Escalado del precio mensual futuro y rentabilidad bajo inflación"
+    rule_concept: "scale_future: rent_amount*=0.8|1|1.2"
+    reports: ["treasury_accountability", "annual_management"]
+    readiness: RULE_EXTENSION
+  - id: "I06"
+    title: "Incumplimientos simultáneos"
+    study: "Riesgo de 2 o 3 inquilinos morosos al mismo tiempo"
+    rule_concept: "suppress_planned: rent_tags=selected_group"
+    reports: ["treasury_accountability", "ad_hoc_concentration_risk"]
+    readiness: RULE_EXTENSION
+  - id: "I07"
+    title: "Cobro directo a otro actor"
+    study: "Quién recibe flujo y quién financia cargas posteriores"
+    rule_concept: "reroute_future: receiver=actor; income_scope=property_share"
+    reports: ["treasury_accountability", "ad_hoc_actor_incidence"]
+    readiness: NEEDS_AUTHORITY
+  - id: "I08"
+    title: "Renta USD y FX estresado"
+    study: "Separar posición USD de conversiones hipotéticas"
+    rule_concept: "fx_sensitivity: governed_rate_policy; scenarios=explicit_rates"
+    reports: ["treasury_accountability", "ad_hoc_fx_exposure"]
+    readiness: NEEDS_FX_POLICY
+  - id: "C01"
+    title: "ABL CABA superior al plan"
+    study: "Riesgo de ABL anual mayor que 4 millones planeados"
+    rule_concept: "scale_future: tag=PM_IMP_ABL_CABA; factor=1|1.25|1.5"
+    reports: ["treasury_accountability"]
+    readiness: RULE_EXTENSION
+  - id: "C02"
+    title: "ARBA y Tigre con sobrecostos"
+    study: "Efecto de aumentar impuestos de febrero 2027"
+    rule_concept: "scale_future: tags=PM_TAX_ARBA_EST_202702|PM_TAX_TIGRE_EST_202702"
+    reports: ["treasury_accountability", "ad_hoc_tax_schedule"]
+    readiness: RULE_EXTENSION
+  - id: "C03"
+    title: "Tigre diciembre se pospone"
+    study: "Costo y liquidez de regularización 30/12 vs enero"
+    rule_concept: "shift_future: tag=PM_TAX_TIGRE_SETTLEMENT_202612; days=30"
+    reports: ["treasury_accountability", "ad_hoc_tax_schedule"]
+    readiness: RULE_EXTENSION
+  - id: "C04"
+    title: "Intereses, multas y ejecuciones"
+    study: "Agregar penalidades sólo bajo supuestos explícitos"
+    rule_concept: "add_future: category=tax_penalty; amount=bounded_assumption"
+    reports: ["treasury_accountability", "ad_hoc_exposure_register"]
+    readiness: CONDITIONAL
+  - id: "C05"
+    title: "Mantenimiento imprescindible"
+    study: "Reparaciones por inmueble y mes, con costo bajo/base/alto"
+    rule_concept: "add_future: category=maintenance; asset=selected; amount=scenario_range"
+    reports: ["treasury_accountability", "annual_management"]
+    readiness: NEEDS_QUOTES
+  - id: "C06"
+    title: "Cobertura imprevista de servicios"
+    study: "Incremento de AySA/servicios y cambios de pagador"
+    rule_concept: "scale_future+reroute_future: service_tags; payer=selected"
+    reports: ["treasury_accountability", "ad_hoc_cost_incidence"]
+    readiness: RULE_EXTENSION
+  - id: "C07"
+    title: "Administrador neutral"
+    study: "Costo operativo vs ahorro en mora y control"
+    rule_concept: "add_future: fee=manager; possible_offset=lower_penalties"
+    reports: ["treasury_accountability", "ad_hoc_governance_cost"]
+    readiness: NEEDS_PROPOSAL
+  - id: "C08"
+    title: "Honorarios y duración del conflicto"
+    study: "Costo de plazos alternativos y nuevos eventos"
+    rule_concept: "add_future: legal_fee_schedule=proposed|stress"
+    reports: ["treasury_accountability", "ad_hoc_exposure_register"]
+    readiness: NEEDS_PROPOSAL
+  - id: "B01"
+    title: "Pagador distinto del obligado"
+    study: "Reportar quién financió y quién sería responsable bajo teorías distintas"
+    rule_concept: "semantic_overlay: proposed_legal_bearer; preserve_physical_payer"
+    reports: ["ad_hoc_cost_responsibility"]
+    readiness: NEEDS_LAW_EVIDENCE
+  - id: "B02"
+    title: "Reparación ordinaria vs capital"
+    study: "Cuánto cambia la incidencia sin alterar pagos observados"
+    rule_concept: "semantic_overlay: cost_category=ordinary|capital|undetermined"
+    reports: ["ad_hoc_cost_responsibility", "annual_management"]
+    readiness: NEEDS_EXPENSE_CAUSE
+  - id: "B03"
+    title: "Asignar gastos por inmueble y cuota"
+    study: "Estudiar cargas comunes, usufructo y nuda propiedad"
+    rule_concept: "semantic_overlay: property_share_allocation=conditional_theories"
+    reports: ["ad_hoc_cost_responsibility"]
+    readiness: NEEDS_DEEDS
+  - id: "B04"
+    title: "Inversión de ingreso y carga"
+    study: "Comparar participaciones de renta p_i y de costos q_i"
+    rule_concept: "semantic_overlay: incidence_share=actual|proportional|inverted"
+    reports: ["ad_hoc_actor_incidence"]
+    readiness: NEEDS_SHARE_MAP
+  - id: "B05"
+    title: "Adelantos personales y reintegro"
+    study: "Pago de tercero recuperado hoy, tarde o nunca"
+    rule_concept: "add_future: reimbursement_received=0|partial|full; beneficiary=proved_relation"
+    reports: ["treasury_accountability", "debt_accountability", "ad_hoc_cost_responsibility"]
+    readiness: NEEDS_RELATION
+  - id: "B06"
+    title: "Costos de donación sin asignación"
+    study: "Alternativas respecto de USD 2149.50 sin reconocer deuda jurídica"
+    rule_concept: "semantic_overlay: pending_allocation=unassigned|hypothetical_shares"
+    reports: ["ad_hoc_cost_responsibility", "debt_accountability"]
+    readiness: NEEDS_LAW_EVIDENCE
+  - id: "G01"
+    title: "Rentas fraccionadas, impuestos centralizados"
+    study: "Riesgo de dejar caja común sin recursos cuando la renta va a varios actores"
+    rule_concept: "reroute_future: rent_by_asset; preserve_charges_in_box"
+    reports: ["treasury_accountability", "ad_hoc_funding_gap"]
+    readiness: NEEDS_AUTHORITY
+  - id: "G02"
+    title: "Cambio de custodio"
+    study: "Estudiar trazabilidad y costo de transferencia acordada"
+    rule_concept: "reroute_future: collection_channel=neutral|successor|current"
+    reports: ["treasury_accountability", "ad_hoc_handover_matrix"]
+    readiness: NEEDS_CUSTODY
+  - id: "G03"
+    title: "Entrega inmediata o gradual"
+    study: "Continuidad de pagos y costo del traspaso"
+    rule_concept: "policy_handover: date=now|30d|60d; responsibility_transferred_if_valid"
+    reports: ["treasury_accountability", "ad_hoc_handover_matrix"]
+    readiness: NEEDS_AUTHORITY
+  - id: "G04"
+    title: "Fondos discutidos segregados"
+    study: "Diferenciar monto admitido, discutido y custodia, sin presumir consignación"
+    rule_concept: "semantic_overlay: custody_bucket=admitted|disputed|unverified"
+    reports: ["ad_hoc_custody_exposure"]
+    readiness: NEEDS_CUSTODY
+  - id: "G05"
+    title: "Rendición V1-objeciones-V2"
+    study: "Efecto documental y costos de una rendición corregida"
+    rule_concept: "game_branch: evidence_events=version|objection|response"
+    reports: ["ad_hoc_evidence_readiness"]
+    readiness: GAME_LAYER
+  - id: "X01"
+    title: "Incumplimiento tributario encadenado"
+    study: "Cuánto aumenta costo de dejar impagos cargos sucesivos"
+    rule_concept: "compound: missed_charges+assumed_penalties+followup_expense"
+    reports: ["treasury_accountability", "ad_hoc_exposure_register"]
+    readiness: CONDITIONAL
+  - id: "X02"
+    title: "Deterioro de inmueble"
+    study: "Beneficio financiero de mantenimiento temprano frente a urgencia futura"
+    rule_concept: "compound: repair_now|defer_with_extra_cost"
+    reports: ["treasury_accountability", "ad_hoc_asset_preservation"]
+    readiness: NEEDS_QUOTES
+  - id: "X03"
+    title: "Venta hoy o postergada"
+    study: "Rentas de espera vs carrying costs y costo de oportunidad"
+    rule_concept: "decision_branch: sale_now|hold; proceeds=assumed; capital_not_recurring"
+    reports: ["treasury_accountability", "ad_hoc_opportunity_cost"]
+    readiness: NEEDS_VALUATION
+  - id: "X04"
+    title: "Salida institucional frente a conflicto"
+    study: "Costo y demora comparado con administrador acordado"
+    rule_concept: "game_branch: cooperative|procedural; only conditional lawful moves"
+    reports: ["ad_hoc_exposure_register", "ad_hoc_cooperation_frontier"]
+    readiness: GAME_LAYER

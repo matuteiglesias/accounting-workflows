@@ -1,0 +1,29 @@
+# PROVISIONAL owner-reported direct-collector mapping, NOT verified custody/title.
+# Source: Contab Torcuato, G. Governance Flows, rows 10-15, read 2026-11-19.
+# ID F-T01-VID, F-T01-KIO, F-T32-TAI, F-T32-COR, F-T32-TEC.
+# Ledger FB is a reporting aggregate, NOT a physical cash box.
+# No Fernando collector assertion exists in the inspected governance table.
+# Taipe excluded as the proposed offset for the father's wife use of another property.
+# No independent market-rent amount or legal agreement was verified.
+schema: accounting.agreement_attribution.v0
+id: primos_alejandro_50_50_provisional
+box: Family Business
+currency: ARS
+excluded_rent_tags:
+  - FB_RENT_TIGRE32_TAIPE
+rent_attribution:
+  - equals: {tag: FB_RENT_TIGRE01_VIDRIERO}
+    shares: {primos: 1.0, alejandro: 0.0}
+  - equals: {tag: FB_RENT_TIGRE01_KIOSCO}
+    shares: {primos: 1.0, alejandro: 0.0}
+  - equals: {tag: FB_RENT_TIGRE32_CORREA}
+    shares: {primos: 0.0, alejandro: 1.0}
+  - equals: {tag: FB_RENT_TIGRE32_TECNICO}
+    shares: {primos: 0.5, alejandro: 0.5}
+allowed_expense_types:
+  - Impuestos
+  - Servicio
+  - Mantenimiento
+  - Legal
+expense_boxes:
+  - Family Business
