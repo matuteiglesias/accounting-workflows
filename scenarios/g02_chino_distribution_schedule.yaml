@@ -1,0 +1,69 @@
+# G02 / Chino Juan / separate, private scenario policy.
+# Evidence: PM paid ledger distribution May, June, July and October 2026.
+# Aug/Sep NOT PAID and NOT ACCRUED. No retroactive payments, ever.
+# Nov 2026 is current/partially observed and only a hypothetical distribution.
+# Never alters real paid entries, loans, bank statements or official Viewer reports.
+# The USD 190 portion was physically paid to primos in ARS using Matias's
+# Mercado Pago, already charged ONCE to PM. USD 760 never sold and remain
+# in Matias's custody on PM's behalf. Future ARS/USD equivalence is a
+# valuation reference, NOT a currency exchange or funding commitment.
+schema: accounting.g02_chino_distribution.v1
+id: g02_chino_forward_distribution
+source:
+  run_id: 20261119T061512Z_FBPM
+  all_status_sha256: 15836867b3d777e31f438ff586b753d185bf28c82e538f9a6831fb020d9e7b7f
+  monthly_policy_inputs_sha256: 60e21f17b4d95c9680a8a601b0b0914a50ac643ed9345c17edcc916d2be458e0
+as_of_date: "2026-11-19"
+through_month: "2027-04"
+historical_paid_months:
+  - "2026-05"
+  - "2026-06"
+  - "2026-07"
+  - "2026-10"
+historical_skipped_no_accrual:
+  - "2026-08"
+  - "2026-09"
+no_retroactive: true
+
+agreement:
+  rent_tag_ars: PM_RENT_CABA_CHINO_ARS
+  rent_tag_usd: PM_RENT_CABA_CHINO_USD
+  monthly_rent_ars: 400000
+  monthly_rent_usd: 380
+  primos_base_ars: 200000
+  primos_usd_equivalence_reference: 190
+  alejandro_to_hh_ars: 200000
+  alejandro_debt_offset_usd: 190
+  payment_day: 20
+  future_physical_funder: unassigned_until_authorized
+
+historical_settlement:
+  ars_equivalent_physical_funder: Matias_MercadoPago
+  ars_equivalent_accounting_charge_box: Property Management
+  usd_reference_custodian: Matias_for_PM
+  usd_physically_sold: false
+  reimbursement_right_assumed: false
+
+ars_equivalent_rates_per_usd:
+  "2026-11": 1500 # ARS equivalence estimate; NO FX sale
+  "2026-12": 1500
+  "2027-01": 1500
+  "2027-02": 1500
+
+variants:
+  - id: reserve_no_new_payouts
+    months: []
+    explanation: >
+      No new distribution. Historical paid ones remain paid; skipped months
+      do not generate claims. Preserve funds for the expected obligations.
+  - id: distribute_nov_to_feb
+    months: ["2026-11", "2026-12", "2027-01", "2027-02"]
+    explanation: >
+      Monthly distribution in each selected current/future month,
+      including an ARS-valued USD 190 reference and separate HH receipt leg. NO FX trade. This is a
+      stress test, not authorization to pay.
+  - id: distribute_only_nov_dec
+    months: ["2026-11", "2026-12"]
+    explanation: >
+      Intermediate sensitivity case: November and December only; do not
+      accrue or catch up January/February or any skipped historical month.
