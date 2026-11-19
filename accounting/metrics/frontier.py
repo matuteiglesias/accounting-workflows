@@ -13,8 +13,6 @@ from typing import Any, Dict
 import pandas as pd
 
 from accounting.artifacts.manifest import artifact_contract_for_name
-from accounting.cash_authority import validated_cash_schema_supported
-from accounting.cash_projection import iter_validated_monthly_cash_positions
 from accounting.metrics.cash_control_adapter import (
     SOURCE_TABLE as CASH_CONTROL_SOURCE,
     monthly_rows as cash_control_monthly_rows,
@@ -43,8 +41,9 @@ CANONICAL_FRONTIER_SOURCES = {
 INITIAL_METRICS = [
     "IS.RENT.TOTAL", "IS.REVENUE.OPERATING", "IS.OPEX.PROPERTY", "IS.NET.OPERATING",
     "FUND.CONTRIB.TOTAL", "DIST.DRAWS.PERSONAL", "COV.NET.AFTER_DRAWS",
-    "BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "ID.DEBT.OPEN.BY_COUNTERPARTY",
+    "ID.DEBT.OPEN.BY_COUNTERPARTY",
     "DQ.CLASSIFICATION.COVERAGE", "DQ.UNKNOWN.AMOUNT",
+    "CTRL.BOX.NET_MOVEMENT", "CTRL.BOX.CUM_NET",
     "TR.FX.CONVERSION.IN", "TR.FX.CONVERSION.OUT", "TR.FX.COST.OUT", "TR.FX.NET", "TR.FX.BY_BOX", "TR.FX.BY_TYPE",
 ]
 
@@ -180,14 +179,6 @@ def _statement_series(
         )
         for _, r in sub.iterrows()
     ]
-
-
-def _selection_period_end(selection) -> str:
-    if selection.selected.empty or "period_end" not in selection.selected.columns:
-        return selection.period
-    values = selection.selected["period_end"].fillna("").astype(str).str.strip()
-    values = values[values.ne("")]
-    return values.max() if not values.empty else selection.period
 
 
 def _build_metrics_frontier_baseline(
@@ -387,92 +378,6 @@ def _build_metrics_frontier_baseline(
                     )
                 )
 
-    cash_unavailable = cash_status == "unavailable"
-    frontend_safe_cash = (
-        pd.DataFrame()
-        if cash_unavailable
-        else cash.loc[
-            cash["is_frontend_safe"].astype(str).str.lower().isin({"true", "1", "yes", "y"})
-        ].copy()
-    )
-    no_frontend_safe = cash_unavailable or frontend_safe_cash.empty
-    cash_suitability = "unavailable" if no_frontend_safe else "safe"
-    cash_contract_status = "unavailable" if no_frontend_safe else "active"
-    cash_caveat_text = cash_caveat or (
-        "No frontend-safe cash rows in monthly_cash_close.csv; no fallback to party/internal balances."
-    )
-    rows.append(
-        _contract_row(
-            "BS.CASH.TOTAL",
-            "Frontend-safe cash total",
-            "cash",
-            "stock",
-            "monthly_cash_close.csv",
-            "sum close_amount where is_frontend_safe=true by period/currency",
-            suitability=cash_suitability,
-            caveat=cash_caveat_text if no_frontend_safe else "Only explicit frontend-safe cash rows are included.",
-            status=cash_contract_status,
-            validation="warn" if no_frontend_safe else "ok",
-        )
-    )
-    rows.append(
-        _contract_row(
-            "BS.CASH.CLOSE.BOX",
-            "Frontend-safe cash by Box",
-            "cash",
-            "stock",
-            "monthly_cash_close.csv",
-            "close_amount by Box where is_frontend_safe=true",
-            suitability=cash_suitability,
-            caveat=cash_caveat_text if no_frontend_safe else "Only explicit frontend-safe cash rows are included.",
-            status=cash_contract_status,
-            validation="warn" if no_frontend_safe else "ok",
-            notes="dimension_name=Box",
-        )
-    )
-    if not no_frontend_safe:
-        grouped = frontend_safe_cash.groupby(
-            ["period", "period_end", "Currency"], dropna=False
-        )["close_amount"].sum().reset_index()
-        for _, r in grouped.iterrows():
-            series.append(
-                _series_row(
-                    "BS.CASH.TOTAL",
-                    r["period"],
-                    r["period_end"],
-                    r["Currency"],
-                    r["close_amount"],
-                    "monthly_cash_close.csv",
-                    run_id,
-                    as_of_date,
-                    "safe",
-                    True,
-                    False,
-                    False,
-                    "Only explicit frontend-safe cash rows are included.",
-                )
-            )
-        for _, r in frontend_safe_cash.iterrows():
-            series.append(
-                _series_row(
-                    "BS.CASH.CLOSE.BOX",
-                    r["period"],
-                    r["period_end"],
-                    r["Currency"],
-                    r["close_amount"],
-                    "monthly_cash_close.csv",
-                    run_id,
-                    as_of_date,
-                    "safe",
-                    True,
-                    False,
-                    False,
-                    "Only explicit frontend-safe cash rows are included.",
-                    dimension_name="Box",
-                    dimension_value=str(r.get("Box", "")),
-                )
-            )
-
     debt_unavailable = debt_status == "unavailable"
     rows.append(
         _contract_row(
@@ -614,17 +519,6 @@ def build_frontier_qa(
         f"missing={missing_initial}; unavailable={unavailable_initial}",
     )
 
-    cash_safe_source = (
-        False
-        if cash is None or cash.empty
-        else cash["is_frontend_safe"].astype(str).str.lower().isin({"true", "1", "yes", "y"}).any()
-    )
-    cash_series = series.loc[series["metric_id"].astype(str).str.startswith("BS.CASH")]
-    add(
-        "no_frontend_cash_without_frontend_safe_cash_source",
-        cash_safe_source or cash_series.empty,
-        f"safe_source={cash_safe_source}; cash_series_rows={len(cash_series)}",
-    )
     op_contract = frontier.loc[
         frontier["metric_id"].eq("IS.REVENUE.OPERATING"), "calculation_rule"
     ].astype(str).str.cat(sep=";")
@@ -665,10 +559,12 @@ def build_frontier_qa(
         "Currency" in series.columns,
         f"columns={list(series.columns)}",
     )
+    retired_cash_ids = {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}
+    emitted_ids = ids | set(series.get("metric_id", pd.Series(dtype=str)).astype(str))
     add(
-        "cash_metrics_unavailable_if_no_frontend_safe_cash_rows",
-        cash_safe_source or cash_series.empty,
-        f"safe_source={cash_safe_source}; cash_series_rows={len(cash_series)}",
+        "retired_validated_cash_metrics_absent",
+        not (emitted_ids & retired_cash_ids),
+        "validated cash headline and frontend-safe QA IDs are retired from governed metrics",
     )
     add(
         "debt_metrics_currency_separated",
@@ -748,141 +644,6 @@ def build_metrics_frontier(
     run_id: str,
     as_of_date: str,
 ) -> Dict[str, Path]:
-    """Build the frontier and apply the governed validated-cash projection."""
+    """Build the governed frontier without the retired validated-cash projection."""
 
-    paths = _build_metrics_frontier_baseline(run_root, metrics_dir, run_id, as_of_date)
-
-    run_root = Path(run_root)
-    metrics_dir = Path(metrics_dir)
-    cash_path = run_root / "monthly_cash_close.csv"
-    cash = pd.read_csv(cash_path) if cash_path.exists() else None
-    if cash is None or cash.empty or not validated_cash_schema_supported(cash):
-        return paths
-
-    frontier_path = paths["metric_contract_frontier"]
-    series_path = paths["frontend_metric_series"]
-    frontier = pd.read_csv(frontier_path)
-    series = pd.read_csv(series_path)
-
-    cash_ids = {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX"}
-    frontier = frontier.loc[~frontier["metric_id"].astype(str).isin(cash_ids)].copy()
-    series = series.loc[~series["metric_id"].astype(str).isin(cash_ids)].copy()
-
-    projections = list(iter_validated_monthly_cash_positions(cash))
-    selected_rows: list[dict[str, Any]] = []
-    for projection in projections:
-        selected = projection.selection
-        if not selected.available:
-            continue
-        metric_id = "BS.CASH.TOTAL" if projection.scope == "currency" else "BS.CASH.CLOSE.BOX"
-        selected_rows.append(
-            _series_row(
-                metric_id,
-                projection.reporting_period,
-                _selection_period_end(selected),
-                projection.currency,
-                selected.value,
-                "monthly_cash_close.csv",
-                run_id,
-                as_of_date,
-                "safe",
-                True,
-                False,
-                False,
-                "Governed validated account snapshots only; inferred/internal excluded and no fallback used.",
-                dimension_name="Box" if projection.scope == "box" else "",
-                dimension_value=projection.box if projection.scope == "box" else "",
-            )
-        )
-
-    has_governed_cash = bool(selected_rows)
-    status = "active" if has_governed_cash else "unavailable"
-    suitability = "safe" if has_governed_cash else "unavailable"
-    validation = "ok" if has_governed_cash else "warn"
-    caveat = (
-        "Cash headline uses latest valid as_of_date per Box/account_id and sums selected validated account closes. "
-        "Inferred control and internal balances are excluded; no fallback is permitted."
-        if has_governed_cash
-        else "No complete governed validated cash position is available; no inferred/internal fallback used."
-    )
-    rule_total = (
-        "cash.position.validated: latest valid as_of_date per Box/account_id; "
-        "sum selected accounts by period/currency; missing/incomplete position unavailable"
-    )
-    rule_box = (
-        "cash.position.validated: latest valid as_of_date per account_id within period/Currency/Box; "
-        "sum selected accounts; no inferred/internal fallback"
-    )
-    new_frontier = pd.DataFrame(
-        [
-            _contract_row(
-                "BS.CASH.TOTAL",
-                "Frontend-safe cash total",
-                "cash",
-                "stock",
-                "monthly_cash_close.csv",
-                rule_total,
-                suitability=suitability,
-                caveat=caveat,
-                status=status,
-                validation=validation,
-            ),
-            _contract_row(
-                "BS.CASH.CLOSE.BOX",
-                "Frontend-safe cash by Box",
-                "cash",
-                "stock",
-                "monthly_cash_close.csv",
-                rule_box,
-                suitability=suitability,
-                caveat=caveat,
-                status=status,
-                validation=validation,
-                notes="dimension_name=Box; governed by cash.position.validated",
-            ),
-        ],
-        columns=FRONTIER_COLUMNS,
-    )
-    frontier = pd.concat([frontier, new_frontier], ignore_index=True)
-    if selected_rows:
-        series = pd.concat(
-            [series, pd.DataFrame(selected_rows, columns=SERIES_COLUMNS)],
-            ignore_index=True,
-        )
-
-    qa = build_frontier_qa(frontier, series, cash)
-    qa = pd.concat(
-        [
-            qa,
-            pd.DataFrame(
-                [
-                    {
-                        "check": "cash_headline_uses_governed_validated_projection",
-                        "status": "pass",
-                        "detail": f"cash_series_rows={len(selected_rows)}; fallback_to_inferred=never",
-                        "severity": "error",
-                    },
-                    {
-                        "check": "cash_frontier_excludes_internal_and_inferred_positions",
-                        "status": "pass",
-                        "detail": "all BS.CASH series rows are reconstructed from cash.position.validated selections",
-                        "severity": "error",
-                    },
-                    {
-                        "check": "cash_frontier_scopes_are_source_backed",
-                        "status": "pass",
-                        "detail": f"projection_scopes={len(projections)}; no report-layer Cartesian scope synthesis",
-                        "severity": "error",
-                    },
-                ],
-                columns=QA_COLUMNS,
-            ),
-        ],
-        ignore_index=True,
-    )
-
-    frontier.to_csv(frontier_path, index=False)
-    series.to_csv(series_path, index=False)
-    qa.to_csv(paths["metrics_frontier_qa"], index=False)
-    qa.to_csv(paths["frontier_source_qa"], index=False)
-    return paths
+    return _build_metrics_frontier_baseline(run_root, metrics_dir, run_id, as_of_date)

@@ -106,20 +106,25 @@ def main() -> None:
 
     if annual_path.exists():
         annual_rows = read_csv(annual_path)
-        cash_rows = [
-            r for r in annual_rows if r.get("metric_id", "").startswith("BS.CASH")
-        ]
-        bad_cash = [
-            r
-            for r in cash_rows
-            if r.get("value_status") == "available"
-            and r.get("value", "") in {"", "0", "0.0"}
-            and "unavailable" in r.get("caveat", "").lower()
+        add(
+            "retired_validated_cash_metrics_absent",
+            not any(
+                r.get("metric_id", "")
+                in {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}
+                for r in annual_rows
+            ),
+            "legacy validated-cash metric IDs are absent from annual metrics",
+        )
+        controls = [
+            r for r in annual_rows
+            if r.get("metric_id") in {"CTRL.BOX.NET_MOVEMENT", "CTRL.BOX.CUM_NET"}
         ]
         add(
-            "cash_status_explicit",
-            not bad_cash,
-            f"cash_rows={len(cash_rows)} bad={len(bad_cash)}",
+            "box_control_metrics_present_and_caveated",
+            {r.get("metric_id") for r in controls}
+            == {"CTRL.BOX.NET_MOVEMENT", "CTRL.BOX.CUM_NET"}
+            and all(r.get("caveat", "").strip() for r in controls),
+            f"rows={len(controls)}",
         )
         debt_stock = any(
             r.get("metric_id", "").startswith("ID.DEBT.")
@@ -151,6 +156,19 @@ def main() -> None:
             not cross_currency_bad,
             f"rows={len(cross_currency_bad)}",
         )
+
+    for name, path in (("frontier", frontier_path), ("series", series_path)):
+        if path.exists():
+            rows = read_csv(path)
+            add(
+                f"{name}_retired_validated_cash_metrics_absent",
+                not any(
+                    r.get("metric_id", "")
+                    in {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}
+                    for r in rows
+                ),
+                f"checked={len(rows)}",
+            )
 
     failed = [c for c in checks if not c[1]]
     for name, ok, detail in checks:

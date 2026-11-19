@@ -183,7 +183,7 @@ def test_monthly_and_annual_use_identical_validated_population() -> None:
     assert set(monthly.selected["account_id"]) == set(annual.selected["account_id"])
 
 
-def test_frontier_monthly_cash_is_governed_and_not_double_counted(tmp_path: Path) -> None:
+def test_frontier_retires_validated_cash_metrics(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     metrics_dir = tmp_path / "metrics"
     run_root.mkdir()
@@ -195,18 +195,12 @@ def test_frontier_monthly_cash_is_governed_and_not_double_counted(tmp_path: Path
         series["period"].astype(str).eq("2026-01")
         & series["Currency"].astype(str).eq("ARS")
     ]
-    total = jan[jan["metric_id"].eq("BS.CASH.TOTAL")]
-    box = jan[jan["metric_id"].eq("BS.CASH.CLOSE.BOX")]
-    assert len(total) == 1 and total.iloc[0]["value"] == 100
-    assert len(box) == 1 and box.iloc[0]["value"] == 100
-
+    assert not jan["metric_id"].isin({"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX"}).any()
     frontier = pd.read_csv(paths["metric_contract_frontier"])
-    cash_contract = frontier[frontier["metric_id"].eq("BS.CASH.TOTAL")].iloc[0]
-    assert "cash.position.validated" in cash_contract["calculation_rule"]
-    assert "inferred" in cash_contract["caveat"].lower()
+    assert not frontier["metric_id"].isin({"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX"}).any()
 
 
-def test_annual_metrics_and_companion_use_same_cash_selector(tmp_path: Path) -> None:
+def test_annual_metrics_retire_validated_cash_metrics(tmp_path: Path) -> None:
     cash = cash_fixture()
     run_root = tmp_path / "run"
     metrics_dir = tmp_path / "annual"
@@ -215,20 +209,9 @@ def test_annual_metrics_and_companion_use_same_cash_selector(tmp_path: Path) -> 
 
     paths = build_annual_balance_dashboard(run_root, metrics_dir, "fixture", "2026-01-31")
     annual = pd.read_csv(paths["annual_balance_dashboard_metrics"])
-    annual_year = pd.to_numeric(annual["period"], errors="coerce")
-    box = annual[
-        annual["metric_id"].eq("BS.CASH.CLOSE.BOX")
-        & annual_year.eq(2026)
-        & annual["Currency"].eq("ARS")
-        & annual["dimension_value"].eq("Property Management")
-    ]
-    total = annual[
-        annual["metric_id"].eq("BS.CASH.TOTAL")
-        & annual_year.eq(2026)
-        & annual["Currency"].eq("ARS")
-    ]
-    assert len(box) == 1 and box.iloc[0]["value"] == 100
-    assert len(total) == 1 and total.iloc[0]["value"] == 100
+    assert not annual["metric_id"].isin(
+        {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}
+    ).any()
 
 def test_no_validated_cash_never_falls_back_to_inferred() -> None:
     cash = cash_fixture()

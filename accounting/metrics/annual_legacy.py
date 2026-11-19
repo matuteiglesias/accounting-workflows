@@ -37,10 +37,10 @@ REQUIRED = [
     "FUND.CONTRIB.BY_CHANNEL","FUND.CONTRIB.BY_CASH_EFFECT","FUND.CONTRIB.BY_TARGET_BOX",
     "FUND.CONTRIB.DIRECT_OBLIGATION","FUND.CONTRIB.CASH_TO_BOX","FUND.CONTRIB.DEBT_LINKED",
     "DIST.DRAWS.PERSONAL","DIST.DIVIDENDS","DIST.DRAWS.BY_TYPE","COV.NET.AFTER_DRAWS","COV.SAVINGS_RATE",
-    "BS.CASH.TOTAL","BS.CASH.CLOSE.BOX","DQ.CASH.FRONTEND_SAFE",
     "ID.DEBT.TOTAL.OPEN","ID.DEBT.OPEN.BY_COUNTERPARTY","ID.DEBT.PRINCIPAL.OPEN","ID.DEBT.INTEREST.OPEN","ID.DEBT.NET_PM_POSITION",
     "ID.DEBT.ACTIVITY.NEW_CLAIMS","ID.DEBT.ACTIVITY.REPAYMENTS","ID.DEBT.ACTIVITY.INTEREST_ACCRUED","ID.DEBT.ACTIVITY.ADJUSTMENTS","ID.DEBT.ACTIVITY.NET_CHANGE",
     "DQ.CLASSIFICATION.COVERAGE","DQ.UNKNOWN.AMOUNT","DQ.OPEX.LEAKAGE.AMOUNT","DQ.DEBT.ACTIVITY.RECONCILIATION",
+    "CTRL.BOX.NET_MOVEMENT","CTRL.BOX.CUM_NET",
     "TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE",
 ]
 LEGACY = ["IS.INCOME.TOTAL","IS.NET.AFTER_COSTS","IS.NET.POST_DRAWS","IS.CONTRIB.TOTAL","IS.DRAWS.PERSONAL","BS.CASH.FB","BS.CASH.PM"]
@@ -221,17 +221,6 @@ def build_annual_balance_dashboard(run_root: Path, metrics_dir: Path, run_id: st
     for mid in ["TR.FX.CONVERSION.IN","TR.FX.CONVERSION.OUT","TR.FX.COST.OUT","TR.FX.NET","TR.FX.BY_BOX","TR.FX.BY_TYPE"]:
         if not any(r["metric_id"]==mid for r in rows): unavailable(mid,"monthly_flow_semantic_split.csv","treasury_fx",caveat="No treasury FX rows classified in canonical semantic split.")
 
-    if cash is not None and not cash.empty and "is_frontend_safe" in cash:
-        c=_year(cash[_truth(cash["is_frontend_safe"])]); c["close_amount"]=pd.to_numeric(c.get("close_amount",0),errors="coerce")
-        if c.empty:
-            unavailable("BS.CASH.TOTAL","monthly_cash_close.csv","3. Cash and liquidity","stock","No frontend-safe cash rows exist; no fallback used."); unavailable("BS.CASH.CLOSE.BOX","monthly_cash_close.csv","3. Cash and liquidity","stock","No frontend-safe cash rows exist; no fallback used.")
-        else:
-            last=c.sort_values("period_end").groupby(["period","Currency","Box"],dropna=False).tail(1)
-            for _,r in last.iterrows(): rows.append(_base("BS.CASH.CLOSE.BOX",r.period,r.Currency,r.close_amount,"available","stock","cash","3. Cash and liquidity","monthly_cash_close.csv","is_frontend_safe=true; dimension=Box","annual stock = last frontend-safe monthly close by year, Box, Currency",run_id,as_of_date,dim_name="Box",dim_value=str(r.Box),caveat="Only explicit frontend-safe cash rows are included."))
-            for _,r in last.groupby(["period","Currency"],dropna=False)["close_amount"].sum().reset_index().iterrows(): rows.append(_base("BS.CASH.TOTAL",r.period,r.Currency,r.close_amount,"available","stock","cash","3. Cash and liquidity","monthly_cash_close.csv","is_frontend_safe=true","sum annual last frontend-safe box closes by year and currency",run_id,as_of_date,caveat="All source rows are explicitly frontend-safe."))
-        for y in sorted(_year(cash).period.unique()): rows.append(_base("DQ.CASH.FRONTEND_SAFE",y,"",int(_truth(cash[cash.period.astype(str).str.startswith(y)]["is_frontend_safe"]).sum()),"available","quality","data_quality","3. Cash and liquidity","monthly_cash_close.csv","is_frontend_safe","count of frontend-safe cash rows by year",run_id,as_of_date,suit="safe_with_caveat"))
-    else: unavailable("BS.CASH.TOTAL","monthly_cash_close.csv","3. Cash and liquidity","stock"); unavailable("BS.CASH.CLOSE.BOX","monthly_cash_close.csv","3. Cash and liquidity","stock"); unavailable("DQ.CASH.FRONTEND_SAFE","monthly_cash_close.csv","3. Cash and liquidity","quality")
-
     if debt is not None and not debt.empty:
         d=debt.copy(); d["period"]=d["period"].astype(str); d["year"]=d["period"].str.slice(0,4); d["open_amount"]=pd.to_numeric(d.get("open_amount",pd.NA),errors="coerce")
         selected_records=[]
@@ -306,7 +295,8 @@ def build_annual_balance_dashboard_qa(metrics: pd.DataFrame, contract: pd.DataFr
     add("annual_stocks_use_last_close", metrics.empty or metrics[metrics.flow_or_stock.eq("stock")].calculation_rule.str.contains("last|latest period|sum annual last",case=False,na=False).all(), "stock rules documented")
     add("ratios_use_annual_aggregates", metrics[metrics.flow_or_stock.eq("ratio")].calculation_rule.str.contains("annual",case=False,na=False).all() if not metrics.empty else True, "ratio rules documented")
     add("no_cross_currency_aggregation", metrics.empty or metrics[~metrics.flow_or_stock.isin(["quality","legacy"]) & metrics.value_status.eq("available")].Currency.astype(str).str.strip().ne("").all(), "money metrics carry Currency")
-    cash=metrics[metrics.metric_id.str.startswith("BS.CASH")]; add("cash_unavailable_without_frontend_safe_rows", cash.empty or cash[~cash.legacy_flag.astype(str).str.casefold().eq("true")].value_status.isin(["available","unavailable"]).all(), f"cash_statuses={sorted(cash.value_status.unique())}")
+    retired_cash_ids = {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}
+    add("retired_validated_cash_metrics_absent", not set(metrics.metric_id.astype(str)) & retired_cash_ids, "validated cash headline and frontend-safe QA IDs are retired")
     add("debt_stock_not_mixed_with_flows", not metrics[metrics.metric_id.str.startswith("ID.DEBT") & metrics.metric_id.str.contains("OPEN|POSITION")].flow_or_stock.eq("flow").any(), "debt OPEN/POSITION are stock")
     add("debt_activity_reconciles_or_residual_visible", "ID.DEBT.ACTIVITY.ADJUSTMENTS" in set(metrics.metric_id) and "DQ.DEBT.ACTIVITY.RECONCILIATION" in set(metrics.metric_id), "adjustments and reconciliation metric present")
     add("legacy_metrics_marked_legacy", metrics[metrics.metric_id.isin(LEGACY)].legacy_flag.astype(str).str.casefold().eq("true").all(), "legacy IDs demoted")

@@ -71,7 +71,7 @@ def test_reunified_frontier_has_no_legacy_delegate() -> None:
     assert "frontier_legacy" not in text
     assert "LEGACY_COMPAT_EXPORTS" not in text
     assert "def build_metrics_frontier(" in text
-    assert "iter_validated_monthly_cash_positions" in text
+    assert "iter_validated_monthly_cash_positions" not in text
 
 
 def test_remaining_facade_exports_are_exactly_caller_inventory() -> None:
