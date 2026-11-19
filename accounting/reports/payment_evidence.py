@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Reproducible private report for an approved transaction-evidence snapshot."""
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
 import html
@@ -125,7 +125,7 @@ def _concept(row: pd.Series) -> str:
     return " · ".join(values)
 
 
-def _format_links(tx_id: str, tx_links: list[dict[str, str]], docs: dict[str, dict[str, str]]) -> str:
+def _format_links(tx_id: str, tx_links: list[dict[str, str]], docs: dict[str, dict[str, str]], *, section: str = "payment") -> str:
     """Priority: approved receipt > receipt to review > bill supporting the obligation."""
     links = []
     shown: set[tuple[str, str]] = set()
@@ -136,14 +136,23 @@ def _format_links(tx_id: str, tx_links: list[dict[str, str]], docs: dict[str, di
             return (2, relation["evidence_id"])
         return (3, relation["evidence_id"])
 
+    if section not in {"payment", "statement"}:
+        raise ValueError(f"unknown evidence link section: {section}")
     for relation in sorted(tx_links, key=priority):
         kind = relation["relation"]
+        if section == "payment" and kind in {"liability_source", "statement_context"}:
+            continue
+        if section == "statement" and kind not in {"liability_source", "statement_context"}:
+            continue
         if kind in PAYMENT_RELATIONS:
             label = "Ver comprobante" if relation["status"] == "approved" else "Revisar comprobante (no aprobado)"
             css = "evidence-link" if relation["status"] == "approved" else "evidence-link evidence-pending"
         elif kind == "liability_source":
             label = "Ver boleta (no acredita pago)"
             css = "evidence-link evidence-bill"
+        elif kind == "statement_context":
+            label = "Ver estado de cuenta (no es recibo)"
+            css = "evidence-link evidence-statement"
         elif kind == "other_support":
             label = "Recibo de la contrapartida"
             css = "evidence-link evidence-counterpart"
@@ -167,12 +176,15 @@ def _status_for(tx_links: list[dict[str, str]]) -> tuple[str, str]:
     approved = [r for r in tx_links if r["status"] == "approved" and r["relation"] in PAYMENT_RELATIONS]
     candidate = [r for r in tx_links if r["status"] == "candidate" and r["relation"] in PAYMENT_RELATIONS]
     liability = [r for r in tx_links if r["relation"] == "liability_source"]
+    statement = [r for r in tx_links if r["relation"] == "statement_context"]
     if approved:
         return "approved", "Comprobante aprobado"
     if candidate:
         return "candidate", "Comprobante por revisar"
     if liability:
         return "bill_only", "Solo boleta; falta prueba de pago"
+    if statement:
+        return "statement_only", "Solo estado de cuenta; pago no validado"
     return "missing", "Sin candidato documental"
 
 
@@ -229,13 +241,15 @@ def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *
             f'<td class="amount">{html.escape(str(row.get("amount", "")))}</td>'
             f'<td>{html.escape(str(row.get("Currency", "")))}</td>'
             f'<td>{state_markup}</td>'
-            f'<td>{_format_links(tx_id, links_by_tx.get(tx_id, []), doc_map)}</td></tr>'
+            f'<td>{_format_links(tx_id, links_by_tx.get(tx_id, []), doc_map, section="payment")}</td>'
+            f'<td>{_format_links(tx_id, links_by_tx.get(tx_id, []), doc_map, section="statement")}</td></tr>'
         )
     approved_count = sum(review_status(str(tx))[0] == "approved" for tx in required["tx_id"])
     candidate_count = sum(review_status(str(tx))[0] == "candidate" for tx in required["tx_id"])
     counterpart_count = sum(review_status(str(tx))[0] == "counterpart" for tx in required["tx_id"])
     bill_only_count = sum(review_status(str(tx))[0] == "bill_only" for tx in required["tx_id"])
-    missing_count = len(required) - approved_count - candidate_count - counterpart_count - bill_only_count
+    statement_only_count = sum(review_status(str(tx))[0] == "statement_only" for tx in required["tx_id"])
+    missing_count = len(required) - approved_count - candidate_count - counterpart_count - bill_only_count - statement_only_count
     attachment_count = relations["evidence_id"].nunique()
     preview_banner = ('<div class="preview-banner"><strong>REPORTE PRIVADO EN REVISIÓN — NO PUBLICAR.</strong> '
                       'Los comprobantes aprobados se identificaron y registraron con auditoría; las contrapartidas no representan pagos adicionales. '
@@ -245,12 +259,12 @@ def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *
 <title>{html.escape(REPORT_TITLE)}</title>
 <style>
 :root{{--ink:#1d2733;--muted:#64748b;--line:#dbe2ea;--green:#147a4b;--green-bg:#e8f6ee;--amber:#956d00;--amber-bg:#fff7d6;--gray:#667085;--gray-bg:#f1f3f5}}
-*{{box-sizing:border-box}}body{{margin:0;color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc}}main{{max-width:1500px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:28px}}h2{{font-size:18px;margin:24px 0 10px}}.meta,.note{{color:var(--muted)}}.panel{{background:white;border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.card{{border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:180px}}.card strong{{display:block;font-size:24px}}.filters{{display:flex;gap:10px;flex-wrap:wrap;align-items:end}}label{{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}}input,select{{font:inherit;padding:8px;border:1px solid #bcc7d3;border-radius:6px;background:white;color:var(--ink)}}table{{width:100%;border-collapse:collapse;background:white;font-size:13px}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}th{{position:sticky;top:0;background:#eef2f6;z-index:1}}.tx-id{{font-family:ui-monospace,SFMono-Regular,monospace;white-space:nowrap}}.amount{{text-align:right;white-space:nowrap}}.status{{display:inline-block;border-radius:999px;padding:3px 8px;white-space:nowrap;font-weight:650;font-size:12px}}.status-approved{{color:var(--green);background:var(--green-bg)}}.status-candidate{{color:var(--amber);background:var(--amber-bg)}}.status-missing{{color:var(--gray);background:var(--gray-bg)}}.status-counterpart{{color:#385d78;background:#e3eef9}}.status-bill_only{{color:#315e7e;background:#e9f2fa}}.evidence-link{{color:#0b5cad;font-weight:650;white-space:nowrap}}.evidence-pending{{color:#996400}}.evidence-bill{{color:#4f6273}}.evidence-counterpart{{color:#385d78}}.review-note{{font-size:11px;color:#64748b;max-width:310px;margin-top:4px;line-height:1.25}}.preview-banner{{padding:12px 16px;background:#ffedd5;border:2px solid #ed9b39;border-radius:8px;font-size:14px;margin:12px 0}}.sr-only{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}.hidden{{display:none!important}}@media print{{.filters{{display:none}}body{{background:white}}main{{padding:8px}}table{{font-size:9px}}th{{position:static}}.evidence-link{{color:#000}}}}
+*{{box-sizing:border-box}}body{{margin:0;color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc}}main{{max-width:1500px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:28px}}h2{{font-size:18px;margin:24px 0 10px}}.meta,.note{{color:var(--muted)}}.panel{{background:white;border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.card{{border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:180px}}.card strong{{display:block;font-size:24px}}.filters{{display:flex;gap:10px;flex-wrap:wrap;align-items:end}}label{{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}}input,select{{font:inherit;padding:8px;border:1px solid #bcc7d3;border-radius:6px;background:white;color:var(--ink)}}table{{width:100%;border-collapse:collapse;background:white;font-size:13px}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}th{{position:sticky;top:0;background:#eef2f6;z-index:1}}.tx-id{{font-family:ui-monospace,SFMono-Regular,monospace;white-space:nowrap}}.amount{{text-align:right;white-space:nowrap}}.status{{display:inline-block;border-radius:999px;padding:3px 8px;white-space:nowrap;font-weight:650;font-size:12px}}.status-approved{{color:var(--green);background:var(--green-bg)}}.status-candidate{{color:var(--amber);background:var(--amber-bg)}}.status-missing{{color:var(--gray);background:var(--gray-bg)}}.status-counterpart{{color:#385d78;background:#e3eef9}}.status-bill_only{{color:#315e7e;background:#e9f2fa}}.status-statement_only{{color:#315e7e;background:#e9f2fa}}.evidence-link{{color:#0b5cad;font-weight:650;white-space:nowrap}}.evidence-pending{{color:#996400}}.evidence-bill{{color:#4f6273}}.evidence-counterpart{{color:#385d78}}.review-note{{font-size:11px;color:#64748b;max-width:310px;margin-top:4px;line-height:1.25}}.preview-banner{{padding:12px 16px;background:#ffedd5;border:2px solid #ed9b39;border-radius:8px;font-size:14px;margin:12px 0}}.sr-only{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}.hidden{{display:none!important}}@media print{{@page{{size:landscape;margin:7mm}}.filters{{display:none}}body{{background:white}}main{{padding:4px;max-width:none}}table{{width:100%;table-layout:fixed;font-size:7px}}th,td{{padding:3px;overflow-wrap:anywhere;word-break:break-word}}.tx-id{{white-space:normal;font-size:6px}}#transactions tr>:nth-child(2){{display:none}}.review-note{{display:none}}.status{{white-space:normal;font-size:7px;line-height:1.2;padding:2px 3px;max-width:130px}}th{{position:static}}.evidence-link{{color:#000;white-space:normal}}}}
 </style></head><body><main>
 {preview_banner}<header><h1>{html.escape(REPORT_TITLE)}</h1><p class="meta">Corrida contable: <strong>{html.escape(source_run_id)}</strong> · Corte contable: <strong>{html.escape(cutoff)}</strong> · Snapshot de evidencia: <strong>{html.escape(snapshot_id)}</strong></p></header>
-<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Recibos pendientes</div><div class="card"><strong>{counterpart_count}</strong>Contrapartidas (no pagos adicionales)</div><div class="card"><strong>{bill_only_count}</strong>Solo boleta</div><div class="card"><strong>{missing_count}</strong>Sin candidato</div><div class="card"><strong>{attachment_count}</strong>Documentos adjuntos</div></div><p class="note">Una boleta acredita una obligación, no el desembolso; una reliquidación no crea otra deuda. Los recibos candidatos no se confunden con recibos aprobados. “Sin candidato” no significa impago. Un pago puede cubrir varias cuotas y una cuota varios pagos.</p></section>
-<section class="panel"><div class="filters"><label>Buscar<input id="search" type="search" placeholder="tx_id, concepto…"></label><label>Estado<select id="status"><option value="">Todos</option><option value="approved">Aprobado</option><option value="candidate">Comprobante por revisar</option><option value="counterpart">Contrapartida</option><option value="bill_only">Solo boleta</option><option value="missing">Sin candidato</option></select></label><label>Año<select id="year"><option value="">Todos</option></select></label><label>Payer<select id="payer"><option value="">Todos</option></select></label><label>Tipo<select id="tipo"><option value="">Todos</option></select></label></div></section>
-<section class="panel"><table id="transactions"><thead><tr><th>ID operación</th><th>tx_id</th><th>Fecha</th><th>Payer</th><th>Tipo</th><th>Concepto / beneficiario</th><th>Importe</th><th>Moneda</th><th>Estado documental</th><th>Evidencia</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
+<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Recibos pendientes</div><div class="card"><strong>{counterpart_count}</strong>Contrapartidas (no pagos adicionales)</div><div class="card"><strong>{bill_only_count}</strong>Solo boleta</div><div class="card"><strong>{statement_only_count}</strong>Solo estado de cuenta</div><div class="card"><strong>{missing_count}</strong>Sin candidato</div><div class="card"><strong>{attachment_count}</strong>Documentos adjuntos</div></div><p class="note">Una boleta acredita una obligación, no el desembolso; una reliquidación no crea otra deuda. Los recibos candidatos no se confunden con recibos aprobados. “Sin candidato” no significa impago. Un pago puede cubrir varias cuotas y una cuota varios pagos.</p></section>
+<section class="panel"><div class="filters"><label>Buscar<input id="search" type="search" placeholder="tx_id, concepto…"></label><label>Estado<select id="status"><option value="">Todos</option><option value="approved">Aprobado</option><option value="candidate">Comprobante por revisar</option><option value="counterpart">Contrapartida</option><option value="bill_only">Solo boleta</option><option value="statement_only">Solo estado de cuenta</option><option value="missing">Sin candidato</option></select></label><label>Año<select id="year"><option value="">Todos</option></select></label><label>Payer<select id="payer"><option value="">Todos</option></select></label><label>Tipo<select id="tipo"><option value="">Todos</option></select></label></div></section>
+<section class="panel"><table id="transactions"><thead><tr><th>ID operación</th><th>tx_id</th><th>Fecha</th><th>Payer</th><th>Tipo</th><th>Concepto / beneficiario</th><th>Importe</th><th>Moneda</th><th>Estado documental</th><th>Comprobante / respaldo</th><th>Statement / boleta (opcional)</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
 <script>(function(){{const table=document.querySelector('#transactions'), rows=[...table.tBodies[0].rows]; const fields={{status:document.querySelector('#status'),year:document.querySelector('#year'),payer:document.querySelector('#payer'),tipo:document.querySelector('#tipo'),search:document.querySelector('#search')}}; function fill(key){{const vals=[...new Set(rows.map(r=>r.dataset[key]).filter(Boolean))].sort(); for(const v of vals){{const o=document.createElement('option');o.value=v;o.textContent=v;fields[key].append(o)}}}} ['year','payer','tipo'].forEach(fill); function apply(){{const q=fields.search.value.toLowerCase();rows.forEach(r=>{{const hay=r.textContent.toLowerCase();const ok=(!fields.status.value||r.dataset.status===fields.status.value)&&(!fields.year.value||r.dataset.year===fields.year.value)&&(!fields.payer.value||r.dataset.payer===fields.payer.value)&&(!fields.tipo.value||r.dataset.tipo===fields.tipo.value)&&(!q||hay.includes(q));r.classList.toggle('hidden',!ok)}})}} Object.values(fields).forEach(e=>e.addEventListener('input',apply));}})();</script>
 </main></body></html>'''
 
@@ -266,6 +280,23 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
     approved = relations[(relations["status"] == "approved") & relations["relation"].isin(PAYMENT_RELATIONS)]
     approved_evidence = sorted(set(approved["evidence_id"]))
     report_evidence = sorted(set(relations["evidence_id"]))
+    # Exclusive summary states must use the same precedence as the visible HTML.
+    # A counterpart can retain a liability bill, but cannot also count as bill-only.
+    manifest_relation_map: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for _, relation in relations.iterrows():
+        manifest_relation_map[str(relation["tx_id"])].append({
+            "status": str(relation["status"]),
+            "relation": str(relation["relation"]),
+        })
+    counterpart_ids = set(
+        required.loc[required.get("evidence_review_group", pd.Series("", index=required.index))
+                     == "COUNTERPART_OF_ALREADY_APPROVED_PAYMENT", "tx_id"].astype(str)
+    ) if snapshot_manifest.get("review_preview", False) else set()
+    states = Counter(
+        "counterpart" if str(tid) in counterpart_ids
+        else _status_for(manifest_relation_map.get(str(tid), []))[0]
+        for tid in required["tx_id"]
+    )
     report_root = Path(out_root).resolve() / REPORT_ID
     if report_root.exists():
         shutil.rmtree(report_root)
@@ -303,10 +334,22 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         ],
         "outputs": {"html": {"path": f"{REPORT_ID}/report.html", "sha256": _sha256(report_html)}, "pdf": {"path": f"{REPORT_ID}/report.pdf", "sha256": _sha256(report_pdf)}},
         "attachments": attachment_rows,
-        "coverage": {"required_transactions": int(len(required)), "approved_relationships": int(len(approved)), "approved_payment_coverage_tx": int(approved["tx_id"].nunique()), "candidate_relationships": int(((relations["status"] == "candidate")).sum()), "candidate_payment_coverage_tx": sum(_status_for([{"status": str(x["status"]), "relation": str(x["relation"])} for _,x in relations.loc[relations["tx_id"] == tid].iterrows()])[0] == "candidate" for tid in required["tx_id"]), "counterpart_coverage_tx": int(sum(str(r.get("evidence_review_group", "")) == "COUNTERPART_OF_ALREADY_APPROVED_PAYMENT" for _,r in required.iterrows())), "bill_only_coverage_tx": sum(_status_for([{"status": str(x["status"]), "relation": str(x["relation"])} for _,x in relations.loc[relations["tx_id"] == tid].iterrows()])[0] == "bill_only" for tid in required["tx_id"]), "without_approved_payment_proof": int(len(required) - approved["tx_id"].nunique())},
+        "coverage": {
+            "required_transactions": int(len(required)),
+            "approved_relationships": int(len(approved)),
+            "approved_payment_coverage_tx": int(approved["tx_id"].nunique()),
+            "candidate_relationships": int((relations["status"] == "candidate").sum()),
+            "candidate_payment_coverage_tx": int(states["candidate"]),
+            "counterpart_coverage_tx": int(states["counterpart"]),
+            "bill_only_coverage_tx": int(states["bill_only"]),
+            "statement_only_coverage_tx": int(states["statement_only"]),
+            "without_approved_payment_proof": int(len(required) - approved["tx_id"].nunique()),
+        },
         "accounting_authority_changed": bool(snapshot_manifest.get("source_corrections")),
         "source_corrections": list(snapshot_manifest.get("source_corrections", [])),
         "matching_rerun": False,
+        "statement_column_optional": True,
+        "statement_context_relations": int((relations["relation"] == "statement_context").sum()),
     }
     (report_root / "report_manifest.json").write_text(json.dumps(report_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     catalog = build_report_catalog(source_run_id=source_run_id, scope_tag="PM_EVIDENCE", as_of_date=cutoff, generated_at_utc=generated_at, reports=[ReportCatalogItem(report_id=REPORT_ID, title=REPORT_TITLE, description=REPORT_DESCRIPTION, period_label=f"Corte {cutoff}", sort_order=10, html=f"{REPORT_ID}/report.html", pdf=f"{REPORT_ID}/report.pdf", manifest=None, attachments=tuple(attachment_rows))])

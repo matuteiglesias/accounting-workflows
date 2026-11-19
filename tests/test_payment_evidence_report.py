@@ -151,3 +151,43 @@ def test_counterpart_does_not_count_as_payment_candidate_or_approved() -> None:
     assert body.count('<tr data-status="candidate"')==0
     assert "Recibo de la contrapartida" in body
     assert "Contrapartidas (no pagos adicionales)" in body
+
+
+def test_statement_column_optional_separates_bills_from_payment_proofs() -> None:
+    required = pd.DataFrame([
+        {"transaction_id":"1","tx_id":"tx-only-statement","Date":"2024-09-07",
+         "payer":"PM","Tipo":"Impuestos","amount":"62640","Currency":"ARS","receiver":"AGIP"},
+        {"transaction_id":"2","tx_id":"tx-proof-and-statement","Date":"2024-10-07",
+         "payer":"PM","Tipo":"Impuestos","amount":"119602","Currency":"ARS","receiver":"AGIP"},
+        {"transaction_id":"3","tx_id":"tx-without-statement","Date":"2024-11-07",
+         "payer":"PM","Tipo":"Impuestos","amount":"200","Currency":"ARS","receiver":"AGIP"},
+    ])
+    docs=pd.DataFrame([
+        {"evidence_id":"a"*64,"content_sha256":"a"*64,"media_type":"application/pdf",
+         "display_name":"bank_statement.pdf","href":"evidence/"+"a"*64+".pdf"},
+        {"evidence_id":"b"*64,"content_sha256":"b"*64,"media_type":"application/pdf",
+         "display_name":"tax_bill.pdf","href":"evidence/"+"b"*64+".pdf"},
+    ])
+    relations=pd.DataFrame([
+        {"tx_id":"tx-only-statement","evidence_id":"a"*64,
+         "relation":"statement_context","status":"candidate"},
+        {"tx_id":"tx-proof-and-statement","evidence_id":"a"*64,
+         "relation":"payment_proof","status":"approved"},
+        {"tx_id":"tx-proof-and-statement","evidence_id":"a"*64,
+         "relation":"statement_context","status":"candidate"},
+        {"tx_id":"tx-without-statement","evidence_id":"b"*64,
+         "relation":"payment_proof","status":"approved"},
+    ])
+    out=payment_evidence._html(required,docs,relations,source_run_id="RUN",
+                               cutoff="2024-11-07",snapshot_id="PRIVATE",
+                               review_preview=True)
+    assert "Statement / boleta (opcional)" in out
+    assert out.count('<tr data-status="statement_only"')==1
+    assert out.count('<tr data-status="approved"')==2
+    assert out.count('<tr data-status="missing"')==0
+    assert "Ver estado de cuenta (no es recibo)" in out
+    assert "Solo estado de cuenta; pago no validado" in out
+    # Two columns: credit-card proof is also traceable to its source statement.
+    assert out.count("evidence/"+("a"*64)+".pdf")==3
+    assert out.count("evidence/"+("b"*64)+".pdf")==1
+    assert "Solo boleta; falta prueba de pago" not in out
