@@ -1,5 +1,7 @@
 # Household HH1 — scope-switched reporting POC (2026-11-19)
 
+> **Documento histórico de la primera prueba.** La versión de informes y sus controles de calidad vigentes están en [HOUSEHOLD_REPORT_QA_20261119.md](HOUSEHOLD_REPORT_QA_20261119.md) y en `accounting-viewer/src/HH1/README.md`. El contrato actual es `household_poc_catalog.v2` (cinco informes HTML, cinco gráficos SVG y una página HH1); no reutilizar las instrucciones antiguas de catálogo gráfico v1.
+
 > **Actualización 19/11/2026:** Claudia (CA) registró dos aportes recibidos/aprobados de ARS 150.000 (29/08 y 04/11). El **run vigente para el POC de octubre** es `20261119T222524Z_HH`, con saldo virtual final **−2.009.394,01 ARS**. Los importes y el run `20261119T211126Z_HH` descritos debajo son el *estado histórico previo al registro*. Ver `docs/HOUSEHOLD_PRODUCT_DISCOVERY_20261119.md` para la conciliación vigente.
 
 ## Finding

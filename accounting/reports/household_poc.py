@@ -16,16 +16,17 @@ from pathlib import Path
 import pandas as pd
 
 from accounting.scope import load_run_scope
+from accounting.reports.household_detail import build_report_contents, render_report
 
-SCHEMA = "household_poc_catalog.v1"
+SCHEMA = "household_poc_catalog.v2"
 COLORS = ("#376e99", "#df9552", "#549c8a", "#8d77b6", "#b7c47b", "#bd748d")
 SPANISH_MONTHS = ("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
 DETAILS = (
-    ("cash_flow", "Entradas y salidas", "Movimientos mensuales de caja registrados en HH."),
-    ("contributions", "Aportes por persona", "Aportes reconocidos en 2025 y 2026, diferenciados por responsable."),
-    ("outflows", "Salidas por categoría", "Egresos clasificados en el control de tesorería."),
-    ("monthly_costs", "Gastos por mes", "Gastos reconocidos, agrupados por período."),
-    ("movement_types", "Déficit virtual", "Magnitud del saldo negativo del libro doméstico, no deuda individual."),
+    ("virtual_balance", "Caja virtual", "La posición de la casa: saldo y variación del período."),
+    ("contributions", "Aportes", "Quién contribuyó en 2025 y 2026 y qué importes son virtuales."),
+    ("outflows", "Destino de los recursos", "En qué se registraron las salidas y qué necesita revisión."),
+    ("monthly_costs", "Gastos por mes", "Evolución del gasto reconocido, sin presuponer reparto."),
+    ("cash_flow", "Flujo de caja", "En qué meses entraron recursos y cuándo faltaron."),
 )
 CATEGORIES = {
     "funding_contribution": "Aportes",
@@ -56,7 +57,17 @@ OUTFLOWS = (
 
 
 def _money(value: float) -> str:
-    return f"${value / 1_000_000:,.2f} M" if abs(value) >= 1_000_000 else f"${value / 1000:,.0f} mil"
+    """Readable ARS labels with Spanish decimals for SVG axes."""
+    val=abs(value)
+    sign="−" if value < 0 else ""
+    if val >= 1_000_000:
+        body=f"{val / 1_000_000:,.2f}".replace(",","_").replace(".",",").replace("_",".")
+        return f"{sign}$ {body} M"
+    if val >= 1000:
+        body=f"{val / 1000:,.0f}".replace(",","_").replace(".",",").replace("_",".")
+        return f"{sign}$ {body} mil"
+    body=f"{val:,.0f}".replace(",","_").replace(".",",").replace("_",".")
+    return f"{sign}$ {body}"
 
 
 def _txt(x: object) -> str:
@@ -64,7 +75,7 @@ def _txt(x: object) -> str:
 
 
 def _bar_svg(title: str, labels: list[str], series: list[tuple[str, list[float]]],
-             *, unit: str = "ARS", note: str = "") -> str:
+             *, unit: str = "ARS", note: str = "", palette: tuple[str,...] = COLORS) -> str:
     """Standalone accessible grouped bar chart, no runtime JS or external assets."""
     if not labels or not series:
         raise ValueError("chart requires non-empty categories and series")
@@ -95,7 +106,7 @@ def _bar_svg(title: str, labels: list[str], series: list[tuple[str, list[float]]
         ])
     series_n=len(series)
     for j,(name,values) in enumerate(series):
-        color=COLORS[j%len(COLORS)]
+        color=palette[j%len(palette)]
         for i,value in enumerate(values):
             bar_w=bar_band/max(series_n,1)*.85
             center=x0+gap*(i+.5)+(j-(series_n-1)/2)*bar_band/max(series_n,1)
@@ -106,7 +117,7 @@ def _bar_svg(title: str, labels: list[str], series: list[tuple[str, list[float]]
     for j,(name,_) in enumerate(series):
         x=130+j*245
         elements.extend([
-            f'<rect x="{x}" y="418" width="13" height="13" rx="3" fill="{COLORS[j%len(COLORS)]}"/>',
+            f'<rect x="{x}" y="418" width="13" height="13" rx="3" fill="{palette[j%len(palette)]}"/>',
             f'<text x="{x+19}" y="429" font-size="12" font-family="system-ui,sans-serif" fill="#41566a">{_txt(name)}</text>'
         ])
     if note:
@@ -217,7 +228,7 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
         "contributions": _bar_svg("Aportes reconocidos por persona · ARS nominales", [known.get(k,k) for k in actors],
              [(baseline_year,[float(actor_totals.get((k,baseline_year),0)) for k in actors]),
               (year+" hasta octubre",[float(actor_totals.get((k,year),0)) for k in actors])],
-             note="Matías 2025: aportes virtuales. No se agregan aportes declarados aún sin asiento."),
+             note="Matías 2025: aportes virtuales. Claudia: agosto sí, noviembre fuera del corte."),
         "outflows":_horizontal_svg("Salidas registradas por tipo · ARS",
              [(name,float(cash_year[col].sum())) for col,name in categories],
              note="Distribución del total_cash_out; no duplicar con los gastos reconocidos."),
@@ -225,26 +236,44 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
              [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
              [("Gastos",[float(expense_by_month.get(month,0)) for month in months])],
              note="Gastos semánticos: pueden incluir pagos directos sin caja física."),
-        "movement_types":_bar_svg("Déficit de caja virtual acumulado · ARS", [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
+        "virtual_balance":_bar_svg("Déficit de caja virtual acumulado · ARS", [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
              [("Déficit virtual",deficit)],
-             note="Magnitud del saldo negativo contable; NO es banco ni crédito individual reconocido."),
+             note="Magnitud de la caja negativa: una barra más alta indica más déficit. No es deuda personal.",
+             palette=("#c78046",)),
     }
     out_dir=Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()):
         raise FileExistsError("HH1 refuses to overwrite a populated report bundle")
     out_dir.mkdir(parents=True,exist_ok=True)
     (out_dir/"charts").mkdir()
+    (out_dir/"reports").mkdir()
+    content=build_report_contents(
+        cash_year, expenses, actor_totals, actors, known, year=year,
+        baseline_year=baseline_year, months=months,
+        outflow_categories=categories,
+        month_labels=[SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
+    )
     entries=[]
-    for report_id,title,description in DETAILS:
+    ids=[t[0] for t in DETAILS]
+    if set(content)!=set(ids) or set(charts)!=set(ids):
+        raise ValueError("HH report definition/chart/catalog mismatch")
+    for i,(report_id,title,description) in enumerate(DETAILS):
         filename=f"charts/{report_id}.svg"
         data=charts[report_id].encode("utf-8")
         (out_dir/filename).write_bytes(data)
+        html_name=f"reports/{report_id}.html"
+        body=render_report(content[report_id],run_id=run_root.name,cutoff=cutoff,
+                           previous_id=ids[i-1] if i else None,
+                           next_id=ids[i+1] if i+1<len(ids) else None).encode("utf-8")
+        (out_dir/html_name).write_bytes(body)
         entries.append({
             "report_id":report_id,
             "title":title,
             "description":description,
             "chart":filename,
             "sha256":sha256(data).hexdigest(),
+            "html":html_name,
+            "html_sha256":sha256(body).hexdigest(),
         })
 
     # Compatibility is an explicit nonfatal decision. Existing FBPM reports
@@ -283,6 +312,9 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
             "annual_cash_out_ars":round(float(cash_year.total_cash_out.sum()),2),
             "recognized_spending_ars":round(float(expenses.amount.sum()),2),
             "virtual_closing_ars":round(float(cash_year.closing_control.iloc[-1]),2),
+            "virtual_opening_2026_ars":round(float(cash_year.opening_control.iloc[0]),2),
+            "annual_net_ars":round(float(cash_year.net_cash_flow.sum()),2),
+            "html_reports_generated":len(entries),
             "prior_year_recognized_MI_virtual_contributions_ars":round(float(actor_totals.get(("MI",baseline_year),0)),2),
             "current_year_recognized_CA_contributions_ars":round(float(actor_totals.get(("CA",year),0)),2),
             "no_cross_box_rows":True,
