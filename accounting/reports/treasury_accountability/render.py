@@ -73,8 +73,7 @@ def complete_calendar(group: pd.DataFrame, start_period: str, max_period: str) -
 
     numeric_exclusions = {
         "period", "period_end", "control_as_of_date", "Box", "Currency",
-        "reconciliation_status", "validated_cash_status", "validated_cash_reason",
-        "validated_as_of_date", "anchor_alignment_status", "debt_reconciliation_status",
+        "reconciliation_status", "debt_reconciliation_status",
     }
     for col in [col for col in group.columns if col not in numeric_exclusions]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -98,8 +97,6 @@ def complete_calendar(group: pd.DataFrame, start_period: str, max_period: str) -
     out["closing_control"] = out["net_cash_flow"].fillna(0).cumsum()
     out["opening_control"] = out["closing_control"] - out["net_cash_flow"].fillna(0)
     out["reconciliation_status"] = out["reconciliation_status"].fillna("calendar_zero")
-    out["validated_cash_status"] = out["validated_cash_status"].fillna("unavailable")
-    out["validated_cash_reason"] = out["validated_cash_reason"].fillna("no_source_row")
     out["n_review_required"] = out["n_review_required"].fillna(0)
     return out
 
@@ -297,12 +294,7 @@ def _status_summary(group: pd.DataFrame) -> tuple[bool, float, int, int]:
         if not source_rows.empty
         else 0
     )
-    validated = (
-        source_rows.loc[source_rows["validated_cash_status"].astype(str).eq("available")]
-        if not source_rows.empty
-        else source_rows
-    )
-    return bool(reconciled), float(max_gap or 0.0), reviews, len(validated)
+    return bool(reconciled), float(max_gap or 0.0), reviews
 
 
 def _series_html(group: pd.DataFrame) -> str:
@@ -312,18 +304,17 @@ def _series_html(group: pd.DataFrame) -> str:
     latest = group.iloc[-1]
     total_in = float(group["total_cash_in"].sum())
     total_out = float(group["total_cash_out"].sum())
-    reconciled, max_gap, reviews, validated_count = _status_summary(group)
-    validated_text = "disponible" if validated_count else "no disponible"
+    reconciled, max_gap, reviews = _status_summary(group)
     period_range = f'{group["period"].iloc[0]} → {group["period"].iloc[-1]}'
 
     return f'''<section class="series-section" id="{_h(slug)}">
       <div class="series-title-row"><div class="series-title">{_h(currency)}</div><div class="series-range">{_h(period_range)}</div></div>
       <div class="kpis">
-        <div class="kpi"><div class="kpi-label">Control contable acumulado</div><div class="kpi-value navy">{_h(_compact(latest["closing_control"]))}</div><div class="kpi-note">No equivale a caja validada.</div></div>
+        <div class="kpi"><div class="kpi-label">Control contable acumulado</div><div class="kpi-value navy">{_h(_compact(latest["closing_control"]))}</div><div class="kpi-note">Movimiento registrado desde origen cero.</div></div>
         <div class="kpi"><div class="kpi-label">Último flujo neto</div><div class="kpi-value">{_h(_compact(latest["net_cash_flow"]))}</div><div class="kpi-note">{_h(latest["period"])}</div></div>
         <div class="kpi"><div class="kpi-label">Entradas acumuladas</div><div class="kpi-value">{_h(_compact(total_in))}</div><div class="kpi-note">movimientos registrados</div></div>
         <div class="kpi"><div class="kpi-label">Salidas acumuladas</div><div class="kpi-value">{_h(_compact(total_out))}</div><div class="kpi-note">movimientos registrados</div></div>
-        <div class="kpi"><div class="kpi-label">Caja validada</div><div class="kpi-value">{_h(validated_text)}</div><div class="kpi-note">snapshot externo / aprobado</div></div>
+        <div class="kpi"><div class="kpi-label">Reconciliación aritmética</div><div class="kpi-value">{_h("reconciliada" if reconciled else "revisar")}</div><div class="kpi-note">apertura + flujo neto = cierre</div></div>
       </div>
       <div class="status-strip">
         <span class="status-pill">Movimientos físicos: {"reconciliados" if reconciled else "revisar"}</span>
@@ -347,7 +338,6 @@ def _cycle_html(cycles: pd.DataFrame) -> str:
     rows = []
     for _, row in cycles.sort_values(["Currency", "cycle_start"]).reset_index(drop=True).iterrows():
         closing = pd.to_numeric(pd.Series([row.get("closing_accountability_balance")]), errors="coerce").iloc[0]
-        gap = row.get("accountability_gap") if str(row.get("accountability_gap_status")) == "available" else pd.NA
         rows.append(
             "<tr>"
             f"<td>{_h(row.get('cycle_start'))} → {_h(row.get('cycle_end'))}</td>"
@@ -357,13 +347,12 @@ def _cycle_html(cycles: pd.DataFrame) -> str:
             f"<td>{_h(_fmt_num(row.get('documented_distributions')))}</td>"
             f"<td>{_h(_fmt_num(row.get('supported_uses')))}</td>"
             f"<td>{_h(_fmt_num(row.get('documented_transfers_out')))}</td>"
-            f"<td>{_h(_fmt_num(row.get('closing_accountability_balance')))}</td>"
-            f"<td>{_h(_fmt_num(gap))}</td></tr>"
+            f"<td>{_h(_fmt_num(row.get('closing_accountability_balance')))}</td></tr>"
         )
     return f'''<section class="box-section" id="fb-accountability-cycles"><header class="box-head"><h2 class="box-title">FAMILY BUSINESS · CICLOS DE RENDICIÓN</h2><div class="box-subtitle">Cortes determinísticos Mar–Ago / Sep–Feb. Son fechas de revisión, no fechas legales de distribución.</div></header>
       <div class="chart-card"><div class="chart-title">Saldo contable acumulado sujeto a rendición</div><div class="chart-subtitle">Cierres históricos por ciclo plenamente cubierto. No representa caja real.</div></div>
-      <div class="table-wrap"><table class="treasury"><thead><tr><th>Ciclo</th><th>Vista</th><th>Moneda</th><th>Apertura</th><th>Fondos recibidos</th><th>Distribuciones</th><th>Usos</th><th>Transferencias</th><th>Saldo bajo rendición</th><th>Gap vs caja</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
-      <div class="table-note">El gap contra liquidez se muestra únicamente cuando existe una observación de caja validada y alineada; de lo contrario figura No disponible.</div></section>'''
+      <div class="table-wrap"><table class="treasury"><thead><tr><th>Ciclo</th><th>Vista</th><th>Moneda</th><th>Apertura</th><th>Fondos recibidos</th><th>Distribuciones</th><th>Usos</th><th>Transferencias</th><th>Saldo bajo rendición</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+      <div class="table-note">Este corte de rendición conserva la moneda y el Box. Cualquier diferencia frente a una observación externa no convierte el control contable en saldo bancario o efectivo de terceros.</div></section>'''
 
 
 def _stakeholder_support_html(support: pd.DataFrame) -> str:
@@ -550,7 +539,7 @@ def build_validation(
     required = {
         "period", "Box", "Currency", "opening_control", "total_cash_in",
         "total_cash_out", "net_cash_flow", "closing_control", "reconciliation_gap",
-        "reconciliation_status", "validated_cash_status", "n_review_required",
+        "reconciliation_status", "n_review_required",
     }
     add(
         "input_schema",
@@ -625,11 +614,10 @@ def build_validation(
         f"n={reviews}",
         "warning",
     )
-    validated = int(source["validated_cash_status"].astype(str).eq("available").sum())
     add(
-        "validated_cash_anchor_availability",
+        "origin_zero_control_boundary",
         "info",
-        f"available_rows={validated}; zero-origin control remains distinct from validated liquidity",
+        "closing_control is recorded movement from a zero-origin convention; it is not a bank or third-party cash balance",
         "info",
     )
     return pd.DataFrame(rows)
@@ -659,8 +647,7 @@ def render_report(
 
     non_numeric = {
         "period", "period_end", "control_as_of_date", "Box", "Currency",
-        "reconciliation_status", "validated_cash_status", "validated_cash_reason",
-        "validated_as_of_date", "anchor_alignment_status", "debt_reconciliation_status",
+        "reconciliation_status", "debt_reconciliation_status",
     }
     for col in [col for col in source.columns if col not in non_numeric]:
         source[col] = pd.to_numeric(source[col], errors="coerce")
@@ -703,7 +690,7 @@ def render_report(
     )
     css = Path(__file__).with_name("report.css").read_text(encoding="utf-8")
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
-      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Corte contable: {_h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box. No constituyen saldos bancarios o de efectivo validados cuando <em>validated_cash_status</em> está unavailable. ARS y USD se mantienen siempre separados.</div></header>
+      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre.</div><div class="meta-row"><span>Corte contable: {_h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el saldo acumulado de movimientos físicos registrados en el motor del Box; la reconciliación comprueba la aritmética del registro. No constituyen saldos bancarios ni una afirmación sobre efectivo de terceros. ARS y USD se mantienen siempre separados.</div></header>
       {_cycle_html(cycles)}
       {_stakeholder_support_html(stakeholder_support)}
       {(_stakeholder_charts_html(accountability=source, semantic_audit=semantic_audit, stakeholder_support=stakeholder_support, annual_metrics=annual_metrics, out_dir=out_dir) if not semantic_audit.empty and not annual_metrics.empty and not stakeholder_support.empty else '')}
@@ -731,9 +718,7 @@ def render_report(
             "latest_net_cash_flow": latest["net_cash_flow"],
             "total_cash_in": group["total_cash_in"].sum(),
             "total_cash_out": group["total_cash_out"].sum(),
-            "validated_cash_available_rows": int(
-                group["validated_cash_status"].astype(str).eq("available").sum()
-            ),
+            "reconciled_rows": int(group["reconciliation_status"].astype(str).eq("reconciled").sum()),
             "n_review_required": int(
                 pd.to_numeric(group["n_review_required"], errors="coerce").fillna(0).sum()
             ),

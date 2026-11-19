@@ -153,13 +153,23 @@ def test_accountability_balance_and_cycles_use_governed_cycle_equation(tmp_path:
     }
     closing = balance.loc[balance["concept"].eq("Saldo final a rendir"), "value"]
     assert closing.tolist() == [200]
-    assert set(balance["validated_cash_status"]) == {"unavailable"}
+    assert "validated_cash_status" not in balance.columns
 
     cycles = build_specialized_view("accountability_cycles", run_root=run, metrics_dir=metrics, scope="Family Business").frame
     assert len(cycles) == 2
     assert set(cycles["value"]) == {200, 300}
     assert cycles["cycle"].str.contains("2025-09 → 2026-02").any()
     assert cycles["cycle"].str.contains("2026-03 → 2026-08").any()
+    assert "validated_cash_status" not in cycles.columns
+
+    legacy_free = pd.read_csv(run / "family_business_accountability_cycles.csv").drop(
+        columns=["validated_cash_status", "accountability_gap_status"]
+    )
+    legacy_free.to_csv(run / "family_business_accountability_cycles.csv", index=False)
+    balance_without_legacy = build_specialized_view(
+        "accountability_balance", run_root=run, metrics_dir=metrics, scope="Family Business"
+    ).frame
+    assert len(balance_without_legacy) == len(balance)
 
     bad = pd.read_csv(run / "family_business_accountability_cycles.csv")
     bad.loc[1, "closing_accountability_balance"] = 201

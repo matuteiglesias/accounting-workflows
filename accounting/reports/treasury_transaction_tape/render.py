@@ -39,7 +39,6 @@ ACCOUNTABILITY_REQUIRED = {
     "total_cash_out",
     "net_cash_flow",
     "closing_control",
-    "validated_cash_status",
 }
 
 
@@ -299,13 +298,6 @@ def _section(group: pd.DataFrame, accountability: pd.DataFrame) -> str:
         & accountability["Currency"].astype(str).eq(currency)
     ].sort_values("period")
     last_control = float(latest.iloc[-1]["closing_control"]) if not latest.empty else total_net
-    validated_status = str(latest.iloc[-1].get("validated_cash_status", "unavailable")) if not latest.empty else "unavailable"
-    validated_value = latest.iloc[-1].get("validated_cash_close", pd.NA) if not latest.empty else pd.NA
-    validated_label = (
-        f"{currency} {_money(validated_value)}"
-        if not pd.isna(validated_value) and validated_status == "available"
-        else "No disponible"
-    )
     return f"""
     <section class='tape-section'>
       <div class='section-head'>
@@ -316,7 +308,7 @@ def _section(group: pd.DataFrame, accountability: pd.DataFrame) -> str:
         <div class='metric'><span>Entradas acumuladas</span><strong>{html.escape(currency)} {_money(total_in)}</strong></div>
         <div class='metric'><span>Salidas acumuladas</span><strong>{html.escape(currency)} {_money(total_out)}</strong></div>
         <div class='metric'><span>Saldo de control</span><strong>{html.escape(currency)} {_money(last_control)}</strong></div>
-        <div class='metric'><span>Caja validada</span><strong>{html.escape(validated_label)}</strong><small>{html.escape(validated_status)}</small></div>
+        <div class='metric'><span>Reconciliación aritmética</span><strong>Entradas − salidas = Δ neto</strong><small>control del registro</small></div>
       </div>
       <div class='table-wrap'>
         <table>
@@ -335,8 +327,8 @@ def _section(group: pd.DataFrame, accountability: pd.DataFrame) -> str:
       </div>
       <div class='control-note'>
         <strong>Lectura administrativa:</strong> el saldo de control es la diferencia acumulada entre entradas y salidas físicas registradas.
-        Si la caja validada no está disponible, este informe no afirma que ese saldo exista hoy como efectivo o depósito bancario: requiere
-        conciliación externa de custodia o documentación adicional de disposiciones que hayan salido del sistema.
+        Este informe muestra movimiento registrado y control acumulado de origen cero. No afirma que ese saldo exista hoy como efectivo,
+        depósito bancario o saldo bajo custodia de terceros; esa condición requiere evidencia externa independiente.
       </div>
     </section>
     """
@@ -396,7 +388,7 @@ def render_report(
     {sections}
     <section class='method'><h2>Alcance y método</h2>
     <p><strong>Qué establece:</strong> reproduce cronológicamente cada movimiento físico gobernado de tesorería y demuestra, transacción por transacción, cómo entradas menos salidas forman el saldo de control.</p>
-    <p><strong>Qué no establece:</strong> el saldo de control no constituye por sí solo efectivo físico validado, faltante, apropiación, deuda jurídica ni obligación personal. La caja validada se mantiene como una observación independiente.</p>
+    <p><strong>Qué no establece:</strong> el saldo de control no constituye por sí solo efectivo físico, saldo bancario, faltante, apropiación, deuda jurídica ni obligación personal. La custodia o disponibilidad de terceros requiere evidencia externa independiente.</p>
     <p><strong>Autoridad:</strong> la membresía del informe proviene exclusivamente del artefacto atómico de tesorería ya gobernado. Este renderer ordena, acumula y reconcilia; no clasifica ni reinterpreta transacciones.</p></section>
     </main></body></html>"""
     html_path = out_dir / "report.html"

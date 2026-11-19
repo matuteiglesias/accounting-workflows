@@ -104,15 +104,33 @@ def test_treasury_report_renders_three_native_currency_series(tmp_path: Path) ->
     assert "Control acumulado y flujo neto mensual · USD" in html
     assert "TOTAL 2026 YTD" in html
     assert "TOTAL PERÍODO" in html
-    assert "No equivale a caja validada" in html
-    assert "no disponible" in html
+    assert "Movimiento registrado desde origen cero" in html
+    assert "No constituyen saldos bancarios" in html
     assert not (validation["status"] == "fail").any()
     assert set(zip(summary["Box"], summary["Currency"])) == {
         ("Family Business", "ARS"),
         ("Property Management", "ARS"),
         ("Property Management", "USD"),
     }
-    assert summary["validated_cash_available_rows"].sum() == 0
+    assert summary["reconciled_rows"].sum() == len(rows)
+
+
+def test_treasury_report_does_not_require_legacy_validation_columns(tmp_path: Path) -> None:
+    row = _row(
+        period="2026-01", box="Property Management", currency="ARS", opening=0,
+        rent=100, funding=0, taxes=0, dividends=0, repayment=0,
+    )
+    source_path = tmp_path / "monthly_cash_accountability.csv"
+    pd.DataFrame([row]).drop(
+        columns=[
+            "validated_cash_close", "validated_cash_status", "validated_cash_reason",
+            "validated_as_of_date", "validated_account_count",
+        ]
+    ).to_csv(source_path, index=False)
+    outputs = render_report(accountability_path=source_path, qa_path=None, out_dir=tmp_path / "report")
+    html = outputs["html"].read_text(encoding="utf-8")
+    assert "Caja validada" not in html
+    assert "Movimiento registrado desde origen cero" in html
 
 
 def test_treasury_report_rejects_non_reconciled_source(tmp_path: Path) -> None:

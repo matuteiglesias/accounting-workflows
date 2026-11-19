@@ -259,8 +259,24 @@ def test_transaction_tape_renders_running_arithmetic_and_control_boundary(tmp_pa
     assert "Rendición transaccional de tesorería" in text
     assert "Property Management · ARS" in text
     assert "Σ entradas" in text
-    assert "Caja validada" in text
-    assert "no constituye por sí solo efectivo físico validado" in text
+    assert "Reconciliación aritmética" in text
+    assert "no constituye por sí solo efectivo físico" in text
+
+
+def test_transaction_tape_does_not_require_legacy_validation_columns(tmp_path: Path) -> None:
+    detail, qa, accountability = _write_report_sources(tmp_path)
+    frame = pd.read_csv(accountability).drop(columns=["validated_cash_status", "validated_cash_close"])
+    frame.to_csv(accountability, index=False)
+    out = render_report(
+        detail_path=detail,
+        detail_qa_path=qa,
+        accountability_path=accountability,
+        out_dir=tmp_path / "report",
+        as_of_date="2026-06-30",
+    )
+    text = out["html"].read_text(encoding="utf-8")
+    assert "Caja validada" not in text
+    assert "Reconciliación aritmética" in text
 
 
 def test_transaction_tape_fails_closed_when_control_does_not_reconcile(tmp_path: Path) -> None:

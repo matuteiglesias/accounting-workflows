@@ -228,7 +228,7 @@ def _prepare_cycles(cycles: pd.DataFrame) -> pd.DataFrame:
         "cycle_id", "cycle_start", "cycle_end", "view_type", "as_of_date", "Box", "Currency",
         "opening_accountability_balance", "accountable_receipts", "documented_distributions",
         "supported_uses", "documented_transfers_out", "closing_accountability_balance",
-        "validated_cash_status", "accountability_gap_status", "n_months",
+        "n_months",
     }
     _require(cycles, required, "family_business_accountability_cycles.csv")
     work = cycles.loc[cycles["Box"].astype(str).eq("Family Business")].copy()
@@ -297,8 +297,6 @@ def _accountability_balance(cycles: pd.DataFrame, _scope: str) -> Round2ViewResu
                 "cycle_start": row["cycle_start"],
                 "cycle_end": row["cycle_end"],
                 "view_type": row["view_type"],
-                "validated_cash_status": row["validated_cash_status"],
-                "accountability_gap_status": row["accountability_gap_status"],
                 "metric_id": "ACCOUNTABILITY.BALANCE.COMPONENTS",
                 "scope": "Family Business",
                 "period_basis": "accountability_cycle",
@@ -314,7 +312,7 @@ def _accountability_balance(cycles: pd.DataFrame, _scope: str) -> Round2ViewResu
         out,
         "ACCOUNTABILITY.BALANCE.COMPONENTS",
         "concept",
-        (("concept", "Componente"), ("direction", "Efecto"), ("value", "Importe"), ("Currency", "Moneda"), ("cycle_start", "Inicio ciclo"), ("cycle_end", "Fin ciclo"), ("validated_cash_status", "Caja validada")),
+        (("concept", "Componente"), ("direction", "Efecto"), ("value", "Importe"), ("Currency", "Moneda"), ("cycle_start", "Inicio ciclo"), ("cycle_end", "Fin ciclo")),
     )
 
 
@@ -332,7 +330,6 @@ def _accountability_cycles(cycles: pd.DataFrame, _scope: str) -> Round2ViewResul
             "value": abs(closing),
             "view_type": row["view_type"],
             "n_months": row["n_months"],
-            "validated_cash_status": row["validated_cash_status"],
             "metric_id": "ACCOUNTABILITY.CYCLE.CLOSING",
             "scope": "Family Business",
             "period_basis": "accountability_cycle",
@@ -346,7 +343,7 @@ def _accountability_cycles(cycles: pd.DataFrame, _scope: str) -> Round2ViewResul
         out,
         "ACCOUNTABILITY.CYCLE.CLOSING",
         "cycle",
-        (("cycle", "Ciclo"), ("value", "Magnitud saldo al cierre"), ("Currency", "Moneda"), ("view_type", "Estado ciclo"), ("n_months", "Meses"), ("validated_cash_status", "Caja validada")),
+        (("cycle", "Ciclo"), ("value", "Magnitud saldo al cierre"), ("Currency", "Moneda"), ("view_type", "Estado ciclo"), ("n_months", "Meses")),
     )
 
 
