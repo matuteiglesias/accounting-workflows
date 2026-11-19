@@ -4,12 +4,12 @@ from __future__ import annotations
 import pandas as pd
 
 from accounting.reports.time_series import (
-    TimeSeriesSpec, render_timeseries_svg, timeseries_figure,
+    HISTORY_START_MONTH, TimeSeriesSpec, render_timeseries_svg, timeseries_figure,
 )
 
 
 def cash_inout_chart(
-    group: pd.DataFrame, *, as_of_date: str, months: int = 12,
+    group: pd.DataFrame, *, as_of_date: str,
 ) -> tuple[str, pd.DataFrame]:
     required = {
         "period", "Box", "Currency", "total_cash_in", "total_cash_out",
@@ -28,7 +28,7 @@ def cash_inout_chart(
     cutoff = pd.Timestamp(as_of_date)
     last = str(cutoff.to_period("M") if cutoff.is_month_end else cutoff.to_period("M") - 1)
     rows = rows.loc[rows["period"].astype(str).le(last)]
-    rows = rows.sort_values("period").tail(months)
+    rows = rows.loc[rows["period"].astype(str).ge(HISTORY_START_MONTH)].sort_values("period")
     if len(rows) < 2:
         return "", pd.DataFrame()
     if rows["period"].duplicated().any():
@@ -45,8 +45,12 @@ def cash_inout_chart(
         ("cash_in", "total_cash_in", "Entradas físicas"),
         ("cash_out", "total_cash_out", "Salidas físicas"),
     )
+    nonempty_source = rows.loc[rows["reconciliation_status"].eq("reconciled")]
+    if nonempty_source.empty:
+        return "", pd.DataFrame()
+    first_recorded = str(nonempty_source["period"].iloc[0])
     points = []
-    for row in rows.to_dict("records"):
+    for row in rows.loc[rows["period"].astype(str).ge(first_recorded)].to_dict("records"):
         for series_id, field, _ in pairs:
             points.append({
                 "period": str(row["period"]), "series_id": series_id,
@@ -63,8 +67,10 @@ def cash_inout_chart(
         note=(
             "Entradas y salidas de caja física registradas; incluyen movimientos no operativos "
             "y no equivalen a renta, ahorro o saldo bancario. "
-            "Sólo meses completos cuando existe un corte explícito."
-        ), max_points=24,
+            "El eje comienza en enero de 2022; meses previos al primer movimiento "
+            "del Box quedan sin dato. Sólo meses completos hasta el corte."
+        ), max_points=120,
+        period_domain=tuple(pd.period_range(HISTORY_START_MONTH, last, freq="M").astype(str)),
     )
     svg, trace = render_timeseries_svg(spec, pd.DataFrame(points), height=278)
     return timeseries_figure(spec, svg), trace

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from accounting.reports.time_series import (
-    TimeSeriesSpec, render_timeseries_svg, timeseries_figure,
+    HISTORY_START_MONTH, TimeSeriesSpec, render_timeseries_svg, timeseries_figure,
 )
 
 
@@ -25,7 +25,7 @@ def operating_vs_distributions_chart(
         monthly["statement_line"].isin(categories) &
         monthly["period"].astype(str).le(str(last_closed))
     ].copy()
-    periods = sorted(d.period.astype(str).unique())[-12:]
+    periods = sorted(p for p in d.period.astype(str).unique() if p >= HISTORY_START_MONTH)
     if len(periods) < 2:
         return "", pd.DataFrame()
     if len(periods) >= 2 and pd.period_range(periods[0], periods[-1], freq="M").size != len(periods):
@@ -54,12 +54,13 @@ def operating_vs_distributions_chart(
         frequency="M", mark="line", unit="ARS", scope="FBPM",
         series_ids=categories,
         series_labels=("Resultado operativo", "Retiros / distribuciones"),
-        subtitle="Últimos doce meses completos · ARS nominales",
+        subtitle=f"{HISTORY_START_MONTH} a {str(last_closed)} · meses completos · ARS nominales",
         note=(
             "Comparación de flujos mensuales registrados. Los retiros son una categoría "
             "administrativa, no prueba de un derecho individual. La diferencia entre "
             "las curvas NO constituye ahorro bancario ni saldo disponible."
-        ), max_points=12,
+        ), max_points=120,
+        period_domain=tuple(pd.period_range(HISTORY_START_MONTH, last_closed, freq="M").astype(str)),
     )
     svg, trace = render_timeseries_svg(spec, points, height=275)
     return timeseries_figure(spec, svg), trace

@@ -13,6 +13,8 @@ import re
 import pandas as pd
 
 
+HISTORY_START_MONTH = "2022-01"
+
 PALETTE = ("#21456f", "#4a81ac", "#78a7c4", "#d09b63", "#7e7999")
 GRID = "#e3e9ee"
 INK = "#203a58"

@@ -125,7 +125,9 @@ def _svg_chart(group: pd.DataFrame, currency: str) -> str:
     closing = group["closing_control"].fillna(0).astype(float).tolist()
     net = group["net_cash_flow"].fillna(0).astype(float).tolist()
     n = len(group)
-    values = closing + net + [0]
+    registered = group["reconciliation_status"].astype(str).eq("reconciled").tolist()
+    first_recorded = registered.index(True) if True in registered else 0
+    values = closing[first_recorded:] + net[first_recorded:] + [0]
     vmin, vmax = min(values), max(values)
     if math.isclose(vmin, vmax):
         vmin -= 1
@@ -163,6 +165,8 @@ def _svg_chart(group: pd.DataFrame, currency: str) -> str:
     step = plot_width / max(n, 1)
     bar_width = max(2.0, min(11.0, step * 0.55))
     for index, value in enumerate(net):
+        if index < first_recorded:
+            continue  # no visible flow before Box had any recorded transaction
         xx = x(index) - bar_width / 2
         yy = y(value)
         rect_top = min(yy, zero_y)
@@ -174,8 +178,8 @@ def _svg_chart(group: pd.DataFrame, currency: str) -> str:
         )
 
     path = " ".join(
-        ("M" if index == 0 else "L") + f"{x(index):.1f},{y(value):.1f}"
-        for index, value in enumerate(closing)
+        ("M" if index == first_recorded else "L") + f"{x(index):.1f},{y(value):.1f}"
+        for index, value in enumerate(closing) if index >= first_recorded
     )
     parts.append(f'<path d="{path}" fill="none" stroke="#315f98" stroke-width="2.3"/>')
     if closing:
@@ -265,15 +269,21 @@ def _table_html(group: pd.DataFrame, *, projection_start_period: str | None = No
         return row
 
     group = group.sort_values("period").reset_index(drop=True)
+    registered_periods = group.loc[group["reconciliation_status"].eq("reconciled"), "period"]
+    first_recorded = str(registered_periods.min()) if not registered_periods.empty else "9999-12"
     prior_year = None
     latest_year = str(group.iloc[-1]["period"])[:4] if not group.empty else ""
     for index, (_, row) in enumerate(group.iterrows()):
         period = str(row["period"])
         year = period[:4]
         row_class = "year-start" if prior_year is not None and year != prior_year else ""
+        if period < first_recorded:
+            row_class = (row_class + " pre-activity").strip()
+        elif str(row["reconciliation_status"]) == "calendar_zero":
+            row_class = (row_class + " calendar-no-movement").strip()
         prior_year = year
         if projection_start_period and period >= projection_start_period:
-            row_class = (row_class + " future").strip()
+            row_class = "future"  # preserve unambiguous projection status in table DOM
         render_row(row.to_dict(), row_class)
         next_year = index + 1 == len(group) or str(group.iloc[index + 1]["period"])[:4] != year
         if next_year:
@@ -332,11 +342,11 @@ def _series_html(group: pd.DataFrame, *, projection_start_period: str | None = N
       {cash_chart}
       <div class="chart-card">
         <div class="chart-title">Control acumulado y flujo neto mensual · {_h(currency)}</div>
-        <div class="chart-subtitle">{"Evolución observada hasta el cierre anterior; desde el mes en curso refleja transacciones pagadas y planeadas vigentes." if projected else "La línea es el control acumulado de origen cero; las barras muestran el movimiento neto que explica cada cambio."}</div>
+        <div class="chart-subtitle">{"Evolución observada hasta el cierre anterior; desde el mes en curso refleja transacciones pagadas y planeadas vigentes." if projected else "La línea es el control acumulado de origen cero; las barras muestran el movimiento neto. Sin datos previos al primer asiento del Box."}</div>
         {_svg_chart(group, currency)}
       </div>
       {_table_html(group, projection_start_period=projection_start_period)}
-      <div class="table-note">“Apoyo directo sin movimiento de caja” conserva obligaciones/apoyos económicos que no movieron físicamente fondos del Box. Las rayas (—) significan cero movimiento. Apertura y cierre muestran cero explícito cuando corresponde.</div>
+      <div class="table-note">Calendario continuo desde enero de 2022. Los meses atenuados anteriores al primer asiento del Box no certifican actividad ni saldos físicos; el control de origen cero es sólo una convención contable. “Apoyo directo sin movimiento de caja” no implica fondos disponibles. Las rayas (—) significan cero movimiento registrado.</div>
     </section>'''
 
 

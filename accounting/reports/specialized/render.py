@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from accounting.reports.charts import PieSpec, render_pie_svg
-from accounting.reports.time_series import TIMESERIES_CSS
+from accounting.reports.time_series import HISTORY_START_MONTH, TIMESERIES_CSS
 from accounting.reports.specialized.time_series_inputs import monthly_rent_chart
 from accounting.reports.pdf import render_pdf
 from accounting.reports.specialized.spec import REPORT_SPECS, SpecializedReportSpec
@@ -42,6 +42,11 @@ def _period_selection(frame: pd.DataFrame, policy: str, as_of_date: str) -> tupl
             year = fallback
         label = year + (f" YTD · corte {cutoff.strftime('%d/%m/%Y')}" if year == str(cutoff.year) else "")
         return selected, label
+    if policy == "all_history_months":
+        start = HISTORY_START_MONTH
+        last = str(cutoff.to_period("M"))
+        selected = frame.loc[periods.ge(start) & periods.le(last)].sort_values("period").copy()
+        return selected, f"{start} → {last} · corte {cutoff.strftime('%d/%m/%Y')}"
     if policy == "latest_year_months":
         selected = frame.loc[periods.str[:4].eq(year)].copy()
         if selected.empty:
@@ -75,6 +80,27 @@ def _table(frame: pd.DataFrame, columns: tuple[tuple[str, str], ...]) -> str:
         )
         + '</tbody></table></div>'
     )
+
+
+def _monthly_history_table(frame: pd.DataFrame, currency: str, as_of_date: str, label: str) -> str:
+    """Full monthly calendar. No source row means 'sin registro', never amount=0."""
+    last = str(pd.Timestamp(as_of_date).to_period("M"))
+    months = pd.period_range(HISTORY_START_MONTH, last, freq="M").astype(str)
+    if frame["period"].astype(str).duplicated().any():
+        raise ValueError("duplicate specialized monthly statement period")
+    amounts = dict(zip(frame["period"].astype(str), frame["value"]))
+    body = []
+    for period in months:
+        found = period in amounts
+        money = _money(float(amounts[period]), currency) if found else "Sin registro"
+        note = "Registrado" if found else "Sin dato"
+        body.append(f'<tr class="{"" if found else "unobserved"}"><td>{html.escape(period)}</td>'
+                    f'<td>{html.escape(money)}</td><td>{note}</td></tr>')
+    return (f'<p class="muted">Serie desde {HISTORY_START_MONTH}. '
+            '«Sin registro» significa falta de observación; no supone importe cero.</p>'
+            '<div class="table-wrap"><table><thead><tr><th>Mes</th>'
+            f'<th>{html.escape(label)}</th><th>Cobertura</th></tr></thead><tbody>'
+            + "".join(body) + '</tbody></table></div>')
 
 
 def _summary_html(frame: pd.DataFrame, currency: str, dimension: str) -> str:
@@ -238,9 +264,11 @@ def render_specialized(
         if current.empty:
             continue
         blocks = []
-        if report_id == "rent_monthly_evolution":
+        monthly_history = report_id in ("rent_monthly_evolution", "opex_monthly_evolution")
+        if monthly_history:
             chart_html, chart_trace = monthly_rent_chart(
-                current, currency=currency, as_of_date=as_of_date
+                current, currency=currency, as_of_date=as_of_date,
+                metric="rent" if report_id == "rent_monthly_evolution" else "opex",
             )
             if chart_html:
                 blocks.append(chart_html)
@@ -273,7 +301,8 @@ def render_specialized(
             blocks.append(f'<div class="chart">{svg}</div>')
         elif "bars" in spec.section_plan:
             traces.append(_plain_trace(report_id, result, current))
-            blocks.append(_bars_html(current, result.dimension, currency, chronological=True))
+            if not monthly_history:
+                blocks.append(_bars_html(current, result.dimension, currency, chronological=True))
         elif "comparison" in spec.section_plan:
             traces.append(_plain_trace(report_id, result, current))
             blocks.append(_comparison_html(current, result.dimension, currency))
@@ -281,7 +310,12 @@ def render_specialized(
             traces.append(_plain_trace(report_id, result, current))
 
         if "table" in spec.section_plan:
-            blocks.append(_table(current, result.table_columns))
+            blocks.append(
+                _monthly_history_table(
+                    current, currency=currency, as_of_date=as_of_date,
+                    label="Renta" if report_id == "rent_monthly_evolution" else "OPEX",
+                ) if monthly_history else _table(current, result.table_columns)
+            )
 
         currency_sections.append(
             f'''<section class="currency-section">

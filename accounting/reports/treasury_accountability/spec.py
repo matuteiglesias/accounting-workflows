@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-START_PERIOD = "2022-01"
+from accounting.reports.time_series import HISTORY_START_MONTH
+
+START_PERIOD = HISTORY_START_MONTH
 
 LABELS = {
     "opening_control": "Apertura control",

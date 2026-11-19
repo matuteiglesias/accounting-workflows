@@ -8,7 +8,9 @@ from typing import Any
 import pandas as pd
 
 from accounting.reports.debt_accountability.spec import SUBTITLE, TITLE, TOLERANCE
-from accounting.reports.debt_accountability.time_series_inputs import build_debt_position_chart
+from accounting.reports.debt_accountability.time_series_inputs import (
+    build_debt_position_chart, monthly_debt_position_table,
+)
 from accounting.reports.time_series import TIMESERIES_CSS
 
 
@@ -151,6 +153,7 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
             debt_chart_blocks.append(chart_html)
             debt_chart_traces.append(chart_trace)
     debt_chart_html = "".join(debt_chart_blocks)
+    monthly_debt_html, monthly_debt_trace = monthly_debt_position_table(position)
     applied = _n(model["repayments"].sum())
     events_html, events = _event_table(detail, year)
     event_amount=_n(events["repayment_amount"].sum()); remainder=_n(events["leftover_amount"].sum()); allocation_rows=int(events["allocation_rows"].sum())
@@ -167,6 +170,7 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
     doc=f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{TITLE}</title><style>{css}\n@media print{{thead{{display:table-row-group}}tr,.allocation{{break-inside:avoid}}}}</style></head><body><main class="report"><header class="hero"><div class="eyebrow">Informe contable gobernado</div><h1>{TITLE}</h1><div class="subtitle">{SUBTITLE}</div><div class="meta"><span>Corte contable: {_date(as_of_date)}</span><span>Período actual: {year} YTD</span><span>Monedas sin mezclar</span></div><p>Property Management (PM) es un ámbito contable y de administración, no una persona jurídica. Las relaciones PM → persona o persona → PM describen posiciones económicas registradas y no determinan por sí solas legitimación, acreedor o deudor jurídico.</p></header>
     <section class="page"><div class="section-head"><h2>1. Posición actual</h2><div class="note">¿Quién debe a quién y cuánto permanece abierto?</div></div><div class="grid"><div class="kpi"><span>Deuda abierta bruta</span><strong>{_money(gross)}</strong></div><div class="kpi"><span>Principal</span><strong>{_money(principal)}</strong></div><div class="kpi"><span>Interés</span><strong>{_money(interest)}</strong></div><div class="kpi"><span>Repagos aplicados {year}</span><strong>{_money(applied)}</strong></div></div><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Principal</th><th class="num">Interés</th><th class="num">Total</th></tr></thead><tbody>{relation_rows}</tbody></table><div class="card outside"><div>Costos pendientes de asignación</div><strong>{' · '.join(_money(v,k) for k,v in gap_total.items())}</strong><div>No integran deuda registrada.</div></div></section>
     <section class="page"><h2>2. Cómo cambió</h2>{debt_chart_html}<div class="equation">Apertura + nuevas obligaciones + interés − repagos aplicados ± ajustes = cierre</div><table><thead><tr><th>Año</th><th class="num">Apertura</th><th class="num">Nuevas obligaciones</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{''.join(yearly)}</tbody></table><p><strong>Los movimientos se suman. Los saldos se observan al cierre.</strong></p></section>
+    <section class="page"><h2>2b. Historial mensual de posiciones desde 2022</h2>{monthly_debt_html}</section>
     <section class="page"><h2>3. Actividad por relación · {year} YTD</h2><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Apertura</th><th class="num">Nueva</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{activity_rows}</tbody></table></section>
     <section class="page"><h2>4. Repagos y trazabilidad</h2><div class="grid"><div class="kpi"><span>Eventos</span><strong>{len(events)}</strong></div><div class="kpi"><span>Monto de eventos</span><strong>{_money(event_amount)}</strong></div><div class="kpi"><span>Aplicado</span><strong>{_money(applied)}</strong></div><div class="kpi"><span>Remanente</span><strong>{_money(remainder)}</strong><small>{allocation_rows} asignaciones</small></div></div><table><thead><tr><th>Fecha</th><th>Relación</th><th class="num">Evento</th><th class="num">Aplicado</th><th class="num">Sin asignar</th><th>Estado</th></tr></thead><tbody>{events_html}</tbody></table><p class="note">El remanente es un repago registrado aún no imputado completamente bajo la regla vigente; no es deuda adicional ni dinero faltante.</p></section>
     <section class="page"><h2>5. Fuera de deuda y controles</h2><div class="gap-grid">{gap_rows}</div><p class="note">Una partida pendiente de asignación permanece visible sin establecer deudor jurídico ni habilitar repago ordinario.</p><div class="qa">{qa_html}</div></section><footer class="footer">Este informe describe obligaciones registradas en el sistema contable. No constituye por sí solo una determinación de responsabilidad jurídica.</footer></main></body></html>'''
@@ -177,6 +181,9 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
             out_dir / "time_series_trace.csv", index=False
         )
         outputs["time_series_trace"] = out_dir / "time_series_trace.csv"
+    if not monthly_debt_trace.empty:
+        monthly_debt_trace.to_csv(out_dir / "monthly_debt_history_trace.csv", index=False)
+        outputs["monthly_history_trace"] = out_dir / "monthly_debt_history_trace.csv"
     return outputs
 
 
