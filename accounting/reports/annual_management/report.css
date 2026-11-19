@@ -63,6 +63,7 @@ body {
 .kpi-label { font-size: 7.8px; color: var(--navy); font-weight: 720; letter-spacing: .2px; }
 .kpi-value { font-size: 14px; color: var(--ink); font-weight: 650; margin-top: 2mm; white-space: nowrap; }
 .kpi-note { color: var(--muted); font-size: 7.6px; margin-top: 1mm; }
+.kpi-reading { color: var(--muted); margin: 1mm 0 4mm; font-size: 9px; line-height: 1.35; }
 .metric-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .metric-table th, .metric-table td { border-bottom: 1px solid var(--line); padding: 1.8mm 1.4mm; text-align: right; vertical-align: top; }
 .metric-table th { color: var(--navy); background: var(--soft); font-weight: 700; font-size: 7.8px; }
@@ -95,5 +96,5 @@ body {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   html, body { background: white; }
-  .report-page { margin: 0; width: 210mm; min-height: 297mm; box-shadow: none; }
+  .report-page { margin: 0; width: 210mm; min-height: 296mm; padding: 7mm 10mm 5mm; box-shadow: none; }
 }

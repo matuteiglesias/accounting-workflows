@@ -26,9 +26,9 @@ SUMMARY_ROWS = [
 
 KPI_SPECS = [
     {"label": "RENTA", "metric_id": "IS.RENT.TOTAL", "currency": "ARS"},
+    {"label": "OPEX DE PROPIEDAD", "metric_id": "IS.OPEX.PROPERTY", "currency": "ARS"},
     {"label": "RESULTADO OPERATIVO", "metric_id": "IS.NET.OPERATING", "currency": "ARS"},
     {"label": "RETIROS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
-    {"label": "DISTRIBUCIONES REGISTRADAS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
     {"label": "POST-RETIROS", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS"},
 ]
 

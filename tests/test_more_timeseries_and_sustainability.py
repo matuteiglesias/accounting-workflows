@@ -128,6 +128,21 @@ def test_ts09_november_starts_forward_window_and_april_is_missing(tmp_path):
     assert document.count('class="governed-timeseries"') == 6
     assert "Facturas vencidas pendientes" in document
     assert "OPEX caja" in document
+    # A future cash plan must not read as a settled physical movement or bank liquidity.
+    assert "¿Qué entradas y salidas se registraron o están planificadas por mes?" in document
+    assert "Máximo déficit acumulado de flujos mensuales con plan" in document
+    assert "No representa fondos disponibles" in document
+    # Headline must use October (last completed observed month), not November partial
+    # or the March projected closing control: fixture October=1,400; March=1,800.
+    assert document.count('class="closing-kpi"') == 2
+    assert document.count("Cierre contable del último mes completo (2026-10)") == 2
+    assert document.count('class="closing-kpi-value">ARS 1.400</div>') == 2
+    assert 'class="closing-kpi-value">ARS 1.800</div>' not in document
+    assert "no es saldo bancario conciliado ni efectivo disponible" in document
+    assert "futuro con planes disponibles (sin plan ≠ cero)" in document
+    assert "diciembre–abril según planes" not in document
+    assert "¿Cuánto entra y sale físicamente en cada mes?" not in document
+    assert "Mínimo de liquidez" not in document
     trace = pd.read_csv(outputs["trace"])
     assert not trace.period.eq("2027-04").any()
     assert trace.loc[trace.period.eq("2026-11"), "phase"].eq("current").all()

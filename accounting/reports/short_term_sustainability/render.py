@@ -118,7 +118,8 @@ def _chart(
         series_ids=tuple(key for key, _ in fields),
         series_labels=tuple(label for _, label in fields),
         period_domain=tuple(months), max_points=12,
-        subtitle="Mayo–octubre histórico · noviembre actual · diciembre–abril según planes",
+        subtitle=(f"{months[0]}–{months[5]} histórico · {months[6]} parcial · "
+                  "futuro con planes disponibles (sin plan ≠ cero)"),
         note=note,
     )
     svg, trace = render_timeseries_svg(spec, pd.DataFrame(values), height=260)
@@ -133,6 +134,11 @@ main{max-width:1120px;margin:auto;background:#fff;padding:30px 38px}
 h1{color:var(--navy);font-size:29px;margin:8px 0}
 h2{color:var(--navy);font-size:19px}
 .subtitle{color:var(--muted);font-size:11px}
+.closing-kpi{margin:9px 0 12px;padding:12px 16px;border-left:4px solid var(--navy);background:#f2f5f9}
+.closing-kpi-label{font-size:12px;font-weight:600;color:var(--navy)}
+.closing-kpi-value{font-size:28px;font-weight:750;line-height:1.2;color:var(--navy);margin:4px 0}
+.closing-kpi-note{font-size:11px;color:var(--muted)}
+.planning-note{line-height:1.55;margin:9px 0 12px}
 .warning{background:#fff5e5;border:1px solid #e9d2a1;border-radius:7px;padding:12px;margin:12px 0}
 .scope{margin:24px 0 40px;break-before:page;page-break-before:always}
 .scope:first-of-type{break-before:auto;page-break-before:auto}
@@ -187,7 +193,7 @@ def render_report(
                          "missing_plan_months": missing, "complete_6m": not missing})
         charts = []
         for chart, title, fields, mark, note in (
-            ("flows", "¿Cuánto entra y sale físicamente en cada mes?",
+            ("flows", "¿Qué entradas y salidas se registraron o están planificadas por mes?",
              (("cash_in", "Entradas"), ("cash_out", "Salidas")), "bars",
              "Noviembre es parcial; desde diciembre los importes dependen de planes; abril no tiene planes registrados."),
             ("net", "¿Qué meses aportan o consumen flujo neto?",
@@ -218,14 +224,32 @@ def render_report(
                 + "</tr>"
             )
             all_rows.append(row)
-        headline = (
-            f"Mínimo de liquidez desde diciembre hasta último mes planificado continuo: "
-            f"<strong>{escape(_money(stress, unit))}</strong> (sujeto a supuestos de cobros y pagos). "
+        # Use the last complete, observed month for the main figure; future
+        # projected closing control is never a current accounting close.
+        last_closed = next(row for row in rows if row["period"] == historical[-1])
+        if last_closed["phase"] != "observed" or pd.isna(last_closed["control"]):
+            raise ValueError(f"last complete month is not observed: {box}/{unit}")
+        closing_kpi = (
+            '<div class="closing-kpi">'
+            '<div class="closing-kpi-label">Cierre contable del último mes completo '
+            f'({escape(historical[-1])})</div>'
+            f'<div class="closing-kpi-value">{escape(_money(last_closed["control"], unit))}</div>'
+            '<div class="closing-kpi-note">Control contable de origen cero: '
+            'no es saldo bancario conciliado ni efectivo disponible. '
+            'Noviembre es parcial; los meses siguientes son planificados.</div></div>'
+        )
+        planning_note = (
+            "Máximo déficit acumulado de flujos mensuales con plan desde diciembre "
+            "(saldo incremental inicial supuesto: cero): "
+            f"<strong>{escape(_money(stress, unit))}</strong>. "
+            "<strong>No representa fondos disponibles</strong>; tampoco incluye obligaciones "
+            "sin plan, facturas vencidas no verificadas ni el orden de pagos dentro del mes. "
+            "Un resultado cero no prueba suficiencia de fondos. "
             f"Meses sin plan: <strong>{escape(', '.join(missing) if missing else 'ninguno')}</strong>."
         )
         panels.append(
-            f'<section class="scope"><h2>{escape(box)} · {escape(unit)}</h2>'
-            f'<p class="subtitle">{headline}</p>' + "".join(charts) +
+            f'<section class="scope"><h2>{escape(box)} · {escape(unit)}</h2>' +
+            closing_kpi + f'<p class="subtitle planning-note">{planning_note}</p>' + "".join(charts) +
             '<table><thead><tr><th>Mes</th><th>Estado</th><th>Entradas</th><th>Salidas</th>'
             '<th>OPEX caja</th><th>Neto</th><th>Control contable</th></tr></thead><tbody>'
             + "".join(tab) + '</tbody></table></section>'

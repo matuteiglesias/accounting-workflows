@@ -98,6 +98,12 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     assert html.count('class="report-page"') == 6
     assert "2026 YTD" in html
     assert "Operación en USD" in html
+    # Executive five-card story: rent, property costs, result, draws, after-draws.
+    # Dividend distributions are a subset of draws, not an additional outflow.
+    assert '<div class="kpi-label">OPEX DE PROPIEDAD</div>' in html
+    assert '<div class="kpi-label">DISTRIBUCIONES REGISTRADAS</div>' not in html
+    assert "Las distribuciones registradas forman parte de los retiros" in html
+    assert "Para profundizar en el Viewer" in html
     assert "No disponible" in html
     assert "Trazabilidad detallada" in html
     assert "Posición y movimientos de deuda" in html

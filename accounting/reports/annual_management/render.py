@@ -333,9 +333,19 @@ def _render_html(model: dict[str, Any], css: str) -> str:
             "RESUMEN EJECUTIVO",
             "¿Cómo está el patrimonio y cuáles son las señales principales?",
         )
-        + f'<div class="kpi-grid kpi-grid-5">{kpis}</div><div class="page-grid">'
+        + f'<div class="kpi-grid kpi-grid-5">{kpis}</div>'
+        + '<p class="kpi-reading">Renta y costos explican el resultado operativo; '
+          'aportes y retiros explican el resultado posterior. '
+          'Las distribuciones registradas forman parte de los retiros, '
+          'no son una segunda salida.</p><div class="page-grid">'
         + f'<div class="span-8">{_table("Tabla resumen", periods, model["summary"]["rows"])}</div>'
-        + '<div class="span-4">' + model["charts"].get("cost_ratio_html", '<div class="panel"><h2>Ratios clave</h2><p>Gráfico no disponible en este paquete.</p></div>') + '</div></div></div>'
+        + '<div class="span-4">' + model["charts"].get(
+            "cost_ratio_html",
+            '<div class="panel"><h2>Para profundizar en el Viewer</h2>'
+            '<p>Renta por inmueble / fuente: de dónde viene.</p>'
+            '<p>Costos operativos por categoría: qué exige sostenerla.</p>'
+            '<p>Distribuciones registradas por receptor: quién recibió.</p></div>',
+        ) + '</div></div></div>'
         + _page_footer(meta, 1)
     )
 

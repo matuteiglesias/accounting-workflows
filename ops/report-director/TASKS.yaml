@@ -1,5 +1,5 @@
 schema: report_director.task_queue.v1
-status: READY_FOR_FIRST_SESSION
+status: FIRST_ITERATION_VERIFIED_LOCAL
 autonomous_scheduler_enabled: false
 codex_dispatch_enabled: false
 source_of_truth: MISSION.md
@@ -16,7 +16,7 @@ limits:
 priority_rule: "Highest consequence to stakeholder understanding per smallest verifiable intervention; revisit after each result."
 tasks:
   - id: RD-001
-    status: READY
+    status: DONE
     title: "Inspeccionar un informe real y emitir una crítica verificable"
     mode: DIRECT_ANALYSIS_FIRST
     trigger: "Arranque de la misión y un HTML/PDF existente con fuente y corte identificables."
@@ -33,7 +33,7 @@ tasks:
       - "Hay una recomendación acotada, o NO_OP si no se encuentra una falla relevante."
     blocked_by: []
   - id: RD-002
-    status: HOLD
+    status: DONE
     title: "Corregir la primera falla de comunicación confirmada"
     mode: CHANGE_ONLY_IF_JUSTIFIED
     trigger: "RD-001 descubre una lectura errónea, contradicción u obstáculo material."
@@ -43,7 +43,7 @@ tasks:
       - "Los inputs y la semántica contable permanecen idénticos o se escala la decisión."
       - "El PDF y HTML muestran el cambio correcto sin recortes."
       - "El lector puede responder la pregunta sin asumir banco, derecho o dato inexistente."
-    blocked_by: ["RD-001: falla específica y owner/branch claramente identificado"]
+    blocked_by: []
   - id: RD-003
     status: HOLD
     title: "Auditar coherencia entre informes de una misma decisión"
@@ -102,3 +102,35 @@ tasks:
       - "Existe un fallo material reproducible, no sólo preferencia estética."
       - "Sin cambios a ledger/publicación, salvo autorización separada."
     blocked_by: []
+  - id: RD-008
+    status: DONE
+    title: "A0-A17: auditar utilidad comunicacional y corregir la portada anual"
+    mode: DIRECT_REVIEW_AND_BOUNDED_RENDER
+    target: "Annual Management, A-series y catalogo/Viewer existente, sin duplicar artefactos."
+    deliverable: "Auditoria privada y preview HTML/PDF de portada reorganizada con prueba de regresion."
+    acceptance:
+      - "Correccion de jerarquia visual sin cambio de metrica gobernada."
+      - "Fixture tests, fuentes de tarjetas y PDF privado inspeccionados."
+    blocked_by: []
+  - id: RD-009
+    status: READY
+    title: "Hacer util la portada del informe de tesoreria"
+    mode: DIRECT_REVIEW_THEN_BOUNDED_CHANGE
+    target: "Treasury Accountability: portada con resumen de ultimo cierre completo en Box y moneda nativa."
+    deliverable: "Antes/despues con HTML/PDF privado y validacion de trace/tabla/QA para run exacto."
+    acceptance:
+      - "No presentar control origen cero como liquidez bancaria."
+      - "No mezclar scopes, periodos ni monedas, ni modificar fuentes o publicacion."
+      - "La primera pagina responde una pregunta real sin ocupar una pagina vacia."
+    blocked_by: []
+  - id: RD-010
+    status: READY_FOR_PRIVATE_CHART_QA
+    title: "Costos 2022-26: quien puso los fondos cuando PM/FB fue intermediario"
+    mode: PRIVATE_SOURCE_CROSSWALK
+    target: "172 costos inicialmente sin actor en run 20261119T110543Z_FBPM."
+    deliverable: "Cruce privado de 172 costos, proyeccion v7 de 288 gastos y fuente C. Long Ledger corregida: 5 filas agua Hector en FB (verificacion nativa 19-Nov-2026)."
+    acceptance:
+      - "Pares de fecha, importe y Box sin contar dos veces las entradas de financiacion."
+      - "Propuestas separadas de atribuciones canonicas, reintegros y carga economica final."
+      - "Reglas globales de fuente de PM/FB validadas por Matias antes de retocar las tortas."
+    blocked_by: ["Nuevo run canonico para reflejar los 5 asientos de Hector corregidos en la Sheet fuente (no ejecutado)", "Confirmar eventual reintegro de Chino para AySA agosto pagada 8-Sep y espejos HH -> PM pendientes", "Atribuir beneficiarios finales de rentas PM antes de publicar comparacion costo vs beneficio"]
