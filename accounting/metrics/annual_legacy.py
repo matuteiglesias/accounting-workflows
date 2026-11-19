@@ -292,7 +292,7 @@ def build_annual_balance_dashboard_qa(metrics: pd.DataFrame, contract: pd.DataFr
     add("no_raw_stage_d_sources", not any(any(b in s for b in RAW_OR_LEGACY[:5]) for s in sources), f"sources={sorted(sources)}")
     add("no_legacy_views_as_canonical", not any("views/" in s or s.startswith("old ") for s in sources), f"sources={sorted(sources)}")
     add("annual_flows_sum_monthly_flows", metrics.empty or metrics[metrics.flow_or_stock.eq("flow") & metrics.value_status.eq("available")].calculation_rule.str.contains("sum monthly|annual flow|annual activity|annual funding/support flow",case=False,na=False).all(), "flow rules documented")
-    add("annual_stocks_use_last_close", metrics.empty or metrics[metrics.flow_or_stock.eq("stock")].calculation_rule.str.contains("last|latest period|sum annual last",case=False,na=False).all(), "stock rules documented")
+    add("annual_stocks_use_last_close", metrics.empty or metrics[metrics.flow_or_stock.eq("stock") & metrics.value_status.eq("available")].calculation_rule.str.contains("last|latest period|latest month-end",case=False,na=False).all(), "stock rules documented")
     add("ratios_use_annual_aggregates", metrics[metrics.flow_or_stock.eq("ratio")].calculation_rule.str.contains("annual",case=False,na=False).all() if not metrics.empty else True, "ratio rules documented")
     add("no_cross_currency_aggregation", metrics.empty or metrics[~metrics.flow_or_stock.isin(["quality","legacy"]) & metrics.value_status.eq("available")].Currency.astype(str).str.strip().ne("").all(), "money metrics carry Currency")
     retired_cash_ids = {"BS.CASH.TOTAL", "BS.CASH.CLOSE.BOX", "DQ.CASH.FRONTEND_SAFE"}

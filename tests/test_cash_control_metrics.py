@@ -50,6 +50,10 @@ def test_frontier_and_annual_emit_source_backed_controls_without_cross_scope(tmp
     # Annual year-to-date stocks must not claim a future December 31 snapshot.
     assert end_by_scope[("CTRL.BOX.CUM_NET", "A", "ARS")] == "2026-02-28"
     assert end_by_scope[("CTRL.BOX.CUM_NET", "B", "ARS")] == "2026-01-31"
+    qa = pd.read_csv(annual_paths["annual_balance_dashboard_qa"])
+    stock_rule = qa.loc[qa["check"].eq("annual_stocks_use_last_close")]
+    assert len(stock_rule) == 1
+    assert stock_rule.iloc[0]["status"] == "pass"
 
 
 def test_absent_source_is_explicitly_unavailable_and_invalid_source_fails_closed(tmp_path: Path) -> None:
