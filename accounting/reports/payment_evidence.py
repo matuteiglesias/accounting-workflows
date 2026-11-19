@@ -304,7 +304,8 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         "outputs": {"html": {"path": f"{REPORT_ID}/report.html", "sha256": _sha256(report_html)}, "pdf": {"path": f"{REPORT_ID}/report.pdf", "sha256": _sha256(report_pdf)}},
         "attachments": attachment_rows,
         "coverage": {"required_transactions": int(len(required)), "approved_relationships": int(len(approved)), "approved_payment_coverage_tx": int(approved["tx_id"].nunique()), "candidate_relationships": int(((relations["status"] == "candidate")).sum()), "candidate_payment_coverage_tx": sum(_status_for([{"status": str(x["status"]), "relation": str(x["relation"])} for _,x in relations.loc[relations["tx_id"] == tid].iterrows()])[0] == "candidate" for tid in required["tx_id"]), "counterpart_coverage_tx": int(sum(str(r.get("evidence_review_group", "")) == "COUNTERPART_OF_ALREADY_APPROVED_PAYMENT" for _,r in required.iterrows())), "bill_only_coverage_tx": sum(_status_for([{"status": str(x["status"]), "relation": str(x["relation"])} for _,x in relations.loc[relations["tx_id"] == tid].iterrows()])[0] == "bill_only" for tid in required["tx_id"]), "without_approved_payment_proof": int(len(required) - approved["tx_id"].nunique())},
-        "accounting_authority_changed": False,
+        "accounting_authority_changed": bool(snapshot_manifest.get("source_corrections")),
+        "source_corrections": list(snapshot_manifest.get("source_corrections", [])),
         "matching_rerun": False,
     }
     (report_root / "report_manifest.json").write_text(json.dumps(report_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
