@@ -90,6 +90,64 @@ def test_payment_evidence_report_rebuilds_frozen_rows_and_only_links_approved_pa
     assert report.count('<tr data-status=') == population_size
     assert report.count('<span class="status status-approved">') == 1
     assert report.count('<span class="status status-candidate">') == 1
-    assert report.count('href="evidence/') == 1
+    assert report.count('href="evidence/') == 2
     assert len(list((tmp_path / "bundle" / "pm_payment_evidence" / "evidence").glob("*." + extension))) == 1
     assert f"evidence/{evidence_id}.{extension}" in report
+
+
+
+def test_bill_only_is_not_mislabeled_payment_candidate_and_preview_is_explicit() -> None:
+    required = pd.DataFrame([
+        {"tx_id": "tx-bill", "Date": "2026-10-10", "amount": "149216", "Currency": "ARS",
+         "payer": "PM", "Tipo": "Impuestos", "Box": "Property Management",
+         "receiver": "Tigre", "evidence_review_note": "Falta recibo de pago"},
+        {"tx_id": "tx-candidate", "Date": "2026-10-13", "amount": "84996", "Currency": "ARS",
+         "payer": "PM", "Tipo": "Impuestos", "Box": "Property Management",
+         "receiver": "ARBA", "evidence_review_note": "Fecha del comprobante diferente"},
+    ])
+    eid = "a" * 64
+    docs = pd.DataFrame([{"evidence_id": eid, "content_sha256": eid,
+                          "media_type": "application/pdf", "display_name": "liquidacion.pdf",
+                          "href": f"evidence/{eid}.pdf"}])
+    relations = pd.DataFrame([
+        {"tx_id": "tx-bill", "evidence_id": eid, "relation": "liability_source", "status": "candidate"},
+        {"tx_id": "tx-candidate", "evidence_id": eid, "relation": "payment_proof", "status": "candidate"},
+    ])
+    html = payment_evidence._html(required, docs, relations,
+                                  source_run_id="RUN_FBPM", cutoff="2026-10-13",
+                                  snapshot_id="PRIVATE_REVIEW", review_preview=True)
+    assert html.count('<tr data-status="bill_only"') == 1
+    assert html.count('<tr data-status="candidate"') == 1
+    assert "Solo boleta; falta prueba de pago" in html
+    assert "Ver boleta (no acredita pago)" in html
+    assert "Revisar comprobante (no aprobado)" in html
+    assert "REPORTE PRIVADO EN REVISIÓN" in html
+    assert "Falta recibo de pago" in html
+
+
+
+def test_counterpart_does_not_count_as_payment_candidate_or_approved() -> None:
+    required = pd.DataFrame([
+       {"tx_id":"approved-tx","transaction_id":"100","Date":"2024-10-07","amount":"100",
+        "Currency":"ARS","payer":"PM","Tipo":"Impuestos","Box":"Property Management",
+        "receiver":"ARBA", "evidence_review_group":""},
+       {"tx_id":"mirror-tx","transaction_id":"101","Date":"2024-10-07","amount":"100",
+        "Currency":"ARS","payer":"MI","Tipo":"Impuestos","Box":"Property Management",
+        "receiver":"PM", "evidence_review_group":"COUNTERPART_OF_ALREADY_APPROVED_PAYMENT",
+        "evidence_review_note":"Evento aprobado en operación 100, no otro pago"},
+    ])
+    h="a"*64
+    docs=pd.DataFrame([{"evidence_id":h,"content_sha256":h,"media_type":"application/pdf",
+                        "display_name":"example.pdf","href":f"evidence/{h}.pdf"}])
+    relations=pd.DataFrame([
+      {"tx_id":"approved-tx","evidence_id":h,"relation":"payment_proof","status":"approved"},
+      {"tx_id":"mirror-tx","evidence_id":h,"relation":"other_support","status":"candidate"},
+    ])
+    body=payment_evidence._html(required,docs,relations,source_run_id="RUN_FBPM",
+                                cutoff="2024-10-07",snapshot_id="PRIVATE_REVIEW",
+                                review_preview=True)
+    assert body.count('<tr data-status="approved"')==1
+    assert body.count('<tr data-status="counterpart"')==1
+    assert body.count('<tr data-status="candidate"')==0
+    assert "Recibo de la contrapartida" in body
+    assert "Contrapartidas (no pagos adicionales)" in body
