@@ -91,6 +91,8 @@ help:
 	@echo "  make smoke-full         # smoke-core + validate + publish dry-run"
 	@echo "  make validate           # compile + contracts + regression suite"
 	@echo ""
+	@echo "Codebase health: make check (existing validate), make inspect (Radon/Vulture), make graph (static imports)"
+	@echo ""
 	@echo "Live operations:"
 	@echo "  make run-canonical      # live ingest -> governed materialization"
 	@echo "  make run-compute        # live canonical -> debt -> metrics -> reports (NO publish)"
@@ -122,6 +124,16 @@ help:
 .PHONY: run-env
 run-env:
 	@bash -lc 'set -a; source "$(ENV_FILE)"; set +a; $(MAKE) run-full'
+
+# Read-only code health; optional analyzers report missing tools explicitly.
+CODE_HEALTH_OUT ?= .reports/code-health
+.PHONY: check inspect graph
+check:
+	@$(PY) scripts/code_health.py check --python "$(PY)" --output-dir "$(CODE_HEALTH_OUT)"
+inspect:
+	@$(PY) scripts/code_health.py inspect --output-dir "$(CODE_HEALTH_OUT)"
+graph:
+	@$(PY) scripts/code_health.py graph --output-dir "$(CODE_HEALTH_OUT)"
 
 .PHONY: doctor validate clean-derived
 doctor:

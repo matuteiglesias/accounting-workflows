@@ -169,6 +169,29 @@ The import root is intentionally the top-level `accounting/` package. This wave 
 
 See `notes/repository_tree_contract.md` for the governed root/path classification.
 
+## Local codebase health and architecture inspection
+
+Run from the repository root:
+
+```bash
+make check      # runs the existing make validate: compile + contracts + full pytest; mandatory exit status
+make inspect    # advisory Radon complexity/maintainability, Vulture candidates, static import inventory
+make graph      # filtered package-level Graphviz SVG, complete module-level import JSON
+```
+
+Results are written to **`.reports/code-health/REPORT.md`** (ignored by Git), with
+`check.log`, JSON evidence, Vulture candidates, and `architecture_packages.svg`.
+`CODE_HEALTH_OUT=/some/path` overrides the output directory. These commands
+never ingest live accounting data or publish outputs. `make check` reuses the
+CI's existing `make validate` (and can be relatively slow); it does not create
+a second correctness policy. `make inspect` needs locally installed `radon`
+and `vulture` for those optional analyses; `make graph` uses Python's AST and
+requires the `dot` executable from Graphviz for SVG. Missing analyzers and
+analysis failures are surfaced in the report; candidate dead code and complexity
+scores are **not** correctness failures. Only mandatory `check` failures block
+that command. The graph shows static import relationships, **not** runtime calls.
+No new tools were added to production dependencies or CI.
+
 ## Runbook
 See `notes/accounting_spine_runbook.md` for the per-stage outputs and smoke checklist.
 

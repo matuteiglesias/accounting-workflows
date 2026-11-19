@@ -7,6 +7,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_PUBLIC_TARGETS = {
+    "check",
+    "inspect",
+    "graph",
     "help",
     "run-env",
     "doctor",
