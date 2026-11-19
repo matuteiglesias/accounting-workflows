@@ -315,7 +315,7 @@ def test_debt_position_drilldown_uses_latest_valid_snapshot_not_month_sum(tmp_pa
     assert list(detail["as_of_date"]) == ["2025-03-31"]
 
 
-def test_diagnostic_box_level_presentation_route_is_retired(tmp_path: Path) -> None:
+def test_diagnostic_box_level_presentation_route_is_preserved(tmp_path: Path) -> None:
     repo = tmp_path
     run = repo / "out" / "run" / "accounting" / "latest"
     pack = repo / "out" / "professional_pack" / "latest"
@@ -324,8 +324,8 @@ def test_diagnostic_box_level_presentation_route_is_retired(tmp_path: Path) -> N
     _write(
         run / "monthly_cash_close.csv",
         [
-            {"period": "2024-03", "Currency": "ARS", "Box": "Property Management", "close_amount": 180000},
-            {"period": "2024-04", "Currency": "ARS", "Box": "Property Management", "close_amount": 180030, "source_table": "box_balance_time_long.freq=M.csv"},
+            {"period": "2024-03", "Currency": "ARS", "Box": "Property Management", "close_amount": 180000, "position_type": "inferred_box_motor", "source_type": "inferred_box_motor", "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2024-03-31"},
+            {"period": "2024-04", "Currency": "ARS", "Box": "Property Management", "close_amount": 180030, "source_table": "box_balance_time_long.freq=M.csv", "position_type": "inferred_box_motor", "source_type": "inferred_box_motor", "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2024-04-30"},
         ],
     )
     _write(
@@ -335,7 +335,10 @@ def test_diagnostic_box_level_presentation_route_is_retired(tmp_path: Path) -> N
 
     paths = build_professional_flow_drilldowns(repo, pack, run)
     index = pd.read_csv(paths["index"])
-    assert "monthly_tables_diagnostic_box_level_matrix" not in set(index["table_id"])
+    row = index[index["table_id"].eq("monthly_tables_diagnostic_box_level_matrix")].iloc[0]
+    assert row["status"] == "ok"
+    assert float(row["matched_value_sum"]) == 30.0
+    assert row["source_artifact"] == "monthly_cash_close.csv"
 
 
 def test_current_annual_companion_tables_reconcile_and_link(tmp_path: Path) -> None:
@@ -428,7 +431,6 @@ def test_current_annual_companion_tables_reconcile_and_link(tmp_path: Path) -> N
     paths = build_professional_flow_drilldowns(repo, pack, run)
     index = pd.read_csv(paths["index"])
     expected = {
-        "annual_cash_close_by_box_wide",
         "annual_funding_by_actor_channel_wide",
         "annual_debt_stock_by_pair_wide",
         "annual_debt_activity_by_pair_wide",

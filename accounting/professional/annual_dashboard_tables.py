@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-"""Annual professional companion-table facade with governed authorities.
-
-Modern validated cash consumes the shared cash projection. Modern funding/support
-rows consume ``funding_support_specs_v1`` and never infer support membership from
-human labels. Historical/non-modern table shapes remain on explicit compatibility
-paths in ``annual_dashboard_tables_legacy``.
-"""
+"""Annual professional companion-table facade with governed authorities."""
 
 from typing import Sequence
 
 import pandas as pd
 
-from accounting.cash_authority import validated_cash_schema_supported
-from accounting.cash_projection import iter_validated_annual_cash_positions
 from accounting.contracts.funding_support import (
     FUNDING_SUPPORT_SPECS_VERSION,
     classify_funding_support,
@@ -174,98 +166,6 @@ def build_annual_funding_by_actor_channel(
             "metric_id",
             "line_id",
             *dims,
-            "source_table",
-            "source_filter",
-            "calculation_rule",
-        ],
-        year_columns,
-    )
-    return long_df, wide_df
-
-
-def build_annual_cash_close_by_box(
-    cash: pd.DataFrame,
-    year_columns: Sequence[str] = _legacy.DEFAULT_YEAR_COLUMNS,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build validated annual cash close by Box/Currency.
-
-    Modern ``monthly_cash_close`` inputs consume the shared annual projection:
-    source-backed year/Currency/Box scope, latest period containing validated
-    candidates in the year, then latest valid as-of per account, then sum
-    selected account closes. Inferred box control and internal balances are
-    never additive and never fallback cash.
-
-    Historical/non-modern table shapes retain the compatibility path.
-    """
-
-    if cash is None or cash.empty or not validated_cash_schema_supported(cash):
-        return _legacy.build_annual_cash_close_by_box(cash, year_columns)
-
-    long_cols = [
-        "metric_id",
-        "line_id",
-        "period",
-        "Box",
-        "Currency",
-        "value",
-        "selected_month",
-        "source_table",
-        "source_filter",
-        "calculation_rule",
-    ]
-    empty_wide_cols = [
-        "metric_id",
-        "line_id",
-        "Box",
-        "Currency",
-        "source_table",
-        "source_filter",
-        "calculation_rule",
-        *year_columns,
-    ]
-
-    rows: list[dict[str, object]] = []
-    for projection in iter_validated_annual_cash_positions(cash):
-        if projection.scope != "box" or not projection.available:
-            continue
-        selection = projection.selection
-        rows.append(
-            {
-                "metric_id": "CASH.CLOSE.BY_BOX",
-                "line_id": (
-                    f"CASH.CLOSE.BY_BOX.{projection.box}.{projection.currency}"
-                ),
-                "period": projection.reporting_period,
-                "Box": projection.box,
-                "Currency": projection.currency,
-                "value": float(selection.value),
-                "selected_month": projection.selected_period,
-                "source_table": "monthly_cash_close.csv",
-                "source_filter": (
-                    "cash.position.validated; source-backed year/Currency/Box scope; "
-                    "latest valid as_of_date per Box/account_id; inferred/internal excluded"
-                ),
-                "calculation_rule": (
-                    "annual stock = last governed validated cash period in year; "
-                    "same account snapshot selector as monthly; sum selected "
-                    "accounts; never sum monthly positions"
-                ),
-            }
-        )
-
-    if not rows:
-        return _legacy._empty(long_cols), _legacy._empty(empty_wide_cols)
-
-    long_df = pd.DataFrame(rows, columns=long_cols).sort_values(
-        ["period", "Currency", "Box"]
-    ).reset_index(drop=True)
-    wide_df = _legacy._annual_wide(
-        long_df,
-        [
-            "metric_id",
-            "line_id",
-            "Box",
-            "Currency",
             "source_table",
             "source_filter",
             "calculation_rule",

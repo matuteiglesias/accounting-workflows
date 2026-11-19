@@ -71,33 +71,6 @@ def _annual_wide(long_df: pd.DataFrame, id_cols: Sequence[str], year_columns: Se
     return wide[list(id_cols) + year_cols + extra_years].sort_values(list(id_cols)).reset_index(drop=True)
 
 
-def build_annual_cash_close_by_box(cash: pd.DataFrame, year_columns: Sequence[str] = DEFAULT_YEAR_COLUMNS) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build annual cash close by Box/Currency from latest month in each year.
-
-    This is a stock metric. Monthly values are never summed.
-    """
-    long_cols = ["metric_id", "line_id", "period", "Box", "Currency", "value", "selected_month", "source_table", "source_filter", "calculation_rule"]
-    if cash is None or cash.empty:
-        return _empty(long_cols), _empty(["metric_id", "line_id", "Box", "Currency", "source_table", "source_filter", "calculation_rule", *year_columns])
-    work = _ensure_columns(cash, {"Box": "N/A", "Currency": "N/A", "metric": "cash_close", "value": 0.0})
-    work = _add_year(work)
-    if work.empty:
-        return _empty(long_cols), _empty(["metric_id", "line_id", "Box", "Currency", "source_table", "source_filter", "calculation_rule", *year_columns])
-    work["value"] = pd.to_numeric(work["value"], errors="coerce").fillna(0.0)
-    work["Box"] = _clean_text(work["Box"], "N/A")
-    work["Currency"] = _clean_text(work["Currency"], "N/A")
-    work = work.sort_values(["period", "Box", "Currency", "selected_month"])
-    latest = work.groupby(["period", "Box", "Currency"], dropna=False).tail(1).copy()
-    latest["metric_id"] = "CASH.CLOSE.BY_BOX"
-    latest["line_id"] = "CASH.CLOSE.BY_BOX." + latest["Box"].astype(str) + "." + latest["Currency"].astype(str)
-    latest["source_table"] = "monthly_cash_close.csv"
-    latest["source_filter"] = "latest selected_month in year by Box/Currency; metric=cash_close"
-    latest["calculation_rule"] = "annual stock = latest available monthly cash close in year; never sum monthly cash closes"
-    long_df = latest[long_cols].sort_values(["period", "Currency", "Box"]).reset_index(drop=True)
-    wide_df = _annual_wide(long_df, ["metric_id", "line_id", "Box", "Currency", "source_table", "source_filter", "calculation_rule"], year_columns)
-    return long_df, wide_df
-
-
 def _funding_dimension_defaults(flow: pd.DataFrame) -> pd.DataFrame:
     work = _ensure_columns(flow, {
         "Currency": "N/A", "Box": "", "semantic_bucket": "", "semantic_subbucket": "", "cash_path": "",

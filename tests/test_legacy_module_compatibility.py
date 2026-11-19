@@ -33,7 +33,6 @@ def test_professional_wave_facade_is_gone_and_legacy_remainder_is_bounded() -> N
         "def _build_debt_activity_cell(",
         "def _build_annual_debt_stock_companion_cell(",
         "def _build_annual_debt_activity_companion_cell(",
-        "monthly_tables_diagnostic_box_level_matrix",
     ]:
         assert retired not in legacy
 

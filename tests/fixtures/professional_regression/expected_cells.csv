@@ -13,8 +13,6 @@ debt,debt_position_valid,monthly_tables_debt_position_matrix,2025-03,USD,,debt.p
 debt,debt_position_invalid,monthly_tables_debt_position_matrix,2025-04,USD,,debt.position.principal,700,unavailable,unavailable,0,,all-invalid debt as_of fails closed
 debt,debt_activity_monthly,monthly_tables_debt_activity_matrix,2025-04,USD,,debt.activity.repayment,170,available,ok,170,,independent debt repayment activity
 debt,debt_activity_annual,annual_debt_activity_by_pair_wide,2025,USD,,debt.activity.repayment,350,available,ok,350,,annual debt activity sums flows
-cash,cash_available,monthly_tables_cash_close_matrix,2026-01,ARS,Property Management,cash,100,available,ok,100,bank-a;bank-b,validated cash only
-cash,cash_unavailable,monthly_tables_cash_close_matrix,2026-02,ARS,Property Management,cash,100,unavailable,unsupported,0,,validated cash unavailable no fallback
 derived,opex_to_rent,overview_balance_dashboard,2026,ARS,,derived.opex_to_rent,0.25,available,ok,0.25,,governed derived metric
 fx,fx_currency_total,monthly_tables_fx_treasury_amount_in,2026-01,ARS,,,200,available,ok,200,fx_pm,FX currency-total route
 fx,fx_box_annual,cash_annual_box_flow_bridge_wide,2026,ARS,Property Management,fx,200,available,ok,200,fx_pm,FX Box by currency route

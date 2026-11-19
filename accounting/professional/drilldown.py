@@ -25,10 +25,6 @@ from accounting.contracts.atomic_flow_drilldowns import (
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.professional import drilldown_legacy as _legacy
 from accounting.professional.annual_flow_executor import execute_annual_flow_membership
-from accounting.professional.cash_position_executor import (
-    execute_annual_cash_position,
-    execute_monthly_cash_position,
-)
 from accounting.professional.debt_activity_executor import (
     execute_annual_debt_activity,
     execute_monthly_debt_activity,
@@ -743,38 +739,6 @@ def _build_derived_cell(
         if annual_fx is not None:
             return annual_fx
 
-    if table_id == "monthly_tables_cash_close_matrix":
-        governed_cash = execute_monthly_cash_position(
-            row=row,
-            period=period,
-            display_value=display_value,
-            cash_close=cash_close,
-            tolerance=tolerance,
-        )
-        if governed_cash is not None:
-            return governed_cash
-        return _fail_closed_current_route(
-            display_value=display_value,
-            source_artifact="monthly_cash_close.csv",
-            family="Validated monthly cash",
-        )
-
-    if table_id == "annual_cash_close_by_box_wide":
-        governed_cash = execute_annual_cash_position(
-            row=row,
-            period=period,
-            display_value=display_value,
-            cash_close=cash_close,
-            tolerance=tolerance,
-        )
-        if governed_cash is not None:
-            return governed_cash
-        return _fail_closed_current_route(
-            display_value=display_value,
-            source_artifact="monthly_cash_close.csv",
-            family="Validated annual cash",
-        )
-
     if table_id == "monthly_tables_debt_activity_matrix":
         return _build_debt_activity_cell(
             row=row,
@@ -868,18 +832,6 @@ _legacy._fx_treasury_measure_for_row = _fx_treasury_measure_for_row
 _legacy._spec_for_cell = _spec_for_cell
 _legacy._build_derived_cell = _build_derived_cell
 _legacy.enrich_professional_table_contracts = _enrich_professional_table_contracts
-
-# Duplicate FX ID was migration debris; diagnostic Box-level presentation was
-# explicitly retired by the current supported-surface census. Underlying Box
-# evidence and diagnostic contracts remain available.
-_legacy.SUPPORTED_TABLE_IDS = tuple(
-    dict.fromkeys(
-        table_id
-        for table_id in _legacy.SUPPORTED_TABLE_IDS
-        if table_id != "monthly_tables_diagnostic_box_level_matrix"
-    )
-)
-
 
 def build_professional_flow_drilldowns(
     repo_root: Path,

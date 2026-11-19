@@ -32,7 +32,6 @@ PINNED_TABLE_ORDER = [
     "cash_fb_related_grouped_audit.csv",
     "cash_unknown_review_pm_ars_reconciliation.csv",
     "cash_unknown_review_pm_ars_check.csv",
-    "cash_validated_levels_from_metrics.csv",
     "cash_liquidity_extended_qa.csv",
     # Income
     "income_operating_statement.csv",
@@ -62,7 +61,6 @@ PINNED_TABLE_ORDER = [
     "monthly_tables_unknown_review_net_matrix.csv",
     "monthly_tables_debt_position_matrix.csv",
     "monthly_tables_debt_activity_matrix.csv",
-    "monthly_tables_cash_close_matrix.csv",
     "monthly_tables_diagnostic_box_level_matrix.csv",
     "monthly_tables_index.csv",
     "monthly_tables_professional_comments.csv",

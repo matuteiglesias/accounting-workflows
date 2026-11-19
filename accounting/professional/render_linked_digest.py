@@ -332,7 +332,6 @@ def _candidate_measures_for_row(row: pd.Series) -> list[str]:
 
             "",
 
-            "cash_close",
             "closing_cash",
             "closing_balance",
             "balance",
@@ -775,7 +774,6 @@ def build_professional_linked_digest(
             LOG.debug("[linked-digest] optional extra table missing: %s", path)
 
     annual_companion_names = [
-        "annual_cash_close_by_box_wide.csv",
         "annual_funding_by_actor_channel_wide.csv",
         "annual_debt_stock_by_pair_wide.csv",
         "annual_debt_activity_by_pair_wide.csv",

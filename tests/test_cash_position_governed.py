@@ -11,7 +11,6 @@ from accounting.cash_authority import (
 )
 from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.metrics.frontier import build_metrics_frontier
-from accounting.professional.annual_dashboard_tables import build_annual_cash_close_by_box
 from accounting.professional.drilldown import _build_derived_cell
 
 
@@ -184,51 +183,6 @@ def test_monthly_and_annual_use_identical_validated_population() -> None:
     assert set(monthly.selected["account_id"]) == set(annual.selected["account_id"])
 
 
-def test_professional_cash_surfaces_select_only_validated_accounts() -> None:
-    cash = cash_fixture()
-    row = pd.Series(
-        {"Currency": "ARS", "Box": "Property Management", "metric": "cash_close"}
-    )
-
-    monthly = _build_derived_cell(
-        table_id="monthly_tables_cash_close_matrix",
-        row=row,
-        period="2026-01",
-        display_value=100,
-        split=pd.DataFrame(),
-        audit=pd.DataFrame(),
-        stmt=pd.DataFrame(),
-        annual=pd.DataFrame(),
-        cash_close=cash,
-        debt_activity=pd.DataFrame(),
-        debt_position=pd.DataFrame(),
-        tolerance=1e-6,
-    )
-    assert monthly[0] == "ok"
-    assert monthly[1] == 100
-    assert set(monthly[7]["account_id"]) == {"bank-a", "bank-b"}
-    section_names = [name for name, _ in monthly[8]]
-    assert "Excluded inferred control rows" in section_names
-    assert "Excluded internal balance rows" in section_names
-
-    annual = _build_derived_cell(
-        table_id="annual_cash_close_by_box_wide",
-        row=pd.Series({"Currency": "ARS", "Box": "Property Management"}),
-        period="2026",
-        display_value=100,
-        split=pd.DataFrame(),
-        audit=pd.DataFrame(),
-        stmt=pd.DataFrame(),
-        annual=pd.DataFrame(),
-        cash_close=cash,
-        debt_activity=pd.DataFrame(),
-        debt_position=pd.DataFrame(),
-        tolerance=1e-6,
-    )
-    assert annual[0] == "ok"
-    assert annual[1] == 100
-
-
 def test_frontier_monthly_cash_is_governed_and_not_double_counted(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     metrics_dir = tmp_path / "metrics"
@@ -275,19 +229,6 @@ def test_annual_metrics_and_companion_use_same_cash_selector(tmp_path: Path) -> 
     ]
     assert len(box) == 1 and box.iloc[0]["value"] == 100
     assert len(total) == 1 and total.iloc[0]["value"] == 100
-
-    companion_long, _ = build_annual_cash_close_by_box(
-        cash, year_columns=("2025", "2026")
-    )
-    companion = companion_long[
-        companion_long["period"].astype(str).eq("2026")
-        & companion_long["Currency"].eq("ARS")
-        & companion_long["Box"].eq("Property Management")
-    ]
-    assert len(companion) == 1
-    assert companion.iloc[0]["value"] == 100
-    assert companion.iloc[0]["selected_month"] == "2026-01"
-
 
 def test_no_validated_cash_never_falls_back_to_inferred() -> None:
     cash = cash_fixture()

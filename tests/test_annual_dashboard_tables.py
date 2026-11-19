@@ -3,25 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from accounting.professional.annual_dashboard_tables import (
-    build_annual_cash_close_by_box,
     build_annual_funding_by_actor_channel,
 )
-
-
-def test_annual_cash_close_uses_latest_month_not_sum() -> None:
-    cash = pd.DataFrame([
-        {"period": "2025-01", "Box": "Property Management", "Currency": "ARS", "metric": "cash_close", "value": 100},
-        {"period": "2025-12", "Box": "Property Management", "Currency": "ARS", "metric": "cash_close", "value": 250},
-        {"period": "2025-06", "Box": "Family Business", "Currency": "ARS", "metric": "cash_close", "value": 40},
-    ])
-
-    long_df, wide_df = build_annual_cash_close_by_box(cash)
-
-    pm = long_df[(long_df["period"].eq("2025")) & (long_df["Box"].eq("Property Management"))].iloc[0]
-    assert pm["value"] == 250
-    assert pm["selected_month"] == "2025-12"
-    assert pm["metric_id"] == "CASH.CLOSE.BY_BOX"
-    assert wide_df.loc[wide_df["Box"].eq("Property Management"), "2025"].iloc[0] == 250
 
 
 def test_annual_funding_preserves_actor_channel_and_cash_effect() -> None:

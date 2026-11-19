@@ -7,7 +7,6 @@ import pandas as pd
 
 import accounting.metrics.annual as annual_module
 import accounting.metrics.frontier as frontier_module
-import accounting.professional.annual_dashboard_tables as professional_annual_module
 from accounting.cash_authority import (
     select_validated_cash_period,
     select_validated_cash_year,
@@ -18,7 +17,6 @@ from accounting.cash_projection import (
 )
 from accounting.metrics.annual import build_annual_balance_dashboard
 from accounting.metrics.frontier import build_metrics_frontier
-from accounting.professional.annual_dashboard_tables import build_annual_cash_close_by_box
 
 
 def _validated_row(
@@ -177,22 +175,6 @@ def test_annual_frontier_and_professional_project_same_source_population(
         annual_cash["period"].eq("2026") & annual_cash["Currency"].eq("ARS")
     ).any()
 
-    companion_long, _ = build_annual_cash_close_by_box(
-        cash,
-        year_columns=("2025", "2026"),
-    )
-    assert set(
-        zip(
-            companion_long["period"].astype(str),
-            companion_long["Currency"],
-            companion_long["Box"],
-            companion_long["value"],
-        )
-    ) == {
-        ("2025", "ARS", "Property Management", 120.0),
-        ("2026", "USD", "Family Box", 7.0),
-    }
-
     frontier_paths = build_metrics_frontier(
         run_root,
         tmp_path / "frontier",
@@ -224,7 +206,9 @@ def test_annual_frontier_and_professional_project_same_source_population(
 def test_bulk_cash_consumers_delegate_scope_discovery_to_projection_module() -> None:
     annual_source = inspect.getsource(annual_module)
     frontier_source = inspect.getsource(frontier_module)
-    professional_source = inspect.getsource(professional_annual_module)
+    professional_source = Path(
+        "accounting/professional/annual_dashboard_tables.py"
+    ).read_text(encoding="utf-8")
 
     assert "iter_validated_annual_cash_positions" in annual_source
     assert "select_validated_cash_year" not in annual_source
@@ -232,5 +216,5 @@ def test_bulk_cash_consumers_delegate_scope_discovery_to_projection_module() -> 
     assert "iter_validated_monthly_cash_positions" in frontier_source
     assert "select_validated_cash_period" not in frontier_source
 
-    assert "iter_validated_annual_cash_positions" in professional_source
+    assert "iter_validated_annual_cash_positions" not in professional_source
     assert "select_validated_cash_year" not in professional_source
