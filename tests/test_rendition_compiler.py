@@ -196,21 +196,18 @@ def _run(tmp_path: Path, *, cutoff: str = "2026-09-30") -> Path:
                 "Box": "Property Management",
                 "Currency": "ARS",
                 "closing_control": 321.0,
-                "validated_cash_status": "unavailable",
             },
             {
                 "period": "2025-12",
                 "Box": "Property Management",
                 "Currency": "USD",
                 "closing_control": 12.0,
-                "validated_cash_status": "unavailable",
             },
             {
                 "period": "2026-05",
                 "Box": "Property Management",
                 "Currency": "ARS",
                 "closing_control": 1799.0,
-                "validated_cash_status": "unavailable",
             },
         ]
     ).to_csv(run / "monthly_cash_accountability.csv", index=False)
@@ -306,6 +303,7 @@ def test_governed_prior_close_remains_box_level_and_not_property_cash(tmp_path: 
     )
 
     opening = pd.read_csv(paths["opening_basis"])
+    assert "validated_cash_status" not in opening.columns
     ars = opening.loc[opening["Currency"].eq("ARS")].iloc[0]
     assert ars["grain"] == "box_currency"
     assert pd.isna(ars["property_id"]) or ars["property_id"] == ""

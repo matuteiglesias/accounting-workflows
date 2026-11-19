@@ -71,7 +71,6 @@ ACCOUNTABILITY_REQUIRED = {
     "Box",
     "Currency",
     "closing_control",
-    "validated_cash_status",
 }
 
 CASH_OUTPUT_COLUMNS = [
@@ -147,7 +146,6 @@ OPENING_COLUMNS = [
     "opening_as_of_period",
     "opening_amount",
     "status",
-    "validated_cash_status",
     "note",
 ]
 VALIDATION_COLUMNS = ["check", "status", "severity", "amount", "detail"]
@@ -514,7 +512,6 @@ def _build_opening_basis(
                     "opening_as_of_period": "",
                     "opening_amount": 0.0,
                     "status": "available",
-                    "validated_cash_status": "not_applicable",
                     "note": "Zero origin asserted only after confirming no earlier scoped activity in the exact run.",
                 }
             )
@@ -542,7 +539,6 @@ def _build_opening_basis(
                         "opening_as_of_period": str(last["period"]),
                         "opening_amount": float(last["closing_control"]),
                         "status": "available_box_level_not_property_attributable",
-                        "validated_cash_status": _text(last.get("validated_cash_status")),
                         "note": (
                             "Governed prior Box control close. It is pooled treasury control and "
                             "is not attributed to any selected property or asserted as physical cash."
@@ -573,7 +569,6 @@ def _build_opening_basis(
                     "opening_as_of_period": "",
                     "opening_amount": pd.NA,
                     "status": status,
-                    "validated_cash_status": "unavailable",
                     "note": note,
                 }
             )
