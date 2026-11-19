@@ -1521,7 +1521,7 @@ def build_professional_flow_drilldowns(
         "audit": "classification_audit.csv",
         "stmt": "monthly_operating_statement.csv",
         "annual": "annual_balance_dashboard_metrics.csv",
-        "cash_close": "monthly_cash_close.csv",
+        "box_motor": "box_balance_time_long.freq=M.csv",
         "debt_activity": "monthly_debt_activity.csv",
         "debt_position": "monthly_debt_position.csv",
     }
@@ -1667,7 +1667,8 @@ def build_professional_flow_drilldowns(
                         audit=frames["audit"],
                         stmt=frames["stmt"],
                         annual=frames["annual"],
-                        cash_close=frames["cash_close"],
+                        cash_close=pd.DataFrame(),
+                        box_motor=frames["box_motor"],
                         debt_activity=frames["debt_activity"],
                         debt_position=frames["debt_position"],
                         tolerance=tolerance,

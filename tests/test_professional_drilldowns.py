@@ -322,10 +322,10 @@ def test_diagnostic_box_level_presentation_route_is_preserved(tmp_path: Path) ->
     tables = pack / "tables"
 
     _write(
-        run / "monthly_cash_close.csv",
+        run / "box_balance_time_long.freq=M.csv",
         [
-            {"period": "2024-03", "Currency": "ARS", "Box": "Property Management", "close_amount": 180000, "position_type": "inferred_box_motor", "source_type": "inferred_box_motor", "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2024-03-31"},
-            {"period": "2024-04", "Currency": "ARS", "Box": "Property Management", "close_amount": 180030, "source_table": "box_balance_time_long.freq=M.csv", "position_type": "inferred_box_motor", "source_type": "inferred_box_motor", "cash_suitability": "safe_with_caveat", "is_frontend_safe": False, "as_of_date": "2024-04-30"},
+            {"TimePeriod": "2024-03", "TimePeriod_end": "2024-03-31", "Currency": "ARS", "Box": "Property Management", "cum_net": 180000},
+            {"TimePeriod": "2024-04", "TimePeriod_end": "2024-04-30", "Currency": "ARS", "Box": "Property Management", "cum_net": 180030},
         ],
     )
     _write(
@@ -338,7 +338,7 @@ def test_diagnostic_box_level_presentation_route_is_preserved(tmp_path: Path) ->
     row = index[index["table_id"].eq("monthly_tables_diagnostic_box_level_matrix")].iloc[0]
     assert row["status"] == "ok"
     assert float(row["matched_value_sum"]) == 30.0
-    assert row["source_artifact"] == "monthly_cash_close.csv"
+    assert row["source_artifact"] == "box_balance_time_long.freq=M.csv"
 
 
 def test_current_annual_companion_tables_reconcile_and_link(tmp_path: Path) -> None:

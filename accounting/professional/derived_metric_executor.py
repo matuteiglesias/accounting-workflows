@@ -12,7 +12,10 @@ from typing import Any
 import pandas as pd
 
 from accounting.box_control import (
+    BOX_MOTOR_SOURCE,
+    box_motor_schema_supported,
     inferred_control_schema_supported,
+    select_box_motor_control_period,
     select_inferred_box_control_period,
 )
 from accounting.contracts.derived_metrics import DerivedMetricSpec, resolve_derived_metric_spec
@@ -303,33 +306,36 @@ def _execute_diagnostic_delta(
     row: pd.Series,
     period: str,
     display_value: float,
-    cash_close: pd.DataFrame,
+    box_motor: pd.DataFrame,
     tolerance: float,
 ):
+    compatibility_cash_close = not box_motor_schema_supported(box_motor)
+    source_artifact = "monthly_cash_close.csv" if compatibility_cash_close else BOX_MOTOR_SOURCE
+    select_period = select_inferred_box_control_period if compatibility_cash_close else select_box_motor_control_period
     currency, box = _currency(row), _norm(row.get("Box"))
     previous_period = _previous_month(period)
     if not previous_period:
         return _unsupported_result(
             spec=spec,
             display_value=display_value,
-            source_artifact="monthly_cash_close.csv",
+            source_artifact=source_artifact,
             reason="invalid_month_period",
             period=period,
             currency=currency,
             evidence=pd.DataFrame(),
             sections=[],
         )
-    current = select_inferred_box_control_period(
-        cash_close, period=period, currency=currency, box=box
+    current = select_period(
+        box_motor, period=period, currency=currency, box=box
     )
-    previous = select_inferred_box_control_period(
-        cash_close, period=previous_period, currency=currency, box=box
+    previous = select_period(
+        box_motor, period=previous_period, currency=currency, box=box
     )
     sections = [
-        ("Current inferred box-control snapshot", current.selected),
-        ("Previous inferred box-control snapshot", previous.selected),
-        ("Current inferred candidates", current.candidates),
-        ("Previous inferred candidates", previous.candidates),
+        ("Current Box-motor snapshot", current.selected),
+        ("Previous Box-motor snapshot", previous.selected),
+        ("Current Box-motor candidates", current.candidates),
+        ("Previous Box-motor candidates", previous.candidates),
     ]
     if not current.available or not previous.available:
         reason = (
@@ -340,7 +346,7 @@ def _execute_diagnostic_delta(
         return _unsupported_result(
             spec=spec,
             display_value=display_value,
-            source_artifact="monthly_cash_close.csv",
+            source_artifact=source_artifact,
             reason=reason,
             period=period,
             currency=currency,
@@ -357,8 +363,8 @@ def _execute_diagnostic_delta(
             "previous_period": previous_period,
             "Currency": currency,
             "Box": box,
-            "current_inferred_control": float(current.value),
-            "previous_inferred_control": float(previous.value),
+            "current_box_motor_cum_net": float(current.value),
+            "previous_box_motor_cum_net": float(previous.value),
             "matched_value": matched,
             "displayed_value": display_value,
             "residual": residual,
@@ -368,8 +374,8 @@ def _execute_diagnostic_delta(
         status,
         matched,
         residual,
-        "governed_inferred_box_control_period_delta",
-        "monthly_cash_close.csv",
+        "governed_inferred_box_control_period_delta" if compatibility_cash_close else "governed_box_motor_period_delta",
+        source_artifact,
         {
             "derived_metric_id": spec.spec_id,
             "executor": "governed_derived_metric_v1",
@@ -380,9 +386,10 @@ def _execute_diagnostic_delta(
             "Currency": currency,
             "Box": box,
             "missing_component_policy": spec.missing_component_policy,
-            "validated_cash_fallback": "never",
+            "source_table": BOX_MOTOR_SOURCE,
+            **({"validated_cash_fallback": "never"} if compatibility_cash_close else {}),
         },
-        "Diagnostic box level is the month-over-month delta of governed inferred-box control only; validated cash and internal balances cannot enter this formula.",
+        "Diagnostic box level is the month-over-month delta of the native Box-motor cum_net only; bank validation and internal balances cannot enter this formula.",
         formula_rows,
         [("Diagnostic formula", formula_rows), *sections],
     )
@@ -395,8 +402,9 @@ def execute_derived_metric(
     period: str,
     display_value: float,
     annual: pd.DataFrame,
-    cash_close: pd.DataFrame,
     tolerance: float,
+    cash_close: pd.DataFrame | None = None,
+    box_motor: pd.DataFrame | None = None,
 ):
     spec_id = _norm(row.get("derived_metric_id"))
     if not spec_id:
@@ -406,14 +414,20 @@ def execute_derived_metric(
         raise ValueError(f"Unknown governed derived_metric_id: {spec_id!r}")
 
     if spec.operation == "period_delta":
-        if cash_close is not None and not cash_close.empty and not inferred_control_schema_supported(cash_close):
-            return None
+        # ``cash_close`` is retained only as a compatibility keyword for old
+        # direct callers; scheduled for deletion with the old mart in PR3c.
+        # The professional production dispatch supplies the native Box motor
+        # through ``box_motor``.
+        source = box_motor if box_motor is not None else cash_close
+        if source is not None and not source.empty and not box_motor_schema_supported(source):
+            if box_motor is not None or not inferred_control_schema_supported(source):
+                return None
         return _execute_diagnostic_delta(
             spec=spec,
             row=row,
             period=period,
             display_value=display_value,
-            cash_close=cash_close,
+            box_motor=source,
             tolerance=tolerance,
         )
 

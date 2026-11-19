@@ -696,6 +696,7 @@ def _build_derived_cell(
     debt_activity: pd.DataFrame,
     debt_position: pd.DataFrame,
     tolerance: float,
+    box_motor: pd.DataFrame | None = None,
 ):
     # Governed annual additive flows never re-filter the monthly split. For a
     # registered annual metric, even a missing lineage artifact fails closed.
@@ -796,6 +797,7 @@ def _build_derived_cell(
             display_value=display_value,
             annual=annual,
             cash_close=cash_close,
+            box_motor=box_motor,
             tolerance=tolerance,
         )
         if governed_derived is not None:
