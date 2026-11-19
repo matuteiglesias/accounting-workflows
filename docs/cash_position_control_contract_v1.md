@@ -2,6 +2,11 @@
 
 Date: 2026-08-19
 
+> **Historical / superseded as of cash retirement 2026-11.** This document
+> records the former validated-cash contract and is not a current operational
+> rule. See the [recorded Box cash-control replacement contract](../notes/cash_control_replacement_contract.md)
+> and, after PR3c/PR3d integration, the [cash-control runtime target](cash_control_runtime_v2.md).
+
 ## Purpose
 
 PR15A converts the cash-authority decision from PR11 into typed declarative

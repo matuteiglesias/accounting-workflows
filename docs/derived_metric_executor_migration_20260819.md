@@ -2,6 +2,13 @@
 
 Date: 2026-08-19
 
+> **Historical boundary / post-retirement target.** This document preserves
+> the PR18 migration narrative. After PR3c/PR3d integration,
+> `derived.diagnostic_box_level` reads the native
+> `box_balance_time_long.freq=M.csv` `cum_net` month delta directly;
+> `monthly_cash_close.csv` inferred rows describe historical compatibility
+> behavior only.
+
 ## Scope
 
 PR18 is the production-consumer migration for the Wave 5 derived-metric

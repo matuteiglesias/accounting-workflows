@@ -44,3 +44,36 @@ PR0 adds only the executable contract and characterization. Existing
 and professional interfaces remain unchanged. PR1 may add the new series to
 consumers after deciding the publication/report contract. Later PRs can retire
 validated-cash execution paths only after those consumers migrate.
+
+## Migration and post-retirement target
+
+This section records the target for PR3c/PR3d and PR4 documentation; it does
+not claim that the parallel cleanup has already landed.
+
+- The active producer is `monthly_cash_accountability.csv`. The governed IDs
+  are `CTRL.BOX.NET_MOVEMENT` (annual flow: sum monthly movements) and
+  `CTRL.BOX.CUM_NET` (annual stock: select the latest month-end, never sum
+  stocks).
+- These are recorded Box controls with explicit provenance and limitations,
+  not validated liquidity, actual cash held, or a bank/account balance. The
+  zero-origin convention does not turn an unknown opening balance into zero.
+- `derived.diagnostic_box_level` uses the direct native Box motor artifact
+  `box_balance_time_long.freq=M.csv` and its `cum_net` month delta. The
+  `monthly_cash_close.csv` runtime and its inferred rows are retired by the
+  target cleanup; the old path remains historical compatibility evidence until
+  that cleanup is integrated.
+- Optional external balance observations are not implemented and are not
+  required for ordinary accounting reports. No observation certifies a
+  recorded control.
+- Native currencies remain separate, Box transfer legs remain recorded per
+  Box, and no consolidated Box total or FX conversion is introduced by this
+  contract.
+- Scenario execution must remain offline, isolated, and non-publishing; the
+  migration does not authorize live ingestion or latest/publication updates.
+- Required QA remains: ledger integrity, movement conservation, opening plus
+  movement equals closing, currency and Box-boundary checks, debt repayment
+  consistency, annual flow/stock selection, report-contract checks, and
+  historical-run preservation.
+
+The post-retirement source graph is summarized in
+[`docs/cash_control_runtime_v2.md`](../docs/cash_control_runtime_v2.md).

@@ -2,6 +2,13 @@
 
 Date: 2026-08-19
 
+> **Historical boundary / post-retirement target.** This document preserves
+> the PR17 contract narrative. After PR3c/PR3d integration, the current
+> `derived.diagnostic_box_level` authority is the native
+> `box_balance_time_long.freq=M.csv` `cum_net` month delta. Rows inferred from
+> `monthly_cash_close.csv` are historical compatibility behavior, not the
+> current diagnostic authority.
+
 This document is the PR17 contract boundary that follows the PR16 derived-authority characterization. It defines formula identity and policy only. No production consumer is migrated in PR17.
 
 ## Invariant

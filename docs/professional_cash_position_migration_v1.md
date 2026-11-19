@@ -1,5 +1,10 @@
 # Wave 4 PR15B — governed validated cash consumption
 
+> **Historical / superseded as of cash retirement 2026-11.** This document
+> records the former professional validated-cash migration and is not a current
+> operational rule. See the [recorded Box cash-control replacement contract](../notes/cash_control_replacement_contract.md)
+> and, after PR3c/PR3d integration, the [cash-control runtime target](cash_control_runtime_v2.md).
+
 ## Invariant
 
 Cash headline values are positions backed by explicitly validated account snapshots. They are not sums of every cash/control row sharing period, Currency, and Box.
