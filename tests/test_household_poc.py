@@ -18,7 +18,8 @@ def fixture_run(tmp_path: Path) -> Path:
     for i in range(1,11):
         row={"period":f"2026-{i:02d}","Currency":"ARS","Box":"Household",
              "total_cash_in":float(100*i),"total_cash_out":float(200*i),
-             "funding_cash_in":float(100*i),"reconciliation_status":"reconciled"}
+             "funding_cash_in":float(100*i),"closing_control":float(-1000*i),
+             "reconciliation_status":"reconciled"}
         for col in ("services_out","maintenance_out","legal_out","taxes_out","debt_repayments_out",
                     "debt_principal_out","personal_draws_out","internal_transfer_out","other_cash_out","unknown_cash_out"):
             row[col]=float(200*i) if col=="services_out" else 0.0
@@ -29,7 +30,7 @@ def fixture_run(tmp_path: Path) -> Path:
          "semantic_bucket":"property_opex","semantic_subbucket":"services",
          "direction":"out","amount":400.},
         {"tx_id":"HH_2","Date":"2026-05-07","Currency":"ARS","Box":"Household",
-         "semantic_bucket":"funding_contribution","semantic_subbucket":"family_or_tenant_contribution",
+         "payer":"MI","semantic_bucket":"funding_contribution","semantic_subbucket":"family_or_tenant_contribution",
          "direction":"in","amount":250.},
     ]).to_csv(r/"classification_audit.csv",index=False)
     return r
@@ -45,6 +46,9 @@ def test_hh1_five_reports_and_explicit_skips(tmp_path):
     assert all(x["status"]=="SKIPPED_INCOMPATIBLE" for x in d["skipped_existing_reports"])
     assert d["data_qa"]["annual_cash_in_ars"]==5500
     assert d["data_qa"]["annual_cash_out_ars"]==11000
+    assert d["data_qa"]["virtual_closing_ars"]==-10000
+    assert "Aportes reconocidos por persona" in (path.parent/"charts/contributions.svg").read_text()
+    assert "Déficit de caja virtual" in (path.parent/"charts/movement_types.svg").read_text()
     import hashlib
     for x in d["reports"]:
         f=path.parent/x["chart"]

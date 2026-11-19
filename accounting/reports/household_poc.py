@@ -22,10 +22,10 @@ COLORS = ("#376e99", "#df9552", "#549c8a", "#8d77b6", "#b7c47b", "#bd748d")
 SPANISH_MONTHS = ("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
 DETAILS = (
     ("cash_flow", "Entradas y salidas", "Movimientos mensuales de caja registrados en HH."),
-    ("contributions", "Aportes", "Aportes registrados hacia la caja Household."),
+    ("contributions", "Aportes por persona", "Aportes reconocidos en 2025 y 2026, diferenciados por responsable."),
     ("outflows", "Salidas por categoría", "Egresos clasificados en el control de tesorería."),
     ("monthly_costs", "Gastos por mes", "Gastos reconocidos, agrupados por período."),
-    ("movement_types", "Tipos de movimiento", "Cantidad de asientos por clase semántica."),
+    ("movement_types", "Déficit virtual", "Magnitud del saldo negativo del libro doméstico, no deuda individual."),
 )
 CATEGORIES = {
     "funding_contribution": "Aportes",
@@ -188,16 +188,36 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
     expenses["month"]=expenses.Date.astype(str).str[:7]
     expense_by_month=expenses.groupby("month").amount.sum()
     expense_by_type=expenses.groupby("semantic_subbucket").amount.sum()
-    movements=semantic[(semantic.Currency=="ARS")&(semantic.Date.astype(str).str[:4]==year)].copy()
-    movement_counts=movements.semantic_bucket.fillna("unknown").value_counts()
+    # Funding claims are only the source-recognized contributions, never inferred
+    # from who executed payments. Show the prior year for the virtual 2025 MI
+    # policy. Values remain nominal ARS; the viewer must not imply deflation.
+    baseline_year=str(int(year)-1)
+    movements=semantic[(semantic.Currency=="ARS")
+        &(semantic.Date.astype(str).str[:4]==year)].copy()
+    funding=semantic[(semantic.Currency=="ARS")
+        &(semantic.semantic_bucket=="funding_contribution")
+        &(semantic.Date.astype(str).str[:4].isin([baseline_year,year]))].copy()
+    if funding.empty:
+        raise ValueError("HH1 needs recognised funding rows for actor chart")
+    funding["year"]=funding.Date.astype(str).str[:4]
+    actor_totals=funding.groupby(["payer","year"],dropna=False).amount.sum()
+    known={"MI":"Matías", "Cande":"Candela", "Alen":"Alén", "Alejandro":"Alejandro", "CA":"Claudia"}
+    actors=[k for k in ("MI","Cande","Alen","Alejandro","CA") if k in set(funding.payer)]
+    actors.extend(sorted(set(funding.payer)-set(actors)))
+    if len(actors)>10:
+        raise ValueError("HH1 actor chart needs explicit grouping for more than ten counterparties")
+    deficit=[max(0.0,-float(v)) for v in cash_year.closing_control.tolist()]
+    if any(not math.isfinite(v) for v in deficit):
+        raise ValueError("HH1 requires finite monthly virtual balances")
 
     charts={
         "cash_flow": _bar_svg("Entradas y salidas registradas · ARS", [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
              [("Entradas",cash_year.total_cash_in.tolist()),("Salidas",cash_year.total_cash_out.tolist())],
              note="Caja operativa registrada; no implica saldo bancario validado."),
-        "contributions": _bar_svg("Aportes mensuales registrados · ARS", [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
-             [("Aportes",cash_year.funding_cash_in.tolist())],
-             note="Incluye sólo funding_cash_in clasificado en Household."),
+        "contributions": _bar_svg("Aportes reconocidos por persona · ARS nominales", [known.get(k,k) for k in actors],
+             [(baseline_year,[float(actor_totals.get((k,baseline_year),0)) for k in actors]),
+              (year+" hasta octubre",[float(actor_totals.get((k,year),0)) for k in actors])],
+             note="Matías 2025: aportes virtuales. No se agregan aportes declarados aún sin asiento."),
         "outflows":_horizontal_svg("Salidas registradas por tipo · ARS",
              [(name,float(cash_year[col].sum())) for col,name in categories],
              note="Distribución del total_cash_out; no duplicar con los gastos reconocidos."),
@@ -205,9 +225,9 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
              [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
              [("Gastos",[float(expense_by_month.get(month,0)) for month in months])],
              note="Gastos semánticos: pueden incluir pagos directos sin caja física."),
-        "movement_types":_horizontal_svg("Asientos por tipo semántico · 2026",
-             [(CATEGORIES.get(k,str(k)),float(v)) for k,v in movement_counts.items()],
-             note="Cantidad de transacciones, no importe; una sola vez por tx_id.",unit="count"),
+        "movement_types":_bar_svg("Déficit de caja virtual acumulado · ARS", [SPANISH_MONTHS[i] for i in range(cutoff_date.month)],
+             [("Déficit virtual",deficit)],
+             note="Magnitud del saldo negativo contable; NO es banco ni crédito individual reconocido."),
     }
     out_dir=Path(out_dir)
     if out_dir.exists() and any(out_dir.iterdir()):
@@ -262,6 +282,9 @@ def build_household_poc(run_root: Path, out_dir: Path, *, cutoff: str = "2026-10
             "annual_cash_in_ars":round(float(cash_year.total_cash_in.sum()),2),
             "annual_cash_out_ars":round(float(cash_year.total_cash_out.sum()),2),
             "recognized_spending_ars":round(float(expenses.amount.sum()),2),
+            "virtual_closing_ars":round(float(cash_year.closing_control.iloc[-1]),2),
+            "prior_year_recognized_MI_virtual_contributions_ars":round(float(actor_totals.get(("MI",baseline_year),0)),2),
+            "current_year_recognized_CA_contributions_ars":round(float(actor_totals.get(("CA",year),0)),2),
             "no_cross_box_rows":True,
             "cash_reconciliation":"reconciled",
             "source_hh_historical_last_date":str(semantic.Date.max()),
