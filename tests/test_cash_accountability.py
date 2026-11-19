@@ -41,34 +41,6 @@ def test_accountability_is_native_currency_and_reconciles(tmp_path):
             {
                 "period": "2026-05",
                 "period_end": "2026-05-31",
-                "as_of_date": "2026-05-31",
-                "Box": "Property Management",
-                "party": "",
-                "account_id": "bank-ars",
-                "account_name": "ARS",
-                "Currency": "ARS",
-                "close_amount": 1800.0,
-                "source_table": "validated_cash_close.csv",
-                "source_date": "2026-05-31",
-                "source_type": "account_snapshot",
-                "source_reference": "fixture",
-                "validation_status": "validated",
-                "validated_by": "controller",
-                "position_type": "cash_close",
-                "cash_suitability": "frontend_safe",
-                "is_frontend_safe": True,
-                "caveat": "fixture",
-                "notes": "",
-                "n_source_rows": 1,
-                "calculation_rule": "fixture",
-            }
-        ]
-    ).to_csv(tmp_path / "monthly_cash_close.csv", index=False)
-    pd.DataFrame(
-        [
-            {
-                "period": "2026-05",
-                "period_end": "2026-05-31",
                 "Currency": "USD",
                 "debtor": "Property Management",
                 "creditor": "MI",
@@ -101,9 +73,8 @@ def test_accountability_is_native_currency_and_reconciles(tmp_path):
     assert ars["direct_tax_support_non_cash"] == 50.0
     assert ars["net_cash_flow"] == 800.0
     assert ars["box_motor_net"] == 800.0
-    assert ars["validated_cash_close"] == 1800.0
-    assert ars["validated_anchor_offset"] == 1000.0
-    assert ars["anchor_alignment_status"] == "first_anchor"
+    assert "validated_cash_close" not in out.columns
+    assert "anchor_alignment_status" not in out.columns
 
     usd = out.loc[out["Currency"].eq("USD")].iloc[0]
     assert usd["rent_in"] == 500.0
@@ -113,7 +84,7 @@ def test_accountability_is_native_currency_and_reconciles(tmp_path):
     assert usd["debt_reconciliation_status"] == "reconciled"
 
 
-def test_two_validated_anchors_expose_offset_gap_instead_of_hiding_it(tmp_path):
+def test_multiple_movement_periods_retain_reconciliation_without_anchors(tmp_path):
     motor_rows = []
     for month, net, cum in [("2026-01", 100.0, 100.0), ("2026-02", 50.0, 150.0)]:
         motor_rows.append(
@@ -181,44 +152,11 @@ def test_two_validated_anchors_expose_offset_gap_instead_of_hiding_it(tmp_path):
             for r in motor_rows
         ]
     ).to_csv(tmp_path / "monthly_box_treasury_flow.csv", index=False)
-    cash_rows = []
-    for period, close in [("2026-01", 1100.0), ("2026-02", 1200.0)]:
-        end = pd.Period(period, freq="M").end_time.date().isoformat()
-        cash_rows.append(
-            {
-                "period": period,
-                "period_end": end,
-                "as_of_date": end,
-                "Box": "Property Management",
-                "party": "",
-                "account_id": "usd",
-                "account_name": "USD",
-                "Currency": "USD",
-                "close_amount": close,
-                "source_table": "validated_cash_close.csv",
-                "source_date": end,
-                "source_type": "account_snapshot",
-                "source_reference": "fixture",
-                "validation_status": "validated",
-                "validated_by": "controller",
-                "position_type": "cash_close",
-                "cash_suitability": "frontend_safe",
-                "is_frontend_safe": True,
-                "caveat": "fixture",
-                "notes": "",
-                "n_source_rows": 1,
-                "calculation_rule": "fixture",
-            }
-        )
-    pd.DataFrame(cash_rows).to_csv(tmp_path / "monthly_cash_close.csv", index=False)
-
     paths = build_monthly_cash_accountability(tmp_path)
     out = pd.read_csv(paths["monthly_cash_accountability"])
-    jan, feb = out.sort_values("period").to_dict("records")
-    assert jan["validated_anchor_offset"] == 1000.0
-    assert feb["validated_anchor_offset"] == 1050.0
-    assert feb["anchor_reconciliation_gap"] == 50.0
-    assert feb["anchor_alignment_status"] == "residual"
+    assert "validated_anchor_offset" not in out.columns
+    assert "anchor_reconciliation_gap" not in out.columns
+    assert out["reconciliation_status"].eq("reconciled").all()
 
 
 def test_non_cash_only_month_uses_complete_control_spine(tmp_path):
@@ -250,4 +188,3 @@ def test_non_cash_only_month_uses_complete_control_spine(tmp_path):
     assert feb["net_cash_flow"] == 0.0
     assert feb["direct_tax_support_non_cash"] == 25.0
     assert feb["reconciliation_status"] == "reconciled"
-

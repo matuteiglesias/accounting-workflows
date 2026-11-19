@@ -20,9 +20,8 @@ CYCLE_COLUMNS = [
     "cycle_id", "cycle_start", "cycle_end", "view_type", "as_of_date", "Box",
     "Currency", "opening_accountability_balance", "accountable_receipts",
     "documented_distributions", "supported_uses", "documented_transfers_out",
-    "closing_accountability_balance", "validated_cash", "validated_cash_status",
-    "validated_cash_as_of_date", "other_documented_custody", "accountability_gap",
-    "accountability_gap_status", "n_months", "n_tx", "source_table", "policy_id",
+    "closing_accountability_balance", "other_documented_custody", "n_months", "n_tx",
+    "source_table", "policy_id",
 ]
 
 HOUSEHOLD_COLUMNS = [
@@ -83,21 +82,13 @@ def build_family_business_accountability_cycles(
     ):
         group = group.sort_values("period")
         completed = end <= cutoff
-        final = group.iloc[-1]
-        cash_ok = (
-            str(final.get("validated_cash_status", "")) == "available"
-            and not str(final.get("validated_cash_reason", "")).strip()
-            and pd.notna(pd.to_numeric(pd.Series([final.get("validated_cash_close")]), errors="coerce").iloc[0])
-        )
         opening = float(pd.to_numeric(pd.Series([group.iloc[0].get("opening_control")]), errors="coerce").fillna(0).iloc[0])
         receipts = float(group["accountable_receipts"].sum())
         distributions = float(group["documented_distributions"].sum())
         uses = float(group["supported_uses"].sum())
         transfers = float(group["documented_transfers_out"].sum())
         closing = opening + receipts - distributions - uses - transfers
-        validated_cash = float(final["validated_cash_close"]) if cash_ok else pd.NA
         custody = 0.0
-        gap = closing - validated_cash - custody if cash_ok else pd.NA
         rows.append({
             "cycle_id": f"{start.date().isoformat()}_{end.date().isoformat()}",
             "cycle_start": start.date().isoformat(), "cycle_end": end.date().isoformat(),
@@ -106,11 +97,7 @@ def build_family_business_accountability_cycles(
             "Currency": currency, "opening_accountability_balance": opening,
             "accountable_receipts": receipts, "documented_distributions": distributions,
             "supported_uses": uses, "documented_transfers_out": transfers,
-            "closing_accountability_balance": closing, "validated_cash": validated_cash,
-            "validated_cash_status": "available" if cash_ok else "unavailable",
-            "validated_cash_as_of_date": final.get("validated_as_of_date", "") if cash_ok else "",
-            "other_documented_custody": custody, "accountability_gap": gap,
-            "accountability_gap_status": "available" if cash_ok else "unavailable_no_validated_cash",
+            "closing_accountability_balance": closing, "other_documented_custody": custody,
             "n_months": len(group), "n_tx": int(pd.to_numeric(group.get("n_tx"), errors="coerce").fillna(0).sum()),
             "source_table": "monthly_cash_accountability.csv",
             "policy_id": "fb_accountability_cycle_6m_anchor_03_01_v1",
@@ -129,10 +116,7 @@ def build_family_business_accountability_cycles(
             "opening_accountability_balance": opening, "accountable_receipts": 0.0,
             "documented_distributions": 0.0, "supported_uses": 0.0,
             "documented_transfers_out": 0.0, "closing_accountability_balance": opening,
-            "validated_cash": pd.NA, "validated_cash_status": "unavailable",
-            "validated_cash_as_of_date": "", "other_documented_custody": 0.0,
-            "accountability_gap": pd.NA,
-            "accountability_gap_status": "unavailable_no_validated_cash",
+            "other_documented_custody": 0.0,
             "n_months": 0, "n_tx": 0, "source_table": "monthly_cash_accountability.csv",
             "policy_id": "fb_accountability_cycle_6m_anchor_03_01_v1",
         })

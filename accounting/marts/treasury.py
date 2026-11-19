@@ -13,7 +13,6 @@ from typing import Any, Dict, Mapping
 
 import pandas as pd
 
-from accounting.cash_authority import select_validated_cash_period
 from accounting.cutoff import load_run_cutoff_if_present
 from accounting.marts.treasury_transaction_detail import write_treasury_transaction_detail
 from accounting.artifacts.producer_provenance import register_mart_outputs
@@ -47,9 +46,6 @@ ACCOUNTABILITY_COLUMNS = [
     "opening_control", *ACCOUNTABILITY_COMPONENT_COLUMNS, "total_cash_in",
     "total_cash_out", "net_cash_flow", "closing_control", "box_motor_net",
     "box_flow_net", "reconciliation_gap", "reconciliation_status",
-    "validated_cash_close", "validated_cash_status", "validated_cash_reason",
-    "validated_as_of_date", "validated_account_count", "validated_anchor_offset",
-    "anchor_reconciliation_gap", "anchor_alignment_status",
     "debt_engine_repayments", "debt_repayment_gap", "debt_reconciliation_status",
     "n_tx", "n_review_required",
 ]
@@ -710,98 +706,9 @@ def build_monthly_cash_accountability(
         cutoff_period = cutoff.date[:7]
         out.loc[out["period"].astype(str).eq(cutoff_period), "control_as_of_date"] = cutoff.date
 
-    cash_path = run_root / "monthly_cash_close.csv"
-    cash = pd.read_csv(cash_path) if cash_path.exists() else pd.DataFrame()
-    selected_meta: list[dict[str, Any]] = []
-    for _, row in out.iterrows():
-        if cash.empty:
-            selected_meta.append({
-                "validated_cash_close": pd.NA,
-                "validated_cash_status": "unavailable",
-                "validated_cash_reason": "missing_source",
-                "validated_as_of_date": "",
-                "validated_account_count": 0,
-                "validated_anchor_offset": pd.NA,
-                "anchor_reconciliation_gap": pd.NA,
-                "anchor_alignment_status": "unavailable",
-            })
-            continue
-        selection = select_validated_cash_period(
-            cash,
-            period=_text(row["period"]),
-            currency=_text(row["Currency"]),
-            box=_text(row["Box"]),
-        )
-        if not selection.available:
-            selected_meta.append({
-                "validated_cash_close": pd.NA,
-                "validated_cash_status": selection.status,
-                "validated_cash_reason": selection.reason,
-                "validated_as_of_date": "",
-                "validated_account_count": 0,
-                "validated_anchor_offset": pd.NA,
-                "anchor_reconciliation_gap": pd.NA,
-                "anchor_alignment_status": "unavailable",
-            })
-            continue
-        dates = sorted(
-            selection.selected["as_of_date"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .loc[lambda s: s.ne("")]
-            .unique()
-            .tolist()
-        )
-        coherent_date = dates[0] if len(dates) == 1 else ""
-        eligible = bool(
-            coherent_date and coherent_date == _text(row["control_as_of_date"])
-        )
-        offset = (
-            float(selection.value) - float(row["closing_control"])
-            if eligible and selection.value is not None
-            else pd.NA
-        )
-        reason = ""
-        if not eligible:
-            reason = (
-                "anchor_date_misaligned"
-                if len(dates) == 1
-                else "selected_accounts_have_mixed_as_of_dates"
-            )
-        selected_meta.append({
-            "validated_cash_close": float(selection.value) if selection.value is not None else pd.NA,
-            "validated_cash_status": "available",
-            "validated_cash_reason": reason,
-            "validated_as_of_date": ";".join(dates),
-            "validated_account_count": int(len(selection.selected)),
-            "validated_anchor_offset": offset,
-            "anchor_reconciliation_gap": pd.NA,
-            "anchor_alignment_status": "pending" if eligible else "unavailable",
-        })
-    out = pd.concat([out.reset_index(drop=True), pd.DataFrame(selected_meta)], axis=1)
-
+    # Validated account snapshots and anchor diagnostics are intentionally not
+    # part of this producer contract.
     out = out.sort_values(["Box", "Currency", "period"]).reset_index(drop=True)
-    for _, idx in out.groupby(["Box", "Currency"], sort=False).groups.items():
-        prior_offset: float | None = None
-        for i in idx:
-            value = pd.to_numeric(
-                pd.Series([out.at[i, "validated_anchor_offset"]]), errors="coerce"
-            ).iloc[0]
-            if pd.isna(value):
-                continue
-            value = float(value)
-            if prior_offset is None:
-                out.at[i, "anchor_alignment_status"] = "first_anchor"
-                out.at[i, "anchor_reconciliation_gap"] = pd.NA
-            else:
-                gap = value - prior_offset
-                out.at[i, "anchor_reconciliation_gap"] = gap
-                out.at[i, "anchor_alignment_status"] = (
-                    "reconciled" if abs(gap) <= tolerance else "residual"
-                )
-            prior_offset = value
-
     debt_path = run_root / "monthly_debt_activity.csv"
     debt = pd.read_csv(debt_path) if debt_path.exists() else pd.DataFrame()
     if not debt.empty:
@@ -876,14 +783,6 @@ def build_monthly_cash_accountability(
                 "amount": row["debt_repayment_gap"], "status": "warn", "severity": "warning",
                 "detail": "cash says money moved; debt engine says how much was allocated",
             })
-        if row["anchor_alignment_status"] == "residual":
-            qa_rows.append({
-                "check": "validated_anchor_offsets_align",
-                "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
-                "amount": row["anchor_reconciliation_gap"], "status": "warn", "severity": "warning",
-                "detail": "validated cash anchors imply inconsistent opening offset",
-            })
-
     out = out[ACCOUNTABILITY_COLUMNS].sort_values(
         ["period", "Box", "Currency"]
     ).reset_index(drop=True)

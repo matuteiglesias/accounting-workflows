@@ -102,22 +102,20 @@ def _accountability_rows(box: str = "Family Business") -> pd.DataFrame:
             "total_cash_in": cash_in, "total_cash_out": draws + uses,
             "personal_draws_out": draws, "dividends_out": 0,
             "internal_transfer_out": 0, "fx_out": 0, "n_tx": 2,
-            "validated_cash_status": "unavailable", "validated_cash_reason": "missing_source",
-            "validated_cash_close": pd.NA, "validated_as_of_date": "",
             "funding_cash_in": cash_in, "net_cash_flow": cash_in - draws - uses,
         })
     return pd.DataFrame(rows)
 
 
-def test_cycles_are_fixed_mar_aug_and_sep_feb_and_cash_gap_is_unavailable() -> None:
+def test_cycles_are_fixed_mar_aug_and_sep_feb_without_cash_gap_contract() -> None:
     assert tuple(str(value.date()) for value in cycle_bounds("2026-08-31")) == ("2026-03-01", "2026-08-31")
     assert tuple(str(value.date()) for value in cycle_bounds("2026-09-01")) == ("2026-09-01", "2027-02-28")
     out = build_family_business_accountability_cycles(_accountability_rows(), as_of_date="2026-09-30")
     closed = out.loc[out["cycle_start"].eq("2026-03-01")].iloc[0]
     assert closed["view_type"] == "completed_cycle"
     assert closed["closing_accountability_balance"] == 100
-    assert closed["accountability_gap_status"] == "unavailable_no_validated_cash"
-    assert pd.isna(closed["accountability_gap"])
+    assert "accountability_gap" not in out.columns
+    assert "validated_cash" not in out.columns
     assert set(out["view_type"]) == {"completed_cycle", "current_since_last_cut"}
 
 
