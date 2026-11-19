@@ -1,5 +1,7 @@
 # Household HH1 — scope-switched reporting POC (2026-11-19)
 
+> **Actualización 19/11/2026:** Claudia (CA) registró dos aportes recibidos/aprobados de ARS 150.000 (29/08 y 04/11). El **run vigente para el POC de octubre** es `20261119T222524Z_HH`, con saldo virtual final **−2.009.394,01 ARS**. Los importes y el run `20261119T211126Z_HH` descritos debajo son el *estado histórico previo al registro*. Ver `docs/HOUSEHOLD_PRODUCT_DISCOVERY_20261119.md` para la conciliación vigente.
+
 ## Finding
 
 The production accounting backend already has an explicit Box-universe selector:

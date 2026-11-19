@@ -1,6 +1,6 @@
 # Household Balbín — discovery y contrato de informes HH1 v2
 
-**Estado:** requisitos recogidos del administrador del hogar el 19/11/2026. **No** equivale a liquidación aprobada, deuda exigible, cambio del ledger ni determinación legal sobre propiedad. **Scope de datos:** `Box=Household` (etiqueta `HH`), distinto de los `Box=Family Business/Property Management`.
+**Estado:** requisitos recogidos y conciliación de aportes de Claudia actualizada el 19/11/2026. **No** equivale a liquidación aprobada, deuda exigible, cambio del ledger ni determinación legal sobre propiedad. **Scope de datos:** `Box=Household` (etiqueta `HH`), distinto de los `Box=Family Business/Property Management`.
 
 ## 1. Unidad administrada y límites
 
@@ -22,24 +22,24 @@ Separar cuatro ejes que nunca deben colapsarse:
 | Candela | `Cande` (no cambiar sin migración) | Aportante irregular; algunos gastos del perro pagados directamente | Registros de aportes + pagos del perro aún por conciliar |
 | Alén / Valén | `Alen` en ledger | Último aporte registrado en mayo 2025. Fecha de salida de residencia **aprox. marzo–mayo 2026**, incierta; no inferir ausencia en 2025 por fin de aportes. | Usuario + registros |
 | Alejandro | `Alejandro` | No residente; cuatro × ARS 200.000 a HH durante mayo, junio, julio y octubre 2026, desde distribuciones suyas | Usuario + registros |
-| Claudia Cuña | **`CA` propuesto**, no creado en origen | Residente desde 01/08/2026; declara ARS 150.000 en septiembre y ARS 150.000 en noviembre de 2026. Solo septiembre cae dentro del corte 31/10; ninguna de esas entradas figura aún como `payer=CA` en corrida HH. | Testimonio, sin transacción conciliada |
+| Claudia Catalina Acuna Ponce | `CA` (**creado y verificado**) | Residente desde 01/08/2026; dos aportes recibidos y aprobados de ARS 150.000: **29/08/2026** y **04/11/2026**. El primero entra en el corte 31/10; el segundo se registra en origen para un corte posterior. | Usuario y dos asientos fuente verificados, IDs 1668/1669 |
 | Chino / Héctor | Externos a HH | Contrapartes en pago de servicios/ABL de propiedad, no miembros HH | No incluir como residentes ni aportantes HH |
 
-**Importante:** el usuario mencionó primero la sigla `SA` y luego propuso `CA` explícitamente para Claudia. **Usar `CA` como candidato**, pero no renombrar filas ni crear actores canónicos antes de reconciliar el origen.
+**Identificador de actor:** el usuario mencionó inicialmente `SA` y después propuso `CA` para Claudia. El identificador definitivo `CA` ya está disponible en el directorio de actores y en ambos asientos de `C. Long Ledger`. No renombrar ni crear más actores duplicados.
 
 No asignar automáticamente prorrateos mensuales por ocupación mientras las fechas de Alén sean inciertas. Para 2025 el cliente propone considerar tres hermanos como unidad de reparto, aunque el pago de Alén se interrumpe en mayo. Para 2026, madre desde agosto y Alén no contribuye en este año.
 
 ## 3. Corte de verdad observado
 
-**Fuente reproducible:** `out/run/accounting/20261119T211126Z_HH/`, cutoff `2026-10-31`. Los valores siguientes son de **contabilidad virtual** de HH en ARS, no certificados bancarios:
+**Fuente reproducible actualizada:** `out/run/accounting/20261119T222524Z_HH/`, cutoff `2026-10-31`. Sustituye para saldos a la corrida previa `20261119T211126Z_HH`. Los valores siguientes son de **contabilidad virtual** de HH en ARS, no certificados bancarios:
 
 | Indicador | Resultado |
 |---|---:|
 | Saldo virtual a 2025-12-31 | -439.080,58 |
-| Ingresos contables de HH ene–oct 2026 | 1.177.500,00 |
+| Ingresos contables de HH ene–oct 2026 | 1.327.500,00 |
 | Egresos contables de HH ene–oct 2026 | 2.897.813,43 |
-| Resultado contable ene–oct 2026 | -1.720.313,43 |
-| Saldo virtual a 2026-10-31 | -2.159.394,01 |
+| Resultado contable ene–oct 2026 | -1.570.313,43 |
+| Saldo virtual a 2026-10-31 | -2.009.394,01 |
 
 Aportes `funding_contribution` según el ledger:
 
@@ -49,9 +49,9 @@ Aportes `funding_contribution` según el ledger:
 | Candela (Cande) | 760.000,00 | 377.500,00 |
 | Alén | 450.000,00 | 0 |
 | Alejandro | 0 | 800.000,00 |
-| Claudia (CA) | 0 | 0 |
+| Claudia (CA) | 0 | 150.000,00 |
 
-**Diferencias a conciliar, no rellenar:** el usuario estimó contribuciones de Candela 2026 alrededor de ARS 300.000, pero hay ARS 377.500 en los registros (puede deberse a fechas o redondeo); Claudia declara ARS 150.000 en septiembre dentro del corte que **no** está en HH 2026, y otros ARS 150.000 en noviembre fuera de corte. La contribución de Matías 2026 se registra como **0** por regla, aunque sus pagos directos pueden financiar el desequilibrio, **sin cuantificación individual verificada**. En 2025 la entrada virtual de MI es 12 × 150.000; no insertar un segundo ingreso por las facturas que esas contribuciones modelan.
+**Diferencias remanentes:** el usuario estimó contribuciones de Candela 2026 alrededor de ARS 300.000, mientras el ledger registra ARS 377.500 hasta octubre; requiere revisar si hubo redondeo o pagos con otra finalidad. Los dos aportes de Claudia están conciliados **con fechas 29 de agosto y 4 de noviembre**, no septiembre/noviembre, y se registraron una sola vez en la caja virtual HH. Solo el primero afecta octubre; el segundo entra en el siguiente corte. Matías 2026 sigue con aportes nominales **0**, aunque sus pagos directos pueden financiar parte del desequilibrio, **sin cuantificación individual verificada**. En 2025 la entrada virtual de MI es 12 × 150.000; no insertar segundo ingreso por las facturas que esos aportes representan.
 
 ## 4. Catálogo v2: cinco informes, en este orden
 
@@ -76,19 +76,19 @@ Aportes `funding_contribution` según el ledger:
 
 ## 5. Escenarios Claudia: especificación, no deuda
 
-El usuario propuso varias bases que son económicamente diferentes. No seleccionar un único criterio de justicia ni sumar la cuota de Claudia como ingreso mientras no esté conciliada. Definir `C_y` como **costo anual compartible confirmado**, no necesariamente el total del ledger; `C_{ago-dic}` como costo compartible durante la residencia, y `A_CA` como aportes **efectivamente corroborados**.
+El usuario propuso varias bases que son económicamente diferentes. No seleccionar un único criterio de justicia ni confundir una cuota calculada con un ingreso ya recibido. Los aportes de Claudia están conciliados y se agregan **una sola vez** como contribuciones de HH. Definir `C_y` como **costo anual compartible confirmado**, no necesariamente el total del ledger; `C_{ago-dic}` como costo compartible durante la residencia, y `A_CA` como aportes **efectivamente corroborados**.
 
 - **Escenario A — tercio del año completo:** `cuota_CA = C_2026 / 3`. Es una hipótesis distributiva, no prorrateada por ocupación.
 - **Escenario B — tercio de los meses que vivió:** `cuota_CA = C_(ago-dic) / 3`. Requiere noviembre y diciembre efectivamente cerrados o pronosticados por separado.
 - **Escenario C — cinco doceavos del tercio anual:** `cuota_CA = (5/12) * (C_2026/3)`. Alternativa explícita de prorrateo temporal que **no equivale** a B si los costos varían por mes.
 - **Sensibilidad adicional:** `cuota_CA = 1/2 * (C_2026/3)`, equivalente a un peso relativo 0,5 frente a pesos 1,25/1,25 para las otras dos partes si se normaliza el total en 3.
 
-Para cualquiera: `diferencia = cuota_CA - A_CA`. No llamar a `diferencia` «deuda» sin acuerdo y sin reconciliación de costos y aportes. El usuario describió dos aportes de ARS 150.000 (septiembre y noviembre); de momento **cero conciliados con CA en el run**. No comparar estimaciones de 2026 completo con un cierre efectivo de octubre sin identificar el pronóstico de noviembre–diciembre y la inflación. Los costos excluidos o controversiales (ABL, humedad y otros) deben estar desglosados antes de aplicar terceras partes.
+Para cualquiera: `diferencia = cuota_CA - A_CA`. No llamar a `diferencia` «deuda» sin acuerdo y sin reconciliación de costos y aportes. El usuario verificó dos aportes de ARS 150.000 (**29/08 y 04/11**): ARS **150.000 conciliados con CA en el run cerrado a octubre** y ARS 300.000 acumulados en los asientos de origen hasta el 4/11, pendientes de incorporarse a un futuro run de noviembre. No comparar estimaciones de 2026 completo con un cierre efectivo de octubre sin identificar el pronóstico de noviembre–diciembre y la inflación. Los costos excluidos o controversiales (ABL, humedad y otros) deben estar desglosados antes de aplicar terceras partes.
 
 ## 6. Corte de implementación para el equipo
 
 **Trabajo inmediato (máximo 2 unidades en curso):**
-1. **Conciliar la entrada de Claudia de septiembre y clasificar correctamente gastos compartidos**, sin alterar el ledger por testimonio solamente. Asegurar que `MI` 2025 siga visible como aporte virtual.
+1. **Clasificar correctamente los gastos compartidos y sus evidencias** (Macro, perro, plantas) y reconciliar cruces con PM/FB. Los aportes de CA ya están asentados; asegurar que `MI` 2025 siga visible como aporte virtual.
 2. **Mejorar los dos primeros informes HH1** (saldo virtual y aportes por persona). Reutilizar `monthly_cash_accountability` y `classification_audit` y no diseñar otro motor de deuda.
 
 **No abrir aún:** cobro exigible a familiares, imputación de compras fuera de ledger, pipeline financiero personal, conciliación bancaria universal, reconstrucción de 2021–2022, UI de presupuestos complejos, reparto automático ABL, comparación de ARS nominales con supuestas cifras reales sin deflactor. Otros agentes pueden trabajar la estética después de validar los contratos de datos.
@@ -97,4 +97,4 @@ Para cualquiera: `diferencia = cuota_CA - A_CA`. No llamar a `diferencia` «deud
 
 ## 7. Fuente y trazabilidad
 
-Contexto narrativo: conversación de discovery HH del 19/11/2026. Fuente técnica: `out/run/accounting/20261119T211126Z_HH`, sin cambio de los punteros `latest_*`. Proof HH1 anterior documentado en `docs/HOUSEHOLD_HH1_POC.md`. Este documento de diseño es **una especificación de trabajo**, no altera registros ni la publicación actual.
+Contexto narrativo: conversación de discovery HH del 19/11/2026. Fuente técnica actual: `out/run/accounting/20261119T222524Z_HH`, sin cambio de los punteros `latest_*`. Proof HH1 anterior documentado en `docs/HOUSEHOLD_HH1_POC.md`. Este documento de diseño es **una especificación de trabajo**, no altera registros ni la publicación actual.
