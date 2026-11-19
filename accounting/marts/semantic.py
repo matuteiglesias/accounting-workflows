@@ -629,58 +629,82 @@ def build_monthly_operating_statement_from_split(
         classified_abs = float(g.loc[~unknown_mask, "amount_abs"].sum())
         coverage = classified_abs / eligible_abs if eligible_abs else 1.0
 
-        def atomic_sum(mask: pd.Series) -> float:
-            selected = g.loc[mask]
+        category_summary = (
+            g.groupby(
+                ["semantic_bucket", "semantic_subbucket"],
+                dropna=False,
+                sort=True,
+            )[["amount_in", "amount_out", "net_amount", "amount_abs", "n_tx"]]
+            .sum()
+            .reset_index()
+        )
+        # Nullable-string group keys can contain pd.NA, whose comparisons
+        # raise on truth testing. Normalize only the lookup labels; raw rows
+        # and the authoritative amount columns remain unchanged.
+        category_records = [
+            (None if pd.isna(row[0]) else row[0],
+             None if pd.isna(row[1]) else row[1], *row[2:])
+            for row in category_summary.itertuples(index=False, name=None)
+        ]
+        measure_indexes = {"amount_in": 2, "amount_out": 3, "amount_abs": 5}
+
+        def atomic_sum(
+            bucket: str | None = None,
+            subbucket: str | None = None,
+            buckets: list[str] | None = None,
+            subbucket_not_in: set[str] | None = None,
+        ) -> float:
             total = 0.0
-            for (row_bucket, row_subbucket), rows in selected.groupby(
-                ["semantic_bucket", "semantic_subbucket"], dropna=False
-            ):
+            for row in category_records:
+                row_bucket, row_subbucket = row[:2]
+                if bucket is not None and row_bucket != bucket:
+                    continue
+                if buckets is not None and row_bucket not in buckets:
+                    continue
+                if subbucket is not None and row_subbucket != subbucket:
+                    continue
+                if subbucket_not_in is not None and row_subbucket in subbucket_not_in:
+                    continue
                 measure = resolve_semantic_measure(row_bucket, row_subbucket)
                 if measure is None:
                     raise ValueError(
                         "No approved semantic measure for "
                         f"bucket={row_bucket!r}, subbucket={row_subbucket!r}"
                     )
-                total += float(rows[measure].sum())
+                total += float(row[measure_indexes[measure]])
             return total
 
-        op_rev_mask = g["semantic_bucket"].eq("operating_revenue")
-        opex_mask = g["semantic_bucket"].eq("property_opex")
-        op_rev = atomic_sum(op_rev_mask)
-        rent = atomic_sum(op_rev_mask & g["semantic_subbucket"].eq("rent"))
-        opex = atomic_sum(opex_mask)
-        taxes = atomic_sum(opex_mask & g["semantic_subbucket"].eq("taxes"))
-        services = atomic_sum(opex_mask & g["semantic_subbucket"].eq("services"))
-        maintenance = atomic_sum(
-            opex_mask & g["semantic_subbucket"].eq("maintenance")
-        )
-        legal = atomic_sum(opex_mask & g["semantic_subbucket"].eq("legal"))
+        op_rev = atomic_sum(bucket="operating_revenue")
+        rent = atomic_sum(bucket="operating_revenue", subbucket="rent")
+        opex = atomic_sum(bucket="property_opex")
+        taxes = atomic_sum(bucket="property_opex", subbucket="taxes")
+        services = atomic_sum(bucket="property_opex", subbucket="services")
+        maintenance = atomic_sum(bucket="property_opex", subbucket="maintenance")
+        legal = atomic_sum(bucket="property_opex", subbucket="legal")
         explicit_opex = {"taxes", "services", "maintenance", "legal"}
         other_opex = atomic_sum(
-            opex_mask & ~g["semantic_subbucket"].isin(explicit_opex)
+            bucket="property_opex", subbucket_not_in=explicit_opex
         )
-        funding = atomic_sum(g["semantic_bucket"].eq("funding_contribution"))
-        draws_mask = g["semantic_bucket"].isin(["family_withdrawal_candidate", "family_withdrawal"])
-        draws = atomic_sum(draws_mask)
+        funding = atomic_sum(bucket="funding_contribution")
+        draw_buckets = ["family_withdrawal_candidate", "family_withdrawal"]
+        draws = atomic_sum(buckets=draw_buckets)
         personal_expenses = atomic_sum(
-            draws_mask & g["semantic_subbucket"].eq("personal_expense")
+            buckets=draw_buckets, subbucket="personal_expense"
         )
-        dividends = atomic_sum(draws_mask & g["semantic_subbucket"].eq("dividend"))
+        dividends = atomic_sum(buckets=draw_buckets, subbucket="dividend")
         transfer_family_expense = atomic_sum(
-            draws_mask & g["semantic_subbucket"].eq("transfer_to_family_expense")
+            buckets=draw_buckets, subbucket="transfer_to_family_expense"
         )
-        debt = atomic_sum(g["semantic_bucket"].eq("debt_movement"))
-        transfers = atomic_sum(g["semantic_bucket"].eq("internal_transfer"))
+        debt = atomic_sum(bucket="debt_movement")
+        transfers = atomic_sum(bucket="internal_transfer")
         fx_mask = g["semantic_bucket"].eq("treasury_fx")
         fx_conversion_in = atomic_sum(
-            fx_mask & g["semantic_subbucket"].eq("fx_conversion_proceeds")
+            bucket="treasury_fx", subbucket="fx_conversion_proceeds"
         )
         fx_conversion_out = atomic_sum(
-            fx_mask & g["semantic_subbucket"].eq("fx_conversion_outflow")
+            bucket="treasury_fx", subbucket="fx_conversion_outflow"
         )
-        fx_cost = atomic_sum(
-            fx_mask & g["semantic_subbucket"].eq("fx_cost_or_spread")
-        )
+        fx_cost = atomic_sum(bucket="treasury_fx", subbucket="fx_cost_or_spread")
         fx_other = g.loc[fx_mask & ~g["semantic_subbucket"].isin(["fx_conversion_proceeds", "fx_conversion_outflow", "fx_cost_or_spread"]), "net_amount"].sum()
         fx_net = float(fx_conversion_in - fx_conversion_out - fx_cost + fx_other)
         unknown_out = g.loc[unknown_mask, "amount_out"].sum()
@@ -689,13 +713,22 @@ def build_monthly_operating_statement_from_split(
         net_operating = float(op_rev - opex)
         coverage_after_draws = float(net_operating + funding - draws)
 
-        def ntx(bucket: str | None = None, subbucket: str | None = None) -> int:
-            m = pd.Series(True, index=g.index)
-            if bucket is not None:
-                m &= g["semantic_bucket"].eq(bucket)
-            if subbucket is not None:
-                m &= g["semantic_subbucket"].eq(subbucket)
-            return int(g.loc[m, "n_tx"].sum())
+        def ntx(
+            bucket: str | None = None,
+            subbucket: str | None = None,
+            buckets: list[str] | None = None,
+        ) -> int:
+            total = 0
+            for row in category_records:
+                row_bucket, row_subbucket = row[:2]
+                if bucket is not None and row_bucket != bucket:
+                    continue
+                if buckets is not None and row_bucket not in buckets:
+                    continue
+                if subbucket is not None and row_subbucket != subbucket:
+                    continue
+                total += row[6]
+            return int(total)
 
         caveat = "Excludes funding, family withdrawals, debt movements, internal transfers, and unknown/review-required flows from net operating."
         add_row(base, "operating_revenue", "Operating revenue", "operating", op_rev, "semantic_bucket=operating_revenue; amount_in", ntx("operating_revenue"), coverage, unknown_amount, review_amount, caveat)
@@ -708,7 +741,7 @@ def build_monthly_operating_statement_from_split(
         add_row(base, "other_property_opex", "Other property OPEX", "property_opex_detail", other_opex, "semantic_bucket=property_opex; semantic_subbucket not in explicit property opex list; amount_out", ntx("property_opex"), coverage, unknown_amount, review_amount, "Should remain zero unless future explicit OPEX rules are added.", "review_before_frontend")
         add_row(base, "net_operating", "Net operating", "operating_result", net_operating, "operating_revenue - property_opex_true", ntx("operating_revenue") + ntx("property_opex"), coverage, unknown_amount, review_amount, caveat)
         add_row(base, "funding_contributions", "Funding contributions", "non_operating_funding", funding, "semantic_bucket=funding_contribution; amount_in", ntx("funding_contribution"), coverage, unknown_amount, review_amount, "Shown separately; not operating revenue.")
-        add_row(base, "family_draws_or_distributions", "Family draws or distributions", "non_operating_distribution", draws, "semantic_bucket in family_withdrawal_candidate,family_withdrawal; amount_out", int(g.loc[draws_mask, "n_tx"].sum()), coverage, unknown_amount, review_amount, "Candidate line for review; not property OPEX.", "review_before_frontend")
+        add_row(base, "family_draws_or_distributions", "Family draws or distributions", "non_operating_distribution", draws, "semantic_bucket in family_withdrawal_candidate,family_withdrawal; amount_out", ntx(buckets=draw_buckets), coverage, unknown_amount, review_amount, "Candidate line for review; not property OPEX.", "review_before_frontend")
         add_row(base, "personal_expenses", "Personal expenses", "non_operating_distribution_detail", personal_expenses, "semantic_subbucket=personal_expense; amount_out", ntx("family_withdrawal_candidate", "personal_expense"), coverage, unknown_amount, review_amount, "Personal expenses are distribution candidates; not property OPEX.", "review_before_frontend")
         add_row(base, "dividends", "Dividends", "non_operating_distribution_detail", dividends, "semantic_subbucket=dividend; amount_out", ntx("family_withdrawal_candidate", "dividend"), coverage, unknown_amount, review_amount, "Dividend-like flows are not property OPEX.", "review_before_frontend")
         add_row(base, "transfer_to_family_expense", "Transfer to family expense", "non_operating_distribution_detail", transfer_family_expense, "semantic_subbucket=transfer_to_family_expense; amount_out", ntx("family_withdrawal_candidate", "transfer_to_family_expense"), coverage, unknown_amount, review_amount, "Transfer/gasto candidate; not property OPEX.", "review_before_frontend")
