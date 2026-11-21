@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 import pandas as pd
 import pytest
@@ -181,3 +183,42 @@ def test_future_months_are_grey_in_same_treasury_table(tmp_path: Path) -> None:
     assert 'class="future"><td class="month">2026-10</td>' not in html
     assert 'tr.future td' in html
     assert not (pd.read_csv(result['validation']).status == 'fail').any()
+
+
+def test_treasury_projection_cli_runs_and_marks_future_as_simulation(tmp_path: Path) -> None:
+    """Regression: the renderer's main() must expose both projection flags."""
+    data = pd.DataFrame([
+        _row(period="2026-10", box="Property Management", currency="ARS", opening=0,
+             rent=100, funding=0, taxes=0, dividends=0, repayment=0),
+        _row(period="2026-12", box="Property Management", currency="ARS", opening=100,
+             rent=200, funding=0, taxes=0, dividends=0, repayment=0),
+    ])
+    source = tmp_path / "cash.csv"
+    data.to_csv(source, index=False)
+    command = [
+        sys.executable, "-m", "accounting.reports.treasury_accountability.render",
+        "--accountability", str(source),
+        "--out-dir", str(tmp_path / "future"),
+        "--start-period", "2026-10",
+        "--projection-as-of-date", "2026-11-19",
+        "--projection-through-date", "2027-03-31",
+    ]
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    html = (tmp_path / "future" / "report.html").read_text()
+    assert "Último cierre observado: 31/10/2026" in html
+    assert "horizonte proyectado: 2027-03-31" in html
+    assert 'class="future"><td class="month">2026-11</td>' in html
+    assert 'class="future"><td class="month">2027-03</td>' in html
+    assert 'class="future"><td class="month">2026-10</td>' not in html
+    assert "No constituyen saldos bancarios" in html
+    assert not pd.read_csv(tmp_path / "future" / "report_validation.csv")["status"].eq("fail").any()
+
+    # Historical report remains a separate explicit mode (no projection flags).
+    observed_command = command[:command.index("--projection-as-of-date")]
+    observed_command[observed_command.index("--out-dir") + 1] = str(tmp_path / "historical")
+    historical = subprocess.run(observed_command, text=True, capture_output=True, check=False)
+    assert historical.returncode == 0, historical.stderr
+    observed = (tmp_path / "historical" / "report.html").read_text()
+    assert "horizonte proyectado" not in observed
+    assert 'class="future"' not in observed

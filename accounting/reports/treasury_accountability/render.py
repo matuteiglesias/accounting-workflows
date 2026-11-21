@@ -795,6 +795,10 @@ def main() -> None:
     parser.add_argument("--annual-metrics", type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--start-period", default=START_PERIOD)
+    parser.add_argument("--projection-as-of-date", default=None,
+                        help="Optional evaluation date (ISO YYYY-MM-DD); requires --projection-through-date")
+    parser.add_argument("--projection-through-date", default=None,
+                        help="Optional projection horizon (ISO YYYY-MM-DD); requires --projection-as-of-date")
     args = parser.parse_args()
     outputs = render_report(
         accountability_path=args.accountability,

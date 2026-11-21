@@ -129,3 +129,27 @@ Three charts are now rendered from governed upstream sources using a common inli
 - Preview input run `20261119T043349Z_FBPM`, monthly operating cut 2026-11-19. Open debt latest source position 2026-10-31. This is a pinned existing run, not a refreshed/published production report.
 
 **Pending:** TS03–TS06 and TS08–TS10 remain proposed; no new helper TS or scenario policies were implemented by this chart-only slice. Optional chart traces should remain internal provenance, and separate publication approval applies to any eventual refreshed Viewer bundle.
+
+### 21-Nov-2026 follow-up · Treasury close versus scenario prospect
+
+The FB+PM main published report remains an observed-only accounting closure
+through **31-Oct-2026**. Its source run `20261119T194105Z_FBPM` contains
+**zero future `planeado` rows**; ordinary report compilation is not
+permitted to invent them or promote November transactions into October.
+The separate, pinned scenario source `20261119T043349Z_FBPM` has
+**58 future planned entries** (Dec-2026 through Mar-2027). A later
+run `20261119T210655Z_FBPM` has **52** plans, but fails the normal
+26-report release check because its treasury inputs include Nov-2026
+periods beyond the October close.
+
+`accounting.scenarios.runner` already renders a separately labeled
+forecast, with Nov-2026 as the first prospective month and a Mar-2027
+horizon, from isolated paid+planned analytic inputs. A CLI omission had left
+`accounting.reports.treasury_accountability.render.main()` referencing
+projection flags not registered in argparse; restored as optional paired
+`--projection-as-of-date` and `--projection-through-date` arguments,
+covered by a real subprocess regression test. This is **not** permission to
+mix scenario output into the ordinary FBPM catalog. Any future scenario
+surface in a private viewer must pin its own source run, scenario variant,
+evaluation date and horizon explicitly; no blending with the October
+closed figures or the HH November provisional figures.
