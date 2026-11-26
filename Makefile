@@ -65,6 +65,9 @@ REPORT_BROWSER_BIN ?=
 # Private evidence is strictly opt-in. Never emitted in public/reports/latest_*.
 VIEWER_REPO ?= $(ROOT)/../accounting-viewer
 PRIVATE_VIEWER_ROOT ?= $(OUT)/private_viewers/$(RUN_ID)
+# Strictly private Household evidence: this target never publishes or copies FB/PM.
+HH_EVIDENCE_SNAPSHOT ?=
+HH_EVIDENCE_OUT_ROOT ?= $(OUT)/private_hh_evidence/$(RUN_ID)
 
 DEBT_CURRENCIES ?= USD
 DEBT_REPAYMENT_STATUSES ?= pagado
@@ -119,6 +122,7 @@ help:
 	@echo "  make release-check"
 	@echo "  make professional-drilldowns"
 	@echo "  make evidence-report RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE)"
+	@echo "  make hh-evidence-report BOXES=Household RUN_ID=<..._HH> HH_EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE)"
 	@echo "  make private-evidence-viewer RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir> (PRIVATE; builds missing downstream reports)"
 	@echo "  make run-compute EVIDENCE_SNAPSHOT=<same-run-snapshot>  # optional private viewer after reports"
 	@echo "  make professional-linked-digest"
@@ -205,6 +209,21 @@ publish-reports:
 release-check:
 	@$(PY) scripts/check_release.py --public-root "$(ROOT)/public/accounting/latest_$(SCOPE_TAG)"
 
+
+# ---------------------------------------------------------------------------
+# Household evidence: scope-isolated, exact-run, explicitly private.
+# PM and HH share one immutable attachment renderer but never share report bundles.
+# ---------------------------------------------------------------------------
+
+.PHONY: hh-evidence-report
+hh-evidence-report:
+	@$(call require_var,HH_EVIDENCE_SNAPSHOT)
+	@test "$(SCOPE_TAG)" = "HH" || (echo "ERROR: HH reports require BOXES=Household"; exit 2)
+	@test -s "$(RUN_OUT)/ledger_canonical.csv" || (echo "ERROR: HH source run missing $(RUN_ID)"; exit 2)
+	@$(PY) scripts/build_household_evidence.py \
+		--run-root "$(RUN_OUT)" --evidence-snapshot "$(HH_EVIDENCE_SNAPSHOT)" \
+		--out-root "$(HH_EVIDENCE_OUT_ROOT)" --browser-bin "$(REPORT_BROWSER_BIN)"
+	@echo "[HH EVIDENCE] private only: $(ROOT)/$(HH_EVIDENCE_OUT_ROOT)/hh_payment_evidence/report.html"
 
 # ---------------------------------------------------------------------------
 # On-demand private evidence viewer: exact-run, never part of public latest.

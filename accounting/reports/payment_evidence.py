@@ -188,7 +188,7 @@ def _status_for(tx_links: list[dict[str, str]]) -> tuple[str, str]:
     return "missing", "Sin candidato documental"
 
 
-def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *, source_run_id: str, cutoff: str, snapshot_id: str, review_preview: bool = False) -> str:
+def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *, source_run_id: str, cutoff: str, snapshot_id: str, review_preview: bool = False, report_title: str = REPORT_TITLE, scope_tag: str = "PM_EVIDENCE") -> str:
     doc_map = {str(row["evidence_id"]): row.to_dict() for _, row in docs.iterrows()}
     links_by_tx: dict[str, list[dict[str, str]]] = defaultdict(list)
     for _, row in relations.iterrows():
@@ -254,26 +254,119 @@ def _html(required: pd.DataFrame, docs: pd.DataFrame, relations: pd.DataFrame, *
     preview_banner = ('<div class="preview-banner"><strong>REPORTE PRIVADO EN REVISIÓN — NO PUBLICAR.</strong> '
                       'Los comprobantes aprobados se identificaron y registraron con auditoría; las contrapartidas no representan pagos adicionales. '
                       'Las decisiones contables y el corte oficial de publicación permanecen independientes.</div>') if review_preview else ""
+    # Separate utility-document coverage from other HH spending.
+    # Internet requires Personal invoices and bank credit-card statements;
+    # maintenance/legal purchases need different kinds of receipts.
+    hh_coverage_panel = ""
+    missing_label = "Sin vínculo documental" if scope_tag == "HH_EVIDENCE" else "Sin candidato"
+    if scope_tag == "HH_EVIDENCE":
+        families = ("Edenor", "MetroGAS", "AySA")
+        def issuer_family(row: pd.Series) -> str:
+            val = str(row.get("issuer", "")).strip().lower()
+            if val.startswith("edenor"):return "Edenor"
+            if val.startswith("metrogas"):return "MetroGAS"
+            if val.startswith("aysa"):return "AySA"
+            return ""
+        matrix: dict[tuple[str,str], dict[str,int]] = defaultdict(
+            lambda: {"total":0,"with_doc":0,"approved":0,"missing":0}
+        )
+        utility_total=0
+        internet_total=0
+        for _, row in required.iterrows():
+            family=issuer_family(row)
+            if not family:
+                if "internet" in (str(row.get("issuer", ""))+" "+str(row.get("Detalle", ""))).lower():
+                    internet_total += 1
+                continue
+            utility_total += 1
+            key=(str(row["Date"])[:4],family)
+            state, _=review_status(str(row["tx_id"]))
+            matrix[key]["total"]+=1
+            matrix[key]["with_doc"]+=int(state!="missing")
+            matrix[key]["approved"]+=int(state=="approved")
+            matrix[key]["missing"]+=int(state=="missing")
+        if sum(x["total"] for x in matrix.values())!=utility_total:
+            raise ValueError("HH utility coverage does not reconcile")
+        year_rows = []
+        for (year,family),values in sorted(matrix.items()):
+            year_rows.append("<tr>"+''.join(
+                f"<td>{html.escape(str(v))}</td>"
+                for v in (year,family,values["total"],values["with_doc"],values["approved"],values["missing"])
+            )+"</tr>")
+        hh_coverage_panel=(
+            '<section class="panel"><h2>Agua, luz y gas · 2024–2026</h2>'
+            '<p class="note">Cobertura específica de facturas y comprobantes. '
+            'La boleta puede haberse emitido antes del pago, incluir un recargo o representar varias cuotas. '
+            'Las filas de Internet no están en esta tabla: se concilian con Personal y el resumen de tarjeta.</p>'
+            f'<div class="cards"><div class="card"><strong>{utility_total}</strong>Movimientos de servicios</div>'
+            f'<div class="card"><strong>{sum(v["with_doc"] for v in matrix.values())}</strong>Con boleta o contexto</div>'
+            f'<div class="card"><strong>{sum(v["approved"] for v in matrix.values())}</strong>Con prueba de pago</div>'
+            f'<div class="card"><strong>{sum(v["missing"] for v in matrix.values())}</strong>Sin documento identificado</div>'
+            f'<div class="card"><strong>{internet_total}</strong>Internet: circuito tarjeta</div></div>'
+            '<table><thead><tr><th>Año</th><th>Emisor</th><th>Movimientos</th>'
+            '<th>Con boleta/contexto</th><th>Recibo aprobado</th><th>Sin vínculo</th></tr></thead>'
+            f'<tbody>{"".join(year_rows)}</tbody></table></section>'
+        )
+    payer_heading = "Caja contable" if scope_tag == "HH_EVIDENCE" else "Payer"
+    payer_explanation = ('<p class="note"><strong>Alcance HH:</strong> «HH» es la caja que registró el gasto, '
+                         'no identifica quién puso el dinero ni quién ejecutó el pago. '
+                         'Las facturas muestran la obligación y los recibos acreditan pagos concretos. '
+                         'La distribución entre integrantes es una decisión independiente.</p>'
+                         if scope_tag == "HH_EVIDENCE" else "")
     return f'''<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(REPORT_TITLE)}</title>
+<title>{html.escape(report_title)}</title>
 <style>
 :root{{--ink:#1d2733;--muted:#64748b;--line:#dbe2ea;--green:#147a4b;--green-bg:#e8f6ee;--amber:#956d00;--amber-bg:#fff7d6;--gray:#667085;--gray-bg:#f1f3f5}}
 *{{box-sizing:border-box}}body{{margin:0;color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc}}main{{max-width:1500px;margin:0 auto;padding:28px}}h1{{margin:0 0 8px;font-size:28px}}h2{{font-size:18px;margin:24px 0 10px}}.meta,.note{{color:var(--muted)}}.panel{{background:white;border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.card{{border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:180px}}.card strong{{display:block;font-size:24px}}.filters{{display:flex;gap:10px;flex-wrap:wrap;align-items:end}}label{{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}}input,select{{font:inherit;padding:8px;border:1px solid #bcc7d3;border-radius:6px;background:white;color:var(--ink)}}table{{width:100%;border-collapse:collapse;background:white;font-size:13px}}th,td{{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}}th{{position:sticky;top:0;background:#eef2f6;z-index:1}}.tx-id{{font-family:ui-monospace,SFMono-Regular,monospace;white-space:nowrap}}.amount{{text-align:right;white-space:nowrap}}.status{{display:inline-block;border-radius:999px;padding:3px 8px;white-space:nowrap;font-weight:650;font-size:12px}}.status-approved{{color:var(--green);background:var(--green-bg)}}.status-candidate{{color:var(--amber);background:var(--amber-bg)}}.status-missing{{color:var(--gray);background:var(--gray-bg)}}.status-counterpart{{color:#385d78;background:#e3eef9}}.status-bill_only{{color:#315e7e;background:#e9f2fa}}.status-statement_only{{color:#315e7e;background:#e9f2fa}}.evidence-link{{color:#0b5cad;font-weight:650;white-space:nowrap}}.evidence-pending{{color:#996400}}.evidence-bill{{color:#4f6273}}.evidence-counterpart{{color:#385d78}}.review-note{{font-size:11px;color:#64748b;max-width:310px;margin-top:4px;line-height:1.25}}.preview-banner{{padding:12px 16px;background:#ffedd5;border:2px solid #ed9b39;border-radius:8px;font-size:14px;margin:12px 0}}.sr-only{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}.hidden{{display:none!important}}@media print{{@page{{size:landscape;margin:7mm}}.filters{{display:none}}body{{background:white}}main{{padding:4px;max-width:none}}table{{width:100%;table-layout:fixed;font-size:7px}}th,td{{padding:3px;overflow-wrap:anywhere;word-break:break-word}}.tx-id{{white-space:normal;font-size:6px}}#transactions tr>:nth-child(2){{display:none}}.review-note{{display:none}}.status{{white-space:normal;font-size:7px;line-height:1.2;padding:2px 3px;max-width:130px}}th{{position:static}}.evidence-link{{color:#000;white-space:normal}}}}
 </style></head><body><main>
-{preview_banner}<header><h1>{html.escape(REPORT_TITLE)}</h1><p class="meta">Corrida contable: <strong>{html.escape(source_run_id)}</strong> · Corte contable: <strong>{html.escape(cutoff)}</strong> · Snapshot de evidencia: <strong>{html.escape(snapshot_id)}</strong></p></header>
-<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Recibos pendientes</div><div class="card"><strong>{counterpart_count}</strong>Contrapartidas (no pagos adicionales)</div><div class="card"><strong>{bill_only_count}</strong>Solo boleta</div><div class="card"><strong>{statement_only_count}</strong>Solo estado de cuenta</div><div class="card"><strong>{missing_count}</strong>Sin candidato</div><div class="card"><strong>{attachment_count}</strong>Documentos adjuntos</div></div><p class="note">Una boleta acredita una obligación, no el desembolso; una reliquidación no crea otra deuda. Los recibos candidatos no se confunden con recibos aprobados. “Sin candidato” no significa impago. Un pago puede cubrir varias cuotas y una cuota varios pagos.</p></section>
+{preview_banner}<header><h1>{html.escape(report_title)}</h1><p class="meta">Corrida contable: <strong>{html.escape(source_run_id)}</strong> · Corte contable: <strong>{html.escape(cutoff)}</strong> · Snapshot de evidencia: <strong>{html.escape(snapshot_id)}</strong></p>{payer_explanation}</header>
+<section class="panel"><h2>Cobertura documental</h2><div class="cards"><div class="card"><strong>{approved_count}</strong>Comprobantes aprobados</div><div class="card"><strong>{candidate_count}</strong>Recibos pendientes</div><div class="card"><strong>{counterpart_count}</strong>Contrapartidas (no pagos adicionales)</div><div class="card"><strong>{bill_only_count}</strong>Solo boleta</div><div class="card"><strong>{statement_only_count}</strong>Solo estado de cuenta</div><div class="card"><strong>{missing_count}</strong>{html.escape(missing_label)}</div><div class="card"><strong>{attachment_count}</strong>Documentos adjuntos</div></div><p class="note">Una boleta acredita una obligación, no el desembolso; una reliquidación no crea otra deuda. Los recibos candidatos no se confunden con recibos aprobados. “Sin candidato” no significa impago. Un pago puede cubrir varias cuotas y una cuota varios pagos.</p></section>
+{hh_coverage_panel}
 <section class="panel"><div class="filters"><label>Buscar<input id="search" type="search" placeholder="tx_id, concepto…"></label><label>Estado<select id="status"><option value="">Todos</option><option value="approved">Aprobado</option><option value="candidate">Comprobante por revisar</option><option value="counterpart">Contrapartida</option><option value="bill_only">Solo boleta</option><option value="statement_only">Solo estado de cuenta</option><option value="missing">Sin candidato</option></select></label><label>Año<select id="year"><option value="">Todos</option></select></label><label>Payer<select id="payer"><option value="">Todos</option></select></label><label>Tipo<select id="tipo"><option value="">Todos</option></select></label></div></section>
-<section class="panel"><table id="transactions"><thead><tr><th>ID operación</th><th>tx_id</th><th>Fecha</th><th>Payer</th><th>Tipo</th><th>Concepto / beneficiario</th><th>Importe</th><th>Moneda</th><th>Estado documental</th><th>Comprobante / respaldo</th><th>Statement / boleta (opcional)</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
+<section class="panel"><table id="transactions"><thead><tr><th>ID operación</th><th>tx_id</th><th>Fecha</th><th>{html.escape(payer_heading)}</th><th>Tipo</th><th>Concepto / beneficiario</th><th>Importe</th><th>Moneda</th><th>Estado documental</th><th>Comprobante / respaldo</th><th>Statement / boleta (opcional)</th></tr></thead><tbody>{''.join(rows)}</tbody></table></section>
 <script>(function(){{const table=document.querySelector('#transactions'), rows=[...table.tBodies[0].rows]; const fields={{status:document.querySelector('#status'),year:document.querySelector('#year'),payer:document.querySelector('#payer'),tipo:document.querySelector('#tipo'),search:document.querySelector('#search')}}; function fill(key){{const vals=[...new Set(rows.map(r=>r.dataset[key]).filter(Boolean))].sort(); for(const v of vals){{const o=document.createElement('option');o.value=v;o.textContent=v;fields[key].append(o)}}}} ['year','payer','tipo'].forEach(fill); function apply(){{const q=fields.search.value.toLowerCase();rows.forEach(r=>{{const hay=r.textContent.toLowerCase();const ok=(!fields.status.value||r.dataset.status===fields.status.value)&&(!fields.year.value||r.dataset.year===fields.year.value)&&(!fields.payer.value||r.dataset.payer===fields.payer.value)&&(!fields.tipo.value||r.dataset.tipo===fields.tipo.value)&&(!q||hay.includes(q));r.classList.toggle('hidden',!ok)}})}} Object.values(fields).forEach(e=>e.addEventListener('input',apply));}})();</script>
 </main></body></html>'''
 
 
-def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_root: Path, browser_bin: str | Path | None = None) -> dict[str, Path | int | str]:
+def build_payment_evidence_report(
+    *,
+    run_root: Path,
+    snapshot_dir: Path,
+    out_root: Path,
+    browser_bin: str | Path | None = None,
+    report_id: str = REPORT_ID,
+    report_title: str = REPORT_TITLE,
+    report_description: str = REPORT_DESCRIPTION,
+    scope_tag: str = "PM_EVIDENCE",
+) -> dict[str, Path | int | str]:
+    """Reuse the same immutable evidence contract across PM and HH."""
+    if (report_id, scope_tag) not in {
+        (REPORT_ID, "PM_EVIDENCE"), ("hh_payment_evidence", "HH_EVIDENCE")
+    }:
+        raise ValueError("Unsupported evidence report ID / scope combination")
     run_root = Path(run_root).resolve(strict=True)
     snapshot_dir = Path(snapshot_dir).resolve(strict=True)
     required, docs, relations, snapshot_manifest = _read_snapshot(snapshot_dir, run_root)
     source_run_id = run_root.name
+    if scope_tag == "HH_EVIDENCE":
+        if not source_run_id.endswith("_HH"):
+            raise ValueError("HH evidence requires an HH-only accounting run")
+        if snapshot_manifest.get("scope_tag") != "HH_EVIDENCE":
+            raise ValueError("HH evidence snapshot must declare HH_EVIDENCE")
+        if set(required["Box"]) != {"Household"}:
+            raise ValueError("HH evidence snapshot leaked cross-Box rows")
+        source = pd.read_csv(run_root / "ledger_canonical.csv", dtype=str, keep_default_na=False)
+        if set(source["Box"]) != {"Household"}:
+            raise ValueError("HH source ledger leaked cross-Box rows")
+        target = source.set_index("tx_id")
+        for _, row in required.iterrows():
+            tid = str(row["tx_id"])
+            if tid not in target.index:
+                raise ValueError(f"HH evidence row not in canonical run: {tid}")
+            for field in ("transaction_id", "Date", "amount_cents", "Currency", "Box"):
+                if str(row[field]) != str(target.loc[tid, field]):
+                    raise ValueError(f"HH evidence changed source identity: {tid}/{field}")
     snapshot_id = str(snapshot_manifest.get("snapshot_id") or snapshot_dir.name)
     source_ledger = run_root / "ledger_canonical.csv"
     cutoff = str(pd.to_datetime(required["Date"], errors="coerce").max().date())
@@ -297,7 +390,7 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         else _status_for(manifest_relation_map.get(str(tid), []))[0]
         for tid in required["tx_id"]
     )
-    report_root = Path(out_root).resolve() / REPORT_ID
+    report_root = Path(out_root).resolve() / report_id
     if report_root.exists():
         shutil.rmtree(report_root)
     evidence_root = report_root / "evidence"
@@ -311,19 +404,19 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         shutil.copy2(source, target)
         if _sha256(target) != evidence_id.lower():
             raise ValueError(f"copied attachment hash mismatch: {evidence_id}")
-        attachment_rows.append({"path": f"{REPORT_ID}/evidence/{evidence_id}.{_attachment_extension(doc)}", "sha256": evidence_id.lower()})
+        attachment_rows.append({"path": f"{report_id}/evidence/{evidence_id}.{_attachment_extension(doc)}", "sha256": evidence_id.lower()})
     report_html = report_root / "report.html"
-    report_html.write_text(_html(required, docs, relations, source_run_id=source_run_id, cutoff=cutoff, snapshot_id=snapshot_id, review_preview=bool(snapshot_manifest.get("review_preview", False))), encoding="utf-8")
+    report_html.write_text(_html(required, docs, relations, source_run_id=source_run_id, cutoff=cutoff, snapshot_id=snapshot_id, review_preview=bool(snapshot_manifest.get("review_preview", False)), report_title=report_title, scope_tag=scope_tag), encoding="utf-8")
     report_pdf = render_pdf(report_html, report_root / "report.pdf", browser_bin=browser_bin)
     generated_at = str(snapshot_manifest.get("generated_at_utc") or snapshot_manifest.get("run_id") or source_run_id)
     report_manifest = {
         "schema": "accounting_report_manifest.v1",
-        "report_id": REPORT_ID,
-        "renderer_version": "pm_payment_evidence.v2_precedence",
+        "report_id": report_id,
+        "renderer_version": "transaction_evidence.v3_scoped",
         "review_preview": bool(snapshot_manifest.get("review_preview", False)),
-        "publication_allowed": not bool(snapshot_manifest.get("review_preview", False)),
+        "publication_allowed": scope_tag == "PM_EVIDENCE" and not bool(snapshot_manifest.get("review_preview", False)),
         "source_run_id": source_run_id,
-        "scope_tag": "PM_EVIDENCE",
+        "scope_tag": scope_tag,
         "as_of_date": cutoff,
         "sources": [
             {"logical_path": "run/ledger_canonical.csv", "path": str(source_ledger), "sha256": _sha256(source_ledger), "rows": int(len(pd.read_csv(source_ledger)))},
@@ -332,7 +425,7 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
             {"logical_path": "evidence/evidence_documents.csv", "path": str(snapshot_dir / "evidence_documents.csv"), "sha256": _sha256(snapshot_dir / "evidence_documents.csv"), "rows": int(len(docs))},
             {"logical_path": "evidence/transaction_evidence.csv", "path": str(snapshot_dir / "transaction_evidence.csv"), "sha256": _sha256(snapshot_dir / "transaction_evidence.csv"), "rows": int(len(relations))},
         ],
-        "outputs": {"html": {"path": f"{REPORT_ID}/report.html", "sha256": _sha256(report_html)}, "pdf": {"path": f"{REPORT_ID}/report.pdf", "sha256": _sha256(report_pdf)}},
+        "outputs": {"html": {"path": f"{report_id}/report.html", "sha256": _sha256(report_html)}, "pdf": {"path": f"{report_id}/report.pdf", "sha256": _sha256(report_pdf)}},
         "attachments": attachment_rows,
         "coverage": {
             "required_transactions": int(len(required)),
@@ -352,7 +445,7 @@ def build_payment_evidence_report(*, run_root: Path, snapshot_dir: Path, out_roo
         "statement_context_relations": int((relations["relation"] == "statement_context").sum()),
     }
     (report_root / "report_manifest.json").write_text(json.dumps(report_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    catalog = build_report_catalog(source_run_id=source_run_id, scope_tag="PM_EVIDENCE", as_of_date=cutoff, generated_at_utc=generated_at, reports=[ReportCatalogItem(report_id=REPORT_ID, title=REPORT_TITLE, description=REPORT_DESCRIPTION, period_label=f"Corte {cutoff}", sort_order=10, html=f"{REPORT_ID}/report.html", pdf=f"{REPORT_ID}/report.pdf", manifest=None, attachments=tuple(attachment_rows))])
+    catalog = build_report_catalog(source_run_id=source_run_id, scope_tag=scope_tag, as_of_date=cutoff, generated_at_utc=generated_at, reports=[ReportCatalogItem(report_id=report_id, title=report_title, description=report_description, period_label=f"Corte {cutoff}", sort_order=10, html=f"{report_id}/report.html", pdf=f"{report_id}/report.pdf", manifest=None, attachments=tuple(attachment_rows))])
     catalog_path = Path(out_root).resolve() / "report_catalog.json"
     write_report_catalog(catalog_path, catalog)
     validate_catalog_files(catalog, bundle_root=Path(out_root).resolve())

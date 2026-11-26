@@ -26,14 +26,16 @@ Después de ambas ejecuciones válidas, exporta de manera conjunta **cuatro arch
 
 ## Interpretación importante
 
-El informe solicitado, `treasury_accountability`, todavía termina en octubre 2026. Su contrato de cierre solo incluye operaciones `pagado` y **no incorpora los cobros `planeado` de diciembre 2026-marzo 2027**. Como acordamos, no modificamos ni extendemos ese informe ahora. En consecuencia, los dos documentos pueden mostrar las mismas cifras de tesorería histórica; eso **no significa** que la hipótesis no se aplicó a los datos temporales. Nunca anunciar una pérdida visible de liquidez futura en este informe antes de ampliar su horizonte de presentación.
+La edición contable observada de `treasury_accountability` termina en el último cierre aprobado; no incorpora operaciones `planeado`. El renderizador también admite un horizonte futuro **independiente** de las reglas de escenarios mediante los argumentos emparejados `--projection-as-of-date` y `--projection-through-date`, sobre insumos analíticos que ya incluyen los planes seleccionados. No genera planes por sí mismo.
 
-Al abrir/exportar fuera del visor, los archivos llevan `SIMULACION` en el nombre: **no son informes oficiales ni prueba de impago**. El HTML/PDF interno se genera exactamente con el renderizador oficial, sin ramas de presentación propias para el simulador.
+El YAML del piloto incluye `projection.as_of_date=2026-11-19` y `projection.through_date=2027-03-31`. El runner deriva por separado los insumos de cada variante, conserva la historia pagada, y renderiza la misma tesorería con meses prospectivos diferenciados en gris. `base_planeada` es la proyección de referencia sin modificaciones; `chino_no_paga` aplica únicamente la hipótesis declarada. Se pueden revisar de forma independiente o comparar. No se altera el cierre observado ni se mezcla el catálogo oficial con una simulación.
+
+Los archivos llevan `SIMULACION` en el nombre y una etiqueta de horizonte dentro del informe. **No son informes oficiales, saldos realizados ni prueba de impago.** Una futura integración en el visor debe preservar identidad del run, fecha de evaluación, horizonte y variante como metadatos separados y exige autorización de audiencia. El corte histórico y el horizonte prospectivo son parámetros diferentes.
 
 ## Qué queda abierto
 
 - Paridad de un pipeline `sin operaciones` contra el correspondiente pipeline oficial (se comprueba la estructura y los artefactos, todavía no equivalencia visual binaria).
-- La ampliación futura de los reportes, diseñada de forma independiente del corredor.
+- Integración explícita de las proyecciones ya implementadas en la navegación privada del visor; no confundirlas con el catálogo observado.
 - Generalizar los operadores declarativos (distribuciones, reasignaciones, costos imputados), con controles de conservación de recursos y compatibilidad.
 - Probar el runner aislado contra un fixture completo de extremo a extremo y revisar la política de cierre documental antes de automatizar decenas de escenarios.
 
