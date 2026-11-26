@@ -19,6 +19,8 @@ EXPECTED_PUBLIC_TARGETS = {
     "publish-reports",
     "release-check",
     "evidence-report",
+    "hh-evidence-report",
+    "private-evidence-viewer",
     "smoke-ingest",
     "smoke-materialize",
     "smoke-core",

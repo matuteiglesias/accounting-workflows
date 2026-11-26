@@ -134,6 +134,8 @@ or PNG, and are SHA-256-verified against the snapshot. **Do not publish this
 bundle to an unauthenticated website**: private payment proofs require an
 independently verified access-control boundary.
 
+For Household-only evidence, use `make hh-evidence-report BOXES=Household RUN_ID=<exact-HH-run-id> HH_EVIDENCE_SNAPSHOT=<snapshot-dir>`. The scope-isolated report stays under `out/private_hh_evidence/`; it is not a replacement for the FBPM catalog and cannot be published as ordinary reports. `make private-evidence-viewer RUN_ID=<exact-run-id> EVIDENCE_SNAPSHOT=<snapshot-dir>` is the separate opt-in private viewer preparation path; it does not publish. These are distinct operator commands, not compatibility aliases.
+
 ### Professional evidence / drilldowns
 
 Professional evidence remains layered over governed artifacts:
