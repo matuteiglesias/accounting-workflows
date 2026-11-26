@@ -23,6 +23,8 @@ SEMANTIC_RULES = [
     {"rule_id":"R000_cost_allocation_gap","priority":5,"rule_name":"Unresolved PM cost allocation gap","match_fields":"Tipo,payer,receiver,Box","match_pattern":"Tipo=Prestamo; payer=Costos; receiver=PM; Box=Property Management","semantic_bucket":"cost_allocation_gap","semantic_subbucket":"unresolved_economic_burden","direction":"unknown","direction_source":"unknown","classification_confidence":"high","review_required":True,"warning":"unresolved allocation; outside established debt and ordinary repayment","notes":"Economic burden within Property Management; PM is an accounting scope, not a legal person.","active":True},
     {"rule_id":"R011_personal_expense_text","priority":10,"rule_name":"Personal expense text","match_fields":"Detalle,notes","match_pattern":"gastos personales","semantic_bucket":"family_withdrawal_candidate","semantic_subbucket":"personal_expense","direction":"out","direction_source":"rule_default","classification_confidence":"medium","review_required":False,"warning":"review family/informal withdrawal candidate","notes":"Personal/family expenses are distribution candidates, never property OPEX.","active":True},
     {"rule_id":"R001_rent_collections","priority":20,"rule_name":"Rent collections","match_fields":"Flujo,Tipo","match_pattern":"Flujo=cobros; Tipo=renta","semantic_bucket":"operating_revenue","semantic_subbucket":"rent","direction":"in","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"Operating rent revenue only.","active":True},
+    {"rule_id":"R016_designated_contribution","priority":25,"rule_name":"Designated external contribution","match_fields":"Flujo,Tipo,payer,receiver,Box","match_pattern":"explicit contribution for expense; external payer to owning FB/PM box","semantic_bucket":"funding_contribution","semantic_subbucket":"designated_expense","direction":"in","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"Funding leg, not OPEX; retain raw Tipo and cash_path as designated expense lineage.","active":True},
+    {"rule_id":"R017_out_of_scope_contribution","priority":26,"rule_name":"Contribution outside reporting box","match_fields":"Flujo,Tipo,payer,receiver,Box","match_pattern":"FB/PM contribution between other parties or internal to FBPM","semantic_bucket":"internal_transfer","semantic_subbucket":"transfer","direction":"internal","direction_source":"rule_default","classification_confidence":"high","review_required":False,"warning":"","notes":"Not new external FBPM funding; retain counterparty evidence.","active":True},
     {"rule_id":"R002_property_taxes","priority":30,"rule_name":"Property taxes","match_fields":"Tipo","match_pattern":"impuestos","semantic_bucket":"property_opex","semantic_subbucket":"taxes","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
     {"rule_id":"R003_property_services","priority":40,"rule_name":"Property services","match_fields":"Tipo","match_pattern":"servicio|servicios","semantic_bucket":"property_opex","semantic_subbucket":"services","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
     {"rule_id":"R004_property_maintenance","priority":50,"rule_name":"Property maintenance","match_fields":"Tipo","match_pattern":"mantenimiento","semantic_bucket":"property_opex","semantic_subbucket":"maintenance","direction":"out","direction_source":"semantic_fallback","classification_confidence":"high","review_required":False,"warning":"","notes":"True property OPEX.","active":True},
@@ -148,6 +150,14 @@ def _derive_funding_dimensions(row: pd.Series) -> dict[str, str]:
     is_support = _is_funding_support_candidate(row)
     actor = _actor_from_text(row) if is_support else ""
 
+    if box in {"Family Business", "Property Management"} and bucket in {"funding_contribution", "property_opex"}:
+        payer = _norm_key(row.get("payer"))
+        actual_actors = {"mi":"Matías", "matias":"Matías", "matías":"Matías", "inq":"Inquilino", "inquilino":"Inquilino",
+                         "alejandro":"Alejandro", "primos":"Primos", "hector":"Héctor", "héctor":"Héctor", "hh":"Household"}
+        actor = actual_actors.get(payer, "")
+        if payer in {"fb", "pm"} and bucket == "property_opex":
+            actor = ""
+
     source_box = box if direction == "out" else ""
     target_box = box if direction == "in" or is_support else ""
     beneficiary_box = target_box
@@ -244,6 +254,15 @@ def _classify_row(row: pd.Series) -> Tuple[str, str, str, str, bool, str, str]:
         return ("family_withdrawal_candidate", "personal_expense", "R011_personal_expense_text", "medium", False, "classified", "review family/informal withdrawal candidate")
     if flujo == "cobros" and tipo == "renta":
         return ("operating_revenue", "rent", "R001_rent_collections", "high", False, "classified", "")
+    if _norm(row.get("Box")) in {"Family Business", "Property Management"}:
+        owner = infer_box_party(row.get("Box")).casefold()
+        payer, receiver = _norm_key(row.get("payer")), _norm_key(row.get("receiver"))
+        is_contribution = flujo == "contribucion" or tipo in {"contribucion", "contribuciones"}
+        if is_contribution and tipo not in {"prestamo", "repago", "interes", "fx"}:
+            if receiver != owner or payer in {"fb", "pm"}:
+                return ("internal_transfer", "transfer", "R017_out_of_scope_contribution", "high", False, "classified", "")
+            if payer and payer != "fx" and tipo in {"impuestos", "servicio", "servicios", "mantenimiento", "legal"}:
+                return ("funding_contribution", "designated_expense", "R016_designated_contribution", "high", False, "classified", "")
     if tipo == "impuestos":
         return ("property_opex", "taxes", "R002_property_taxes", "high", False, "classified", "")
     if tipo in {"servicio", "servicios"}:

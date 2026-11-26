@@ -23,6 +23,7 @@ from accounting.contracts.funding_support import (
 )
 from accounting.contracts.semantic_measures import resolve_semantic_measure
 from accounting.metrics import annual_legacy as _legacy
+from accounting.metrics.resource_bridge import write_resource_bridge, SOURCE as RESOURCE_SOURCE, MEMBERS as RESOURCE_MEMBERS
 from accounting.metrics.cash_control_adapter import (
     SOURCE_TABLE as CASH_CONTROL_SOURCE,
     annual_rows as cash_control_annual_rows,
@@ -265,7 +266,40 @@ def build_annual_balance_dashboard(
         metrics, cash_control, run_id=run_id, as_of_date=as_of_date
     )
 
-    cash_rewritten = False
+    bridge = write_resource_bridge(run_root, metrics_dir)
+    if bridge is not None:
+        paths["monthly_resource_bridge"] = metrics_dir / RESOURCE_SOURCE
+        paths["resource_bridge_membership"] = metrics_dir / RESOURCE_MEMBERS
+        bridge = bridge.assign(period=bridge.period.astype(str).str[:4]).groupby(["period","Currency"]).sum(numeric_only=True).reset_index()
+        additions = []
+        for row in bridge.itertuples(index=False):
+            vals = {
+                "FUND.ECONOMIC.TOTAL": row.economic_funding,
+                "FUND.ECONOMIC.CONTRIBUTIONS": row.contribution,
+                "FUND.ECONOMIC.DESIGNATED": row.designated_advance,
+                "FUND.ECONOMIC.DIRECT_TENANT": row.direct_tenant_support,
+                "FUND.ECONOMIC.CLEARING_PENDING": row.clearing_pending,
+                "FUND.ECONOMIC.LINKED_RECOVERY": row.linked_debt_recovery,
+            }
+            sub = metrics.loc[metrics.period.astype(str).str[:4].eq(row.period) & metrics.Currency.eq(row.Currency) & metrics.dimension_name.fillna("").eq("")]
+            lookup = sub.set_index("metric_id").value
+            if "IS.NET.OPERATING" in lookup and "DIST.DRAWS.PERSONAL" in lookup:
+                operating = float(lookup["IS.NET.OPERATING"])
+                coverage = operating + row.economic_funding + row.linked_debt_recovery - float(lookup["DIST.DRAWS.PERSONAL"])
+                vals["COV.RESOURCE.AFTER_DRAWS"] = coverage
+                vals["COV.RESOURCE.RATIO"] = coverage / operating if operating else None
+            for mid, value in vals.items():
+                ratio = mid.endswith(".RATIO")
+                coverage_metric = mid.startswith("COV.")
+                additions.append(_legacy._base(mid,row.period,row.Currency,value,"not_applicable" if value is None else "available",
+                    "ratio" if ratio else "flow","economic_funding","2. Funding and distributions",
+                    RESOURCE_SOURCE if not coverage_metric else RESOURCE_SOURCE+";monthly_operating_statement.csv",
+                    "explicit paid transaction membership; linked recovery separately allocated",
+                    "annual ratio = annual resource coverage / operating result" if ratio else
+                    ("annual flow = net operating + economic funding + linked debt recovery - draws" if coverage_metric else "annual flow = sum monthly governed resource component"),
+                    run_id,as_of_date,suit="safe_with_caveat",caveat="Economic financing includes reimbursable advances and direct tenant support; not profit or cash. Linked recovery is debt settlement, not fresh funding. Pending clearing excluded."))
+        metrics = pd.concat([metrics,pd.DataFrame(additions,columns=_legacy.ANNUAL_METRICS_COLUMNS)],ignore_index=True)
+    cash_rewritten = bridge is not None
 
     if not funding_rewritten and not cash_rewritten and not cash_control_rewritten:
         return paths

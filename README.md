@@ -211,3 +211,7 @@ Use `notes/documentation_compass.md` as the role-based guide to current docs.
 
 ## Logging convention
 Operational Python entrypoints use `YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message`. Keep `journalctl` as the operational log source of truth and retain per-run CSV/JSON/HTML/PDF artifacts under the governed run, metrics, reports, professional-pack, drilldown, docs-input, and publication roots rather than duplicating logs into source-controlled artifacts.
+
+### Economic funding bridge (annual management)
+
+The annual report uses a governed economic-funding bridge, separate from the operating result, debt stock and physical Box cash. Designated external contributions to FB/PM are financing, not OPEX; tenant direct tax/service payments retain gross OPEX and count once as support, without a Box cash inflow. Pending contribution/repayment clearings are excluded from new support. Explicit distribution-linked debt recoveries are reported separately and must reconcile with the debt allocation authority. For exact-run replay, retain `private_review/distribution_recovery_pairs.csv`; for new cutoffs the optional local `private/distribution_recovery_registry.csv` (or `RESOURCE_RECOVERY_REGISTRY`) carries Box, recovery_date, distribution_tx_id and recovery_tx_id, and is snapshotted to the run by scope/cutoff. Never commit private registry IDs. The extended coverage is operating result + economic funding + linked debt recovery − gross draws; it is neither profit nor cash.

@@ -94,8 +94,8 @@ class MetricStore:
             "available", "ok", "pass", "structural_zero",
         }:
             return "No disponible"
-        if fmt == "ratio":
-            pct = float(value) * 100.0 if abs(float(value)) <= 10 else float(value)
+        if fmt in {"ratio", "fraction"}:
+            pct = float(value) * 100.0 if fmt == "fraction" or abs(float(value)) <= 10 else float(value)
             return f"{pct:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
         if fmt == "count":
             return f"{int(round(float(value))):,}".replace(",", ".")
@@ -281,7 +281,11 @@ def _table(
     body = []
     for row in rows:
         tr_cls = "major" if row.get("role") == "major" else ""
-        values = "".join(f"<td>{_esc(value)}</td>" for value in row["values"])
+        values = "".join(
+            "<td>" + ("".join(f'<span class="currency-line">{_esc(v)}</span>' for v in value)
+                       if isinstance(value, list) else _esc(value)) + "</td>"
+            for value in row["values"]
+        )
         body.append(
             f'<tr class="{tr_cls}"><td class="indent-{int(row.get("indent", 0))}">'
             f'{_esc(row["label"])}</td>{values}</tr>'
@@ -322,8 +326,8 @@ def _render_html(model: dict[str, Any], css: str) -> str:
 
     kpis = "".join(
         f'<div class="kpi"><div class="kpi-label">{_esc(item["label"])}</div>'
-        f'<div class="kpi-value">{_esc(item["value"])}</div>'
-        f'<div class="kpi-note">{_esc(meta["last_period_label"])}</div></div>'
+        + ''.join(f'<div class="kpi-value currency-line">{_esc(value)}</div>' for value in item["values"])
+        + f'<div class="kpi-note">{_esc(meta["last_period_label"])}</div></div>'
         for item in model["summary"]["kpis"]
     )
     pages.append(
@@ -333,9 +337,9 @@ def _render_html(model: dict[str, Any], css: str) -> str:
             "RESUMEN EJECUTIVO",
             "¿Cómo está el patrimonio y cuáles son las señales principales?",
         )
-        + f'<div class="kpi-grid kpi-grid-5">{kpis}</div>'
+        + f'<div class="kpi-grid kpi-grid-6">{kpis}</div>'
         + '<p class="kpi-reading">Renta y costos explican el resultado operativo; '
-          'aportes y retiros explican el resultado posterior. '
+          'aportes (incluyen anticipos reintegrables y pagos directos) y recuperos de deuda ligados a distribuciones, menos retiros, explican la cobertura posterior. No es saldo de caja ni utilidad. '
           'Las distribuciones registradas forman parte de los retiros, '
           'no son una segunda salida.</p><div class="page-grid">'
         + f'<div class="span-8">{_table("Tabla resumen", periods, model["summary"]["rows"])}</div>'
@@ -386,7 +390,7 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + _table("Puente de aplicación · USD", periods, model["application"]["bridge_usd"], compact=True)
         + '</div>'
         + '<div class="span-7">'
-        + _table("Funding por actor / origen", periods, model["application"]["funding"], compact=True)
+        + _table("Apoyo bruto por actor / origen (incluye deuda; no suma al puente)", periods, model["application"]["funding"], compact=True)
         + '</div><div class="span-5">'
         + _table("Distribuciones ARS", periods, model["application"]["distributions_ars"], compact=True)
         + _table("Distribuciones USD", periods, model["application"]["distributions_usd"], compact=True)
@@ -526,16 +530,20 @@ def build_report_model(
                 ],
             })
 
-    kpis = []
-    for spec in KPI_SPECS:
-        cell = store.get(
-            spec["metric_id"],
-            last,
-            spec.get("currency", ""),
-            fmt=spec.get("format", "money"),
-            track={"page_id": "summary", "component_id": "kpis", "row_id": spec["label"]},
-        )
-        kpis.append({"label": spec["label"], "value": cell.display})
+    def summary_cells(spec, period, component):
+        vals = []
+        for currency in ("ARS", "USD"):
+            cell = store.get(spec["metric_id"], period, currency,
+                fmt=spec.get("format","money"),
+                track={"page_id":"summary","component_id":component,"row_id":spec["label"]})
+            label = currency + " " if spec.get("format") == "fraction" or cell.value is None else ""
+            vals.append(label + cell.display)
+        return vals
+
+    kpis = [{"label": spec["label"], "values": summary_cells(spec,last,"kpis")}
+            for spec in KPI_SPECS]
+    summary_rows = [{**spec,"values":[summary_cells(spec,period,"summary_table") for period in periods]}
+                    for spec in SUMMARY_ROWS]
 
     portfolio = []
     parts = []
@@ -555,22 +563,22 @@ def build_report_model(
         share = "—" if abs(total) <= 1e-12 else f"{100 * float(cell.value or 0) / total:.1f}%".replace(".", ",")
         portfolio.append({"label": label, "value": cell.display, "share": share})
 
-    bridge_ars = [
-        {"label": "Resultado operativo", "metric_id": "IS.NET.OPERATING", "currency": "ARS", "role": "major"},
-        {"label": "+ Funding / aportes", "metric_id": "FUND.CONTRIB.TOTAL", "currency": "ARS"},
-        {"label": "− Retiros personales", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
-        {"label": "de los retiros: dividendos", "metric_id": "DIST.DIVIDENDS", "currency": "ARS", "indent": 1},
-        {"label": "= Resultado post-retiros", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS", "role": "major"},
-        {"label": "Tasa de ahorro / retención", "metric_id": "COV.SAVINGS_RATE", "currency": "ARS", "format": "ratio"},
-        {"label": "Retiros / resultado operativo", "derived": "draws_to_operating", "format": "ratio"},
-    ]
-    bridge_usd = [
-        {"label": "Resultado operativo USD", "metric_id": "IS.NET.OPERATING", "currency": "USD", "format": "usd", "missing_policy": "zero", "role": "major"},
-        {"label": "+ Funding / aportes USD", "metric_id": "FUND.CONTRIB.TOTAL", "currency": "USD", "format": "usd", "missing_policy": "zero"},
-        {"label": "− Retiros personales USD", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "USD", "format": "usd", "missing_policy": "zero"},
-        {"label": "de los retiros: dividendos USD", "metric_id": "DIST.DIVIDENDS", "currency": "USD", "format": "usd", "missing_policy": "zero", "indent": 1},
-        {"label": "= Resultado post-retiros USD", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "USD", "format": "usd", "missing_policy": "zero", "role": "major"},
-    ]
+    def application_bridge(currency):
+        specs = [
+            ("Resultado operativo","IS.NET.OPERATING"),
+            ("+ Aportes y financiación","FUND.ECONOMIC.TOTAL"),
+            ("de los aportes: directos inquilinos","FUND.ECONOMIC.DIRECT_TENANT"),
+            ("+ Recuperos ligados a distribución","FUND.ECONOMIC.LINKED_RECOVERY"),
+            ("− Retiros y distribuciones","DIST.DRAWS.PERSONAL"),
+            ("de los retiros: dividendos","DIST.DIVIDENDS"),
+            ("= Resultado post-retiros (cobertura)","COV.RESOURCE.AFTER_DRAWS"),
+            ("Tasa de cobertura","COV.RESOURCE.RATIO"),
+        ]
+        return [{"label":label,"metric_id":mid,"currency":currency,
+                 "format":"fraction" if mid.endswith(".RATIO") else "money",
+                 "indent":1 if label.startswith("de los") else 0} for label,mid in specs]
+    bridge_ars = application_bridge("ARS")
+    bridge_usd = application_bridge("USD")
     funding = [
         {
             "label": actor,
@@ -701,7 +709,7 @@ def build_report_model(
         },
         "summary": {
             "kpis": kpis,
-            "rows": _rows(store, SUMMARY_ROWS, periods, "summary", "summary_table"),
+            "rows": summary_rows,
         },
         "operations": {
             "rows": _rows(store, OPERATING_ROWS, periods, "operations", "operating_table"),
@@ -801,7 +809,7 @@ def validate_report(store: MetricStore) -> pd.DataFrame:
 
     required_usd = {
         "IS.RENT.TOTAL", "IS.NET.OPERATING", "DIST.DIVIDENDS",
-        "COV.NET.AFTER_DRAWS",
+        "COV.RESOURCE.AFTER_DRAWS",
     }
     usd_ids = set(cells.loc[cells["Currency"].eq("USD"), "metric_id"])
     add(

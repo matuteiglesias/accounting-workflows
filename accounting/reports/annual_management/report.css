@@ -98,3 +98,8 @@ body {
   html, body { background: white; }
   .report-page { margin: 0; width: 210mm; min-height: 296mm; padding: 7mm 10mm 5mm; box-shadow: none; }
 }
+
+.kpi-grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.kpi-grid-6 .kpi { padding: 2.5mm 1.5mm; }
+.kpi-grid-6 .kpi-value { font-size: 11px; white-space: normal; }
+.currency-line { display:block; }

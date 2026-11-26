@@ -273,6 +273,16 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "diagnostic_evidence",
             "notes": "Treasury reconciliation evidence; hard motor identities fail closed while debt/anchor residuals remain visible.",
         }
+    if key in {"monthly_resource_bridge.csv", "resource_bridge_membership.csv"}:
+        return {
+            "artifact_role": "canonical_source",
+            "accounting_nature": "flow",
+            "grain": "monthly" if key.startswith("monthly") else "tx",
+            "currency_policy": "by_currency",
+            "frontend_suitability": "safe_with_caveat" if key.startswith("monthly") else "internal_only",
+            "source_authority": "source_of_truth_for_economic_funding",
+            "notes": "Governed economic funding bridge; not cash or debt stock. Membership is internal.",
+        }
     if key == "monthly_operating_statement.csv":
         return {
             "artifact_role": "canonical_source",

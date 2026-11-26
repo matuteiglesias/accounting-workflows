@@ -25,6 +25,7 @@ ANNUAL_CONTRACT_COLUMNS = [
 ]
 QA_COLUMNS = ["check","status","detail","severity"]
 CANONICAL = {
+    "monthly_resource_bridge.csv", "monthly_resource_bridge.csv;monthly_operating_statement.csv",
     "monthly_operating_statement.csv","monthly_flow_semantic_split.csv",
     "monthly_cash_accountability.csv",
     "monthly_debt_position.csv","monthly_debt_activity.csv","semantic_leakage_qa.csv",

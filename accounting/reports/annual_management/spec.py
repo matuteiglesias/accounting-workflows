@@ -13,23 +13,25 @@ REPORT_META = {
 # flow breakdowns where absence of a dimension row means no activity. Source
 # rows explicitly marked unavailable remain unavailable.
 SUMMARY_ROWS = [
-    {"label": "Renta", "metric_id": "IS.RENT.TOTAL", "currency": "ARS", "role": "major"},
-    {"label": "OPEX de propiedad", "metric_id": "IS.OPEX.PROPERTY", "currency": "ARS"},
-    {"label": "Resultado operativo", "metric_id": "IS.NET.OPERATING", "currency": "ARS", "role": "major"},
-    {"label": "Funding / aportes", "metric_id": "FUND.CONTRIB.TOTAL", "currency": "ARS"},
-    {"label": "Retiros personales", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS", "role": "major"},
-    {"label": "Distribuciones registradas", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
-    {"label": "Resultado post-retiros", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS", "role": "major"},
-    {"label": "Tasa de ahorro / retención", "metric_id": "COV.SAVINGS_RATE", "currency": "ARS", "format": "ratio"},
-    {"label": "Posición neta PM USD", "metric_id": "ID.DEBT.NET_PM_POSITION", "currency": "USD", "format": "usd"},
+    {"label": "Renta", "metric_id": "IS.RENT.TOTAL", "role": "major"},
+    {"label": "OPEX de propiedad", "metric_id": "IS.OPEX.PROPERTY"},
+    {"label": "Resultado operativo", "metric_id": "IS.NET.OPERATING", "role": "major"},
+    {"label": "Aportes y financiación", "metric_id": "FUND.ECONOMIC.TOTAL"},
+    {"label": "de los aportes: pagos directos de inquilinos", "metric_id": "FUND.ECONOMIC.DIRECT_TENANT", "indent": 1},
+    {"label": "Retiros y distribuciones", "metric_id": "DIST.DRAWS.PERSONAL", "role": "major"},
+    {"label": "de los retiros: distribuciones", "metric_id": "DIST.DIVIDENDS", "indent": 1},
+    {"label": "Recuperos de deuda ligados a distribución", "metric_id": "FUND.ECONOMIC.LINKED_RECOVERY"},
+    {"label": "Resultado post-retiros (cobertura)", "metric_id": "COV.RESOURCE.AFTER_DRAWS", "role": "major"},
+    {"label": "Tasa de cobertura", "metric_id": "COV.RESOURCE.RATIO", "format": "fraction"},
 ]
 
 KPI_SPECS = [
-    {"label": "RENTA", "metric_id": "IS.RENT.TOTAL", "currency": "ARS"},
-    {"label": "OPEX DE PROPIEDAD", "metric_id": "IS.OPEX.PROPERTY", "currency": "ARS"},
-    {"label": "RESULTADO OPERATIVO", "metric_id": "IS.NET.OPERATING", "currency": "ARS"},
-    {"label": "RETIROS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
-    {"label": "POST-RETIROS", "metric_id": "COV.NET.AFTER_DRAWS", "currency": "ARS"},
+    {"label": "RENTA", "metric_id": "IS.RENT.TOTAL"},
+    {"label": "OPEX DE PROPIEDAD", "metric_id": "IS.OPEX.PROPERTY"},
+    {"label": "RESULTADO OPERATIVO", "metric_id": "IS.NET.OPERATING"},
+    {"label": "APORTES", "metric_id": "FUND.ECONOMIC.TOTAL"},
+    {"label": "RETIROS", "metric_id": "DIST.DRAWS.PERSONAL"},
+    {"label": "POST-RETIROS", "metric_id": "COV.RESOURCE.AFTER_DRAWS"},
 ]
 
 OPERATING_ROWS = [

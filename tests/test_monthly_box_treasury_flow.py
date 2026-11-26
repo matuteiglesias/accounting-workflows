@@ -74,7 +74,7 @@ def test_residual_cash_is_transaction_drillable_and_materiality_is_warn_only(tmp
         "tx_id": "residual-in", "Date": "2026-05-03", "amount": 150000.0,
         "Currency": "ARS", "Box": "Property Management", "Lugar": "CABA",
         "status": "pagado", "payer": "MI", "receiver": "PM",
-        "Flujo": "Contribucion", "Tipo": "Impuestos", "Detalle": "source evidence",
+        "Flujo": "Pagos", "Tipo": "Impuestos", "Detalle": "unexplained incoming expense-coded cash",
     }])
     materialize_box_balance_time_long(ledger, tmp_path, freq="M")
     materialize_box_flow_balance_time_long(ledger, tmp_path, freq="M")
@@ -92,3 +92,19 @@ def test_residual_cash_is_transaction_drillable_and_materiality_is_warn_only(tmp
     assert row["other_cash_in_share"] == 1.0
     assert row["status"] == "warn"
     assert row["severity"] == "warning"
+
+def test_designated_contribution_is_funding_not_residual(tmp_path):
+    ledger = pd.DataFrame([{
+        "tx_id": "designated-in", "Date": "2026-05-03", "amount": 150000.0,
+        "Currency": "ARS", "Box": "Property Management", "Lugar": "CABA",
+        "status": "pagado", "payer": "MI", "receiver": "PM",
+        "Flujo": "Contribucion", "Tipo": "Impuestos", "Detalle": "",
+    }])
+    materialize_box_balance_time_long(ledger,tmp_path,freq="M")
+    materialize_box_flow_balance_time_long(ledger,tmp_path,freq="M")
+    paths=build_semantic_outputs(ledger,tmp_path,freq="M")
+    audit=pd.read_csv(paths["treasury_residual_cash_audit"])
+    assert audit.empty
+    treasury=pd.read_csv(paths["monthly_box_treasury_flow"])
+    assert treasury.loc[treasury.cash_category.eq("funding"),"amount_in"].sum()==150000
+    assert treasury.amount_out.sum()==0

@@ -111,7 +111,7 @@ def build_operating_chart_pair(
         chart_id="ts02_opex_to_rent", title="¿Qué proporción de la renta absorbieron los costos?",
         frequency="Y", mark="line", unit="%", scope="FBPM",
         series_ids=("opex_to_rent",), series_labels=("Costos / renta",),
-        subtitle="La proporción evita confundir pesos nominales con peso económico",
+        subtitle="Costos y renta en ARS; no incluye USD",
         note=f"Misma ventana: {period_description}. No mide causalidad ni eficiencia.",
         max_points=12,
     )

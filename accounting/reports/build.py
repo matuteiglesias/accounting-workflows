@@ -343,7 +343,7 @@ def build_report_bundle(
 
     annual_manifest = build_report_manifest(
         report_id="annual_management",
-        renderer_version="annual_management.v4",
+        renderer_version="annual_management.v5",
         source_run_id=source_run_id,
         scope_tag=scope_tag,
         as_of_date=as_of_date,
