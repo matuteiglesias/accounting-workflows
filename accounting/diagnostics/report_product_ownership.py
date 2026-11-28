@@ -103,9 +103,11 @@ def audit_report_products(
         for source in manifest["sources"]:
             logical = source["path"]
             prefix, sep, remainder = logical.partition("/")
-            if not sep or prefix not in ("run", "metrics"):
+            if not sep or prefix not in ("run", "metrics", "reports"):
                 raise ValueError(f"unknown input namespace: {logical}")
-            filepath = _safe_file(run_root if prefix == "run" else metrics_root, remainder)
+            if prefix == "reports" and not (report_id == "treasury_accountability" and remainder.startswith("treasury_accountability/projection/")):
+                raise ValueError(f"unapproved report-local input: {logical}")
+            filepath = _safe_file({"run": run_root, "metrics": metrics_root, "reports": reports_root}[prefix], remainder)
             if verify_hashes:
                 _verify(filepath, source["sha256"])
             input_consumers[logical].add(report_id)

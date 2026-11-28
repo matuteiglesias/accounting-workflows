@@ -183,6 +183,7 @@ def build_report_bundle(
     browser_bin: str | Path | None = None,
     require_pdf: bool = True,
     generated_at_utc: str | None = None,
+    treasury_observed_only: bool = False,
 ) -> dict[str, Path]:
     run_root = Path(run_root).resolve(strict=True)
     metrics_dir = Path(metrics_dir).resolve(strict=True)
@@ -266,14 +267,36 @@ def build_report_bundle(
         repayment_detail_path=repayment_detail,
         monthly_operating_path=operating_monthly if operating_monthly.is_file() else None,
     )
+    treasury_projection_sources = []
+    treasury_kwargs = {}
+    treasury_input, treasury_input_qa = treasury_accountability, treasury_qa
+    if not treasury_observed_only:
+        from accounting.reports.treasury_accountability.projection import build_default_projection
+        forecast_dir = treasury_dir / "projection"
+        forecast, planning_source = build_default_projection(run_root, forecast_dir)
+        treasury_input = forecast_dir / "monthly_cash_accountability.csv"
+        treasury_input_qa = forecast_dir / "monthly_cash_accountability_qa.csv"
+        treasury_kwargs = dict(projection_as_of_date=forecast["as_of_date"],
+            projection_through_date=forecast["through_date"],
+            observed_as_of_date=forecast["observed_as_of_date"],
+            observed_accountability_path=treasury_accountability,
+            projection_planned_rows=forecast["planned_rows"])
+        treasury_period_label += " · proyección hasta " + forecast["through_date"][:7]
+        treasury_projection_sources = [
+            _source(planning_source, "run/"+planning_source.name),
+            _source(treasury_input, "reports/treasury_accountability/projection/monthly_cash_accountability.csv"),
+            _source(treasury_input_qa, "reports/treasury_accountability/projection/monthly_cash_accountability_qa.csv"),
+            _source(forecast_dir/"selected_plans.csv","reports/treasury_accountability/projection/selected_plans.csv"),
+        ]
     treasury_outputs = render_treasury(
-        accountability_path=treasury_accountability,
-        qa_path=treasury_qa,
+        accountability_path=treasury_input,
+        qa_path=treasury_input_qa,
         cycles_path=accountability_cycles,
         stakeholder_support_path=stakeholder_support,
         semantic_audit_path=semantic_audit,
         annual_metrics_path=annual_metrics,
         out_dir=treasury_dir,
+        **treasury_kwargs,
     )
     tape_outputs = (
         render_tape(
@@ -369,6 +392,7 @@ def build_report_bundle(
         sources=[
             _source(treasury_accountability, "run/monthly_cash_accountability.csv"),
             _source(treasury_qa, "run/monthly_cash_accountability_qa.csv"),
+            *treasury_projection_sources,
             _source(accountability_cycles, "run/family_business_accountability_cycles.csv"),
             _source(stakeholder_support, "run/monthly_stakeholder_support.csv"),
             _source(stakeholder_support_qa, "run/monthly_stakeholder_support_qa.csv"),
@@ -378,6 +402,8 @@ def build_report_bundle(
         outputs=_manifest_outputs(treasury_outputs, bundle_root=out_dir),
         validation_status=treasury_status,
     )
+    if not treasury_observed_only:
+        treasury_manifest["projection"] = forecast
     treasury_manifest_path = treasury_dir / "report_manifest.json"
     write_report_manifest(treasury_manifest_path, treasury_manifest)
 
@@ -598,6 +624,7 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--scope-tag", required=True)
     parser.add_argument("--browser-bin")
+    parser.add_argument("--treasury-observed-only", action="store_true", help="Explicit historical-only treasury report (no rolling forecast)")
     parser.add_argument(
         "--html-only",
         action="store_true",
@@ -611,6 +638,7 @@ def main() -> None:
         scope_tag=args.scope_tag,
         browser_bin=args.browser_bin,
         require_pdf=not args.html_only,
+        treasury_observed_only=args.treasury_observed_only,
     )
     for name, path in outputs.items():
         if path:

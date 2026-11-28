@@ -28,6 +28,7 @@ ARTIFACT_ROLES = [
     "qa",
     "meta",
     "derived_valuation",
+    "planning_input",
 ]
 ACCOUNTING_NATURES = ["transaction", "flow", "stock", "ratio", "quality", "rules", "mixed", "unknown"]
 GRAINS = ["tx", "daily", "monthly", "quarterly", "annual", "period_close", "rule", "dashboard_line", "mixed"]
@@ -64,6 +65,7 @@ SOURCE_AUTHORITIES = [
     "diagnostic_evidence",
     "semantic_coverage_contract",
     "derived_valuation_evidence",
+    "planned_not_realized",
 ]
 
 CONTRACT_COLUMNS = [
@@ -101,6 +103,16 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "frontend_suitability": "internal_only",
             "source_authority": "source_of_truth",
             "notes": "Scoped normalized all-status evidence for debt resolution; not an accounting-recognition view.",
+        }
+    if key == "ledger_planning_snapshot.csv" or name == "ledger_planning_snapshot":
+        return {
+            "artifact_role": "planning_input",
+            "accounting_nature": "transaction",
+            "grain": "tx",
+            "currency_policy": "explicit_currency_required",
+            "frontend_suitability": "internal_only",
+            "source_authority": "planned_not_realized",
+            "notes": "Scoped planned records retained independently of observed cutoff; never historical cash or debt recognition.",
         }
     if key == "ledger_valuation_usd_ccl.csv" or name == "ledger_valuation_usd_ccl":
         return {

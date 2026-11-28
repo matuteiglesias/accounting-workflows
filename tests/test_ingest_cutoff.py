@@ -74,6 +74,12 @@ def _fixture(path: Path) -> None:
                 "status": "pendiente",
                 "Box": "Property Management",
             },
+            {
+                "tx_id": "aug-plan", "Date": "2026-08-15", "amount": 200,
+                "Currency": "ARS", "payer": "Tenant", "receiver": "PM",
+                "Flujo": "Cobros", "Tipo": "Renta", "status": "planeado",
+                "Box": "Property Management",
+            },
         ]
     ).to_csv(path, index=False)
 
@@ -116,6 +122,9 @@ def _assert_cutoff_outputs(out_dir: Path) -> None:
         "jul-pending-debt",
     ]
     assert recognized["tx_id"].tolist() == ["jul-paid", "missing-date"]
+    plans = pd.read_csv(out_dir / "ledger_planning_snapshot.csv")
+    assert plans["tx_id"].tolist() == ["aug-plan"]
+    assert plans["status"].tolist() == ["planeado"]
 
     for frame in [all_status, recognized]:
         dates = pd.to_datetime(frame["Date"], errors="coerce")

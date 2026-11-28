@@ -796,6 +796,12 @@ def main() -> int:
         add_time_period=bool(args.add_time_period),
         time_freq=str(args.time_freq),
     )
+    # Retain plans separately before the observed cutoff removes future rows.
+    # This sidecar is not a recognized ledger or a historical debt input.
+    plans = ledger_all_status.loc[ledger_all_status["status"].astype(str).str.strip().str.casefold().eq("planeado")].copy()
+    plans["Date"] = pd.to_datetime(plans["Date"], errors="coerce").dt.date.astype(str)
+    plans_path = out_dir / "ledger_planning_snapshot.csv"
+    plans.to_csv(plans_path, index=False)
     ledger_all_status = filter_ledger_cutoff(ledger_all_status, cutoff_date)
     ledger = filter_ledger_statuses(ledger_all_status, only_status)
 
@@ -851,7 +857,11 @@ def main() -> int:
             content_type="text/csv",
         )
 
-        out_arts = [all_status_art, out_art]
+        out_arts = [all_status_art, out_art, artifact_from_path(
+            name="ledger_planning_snapshot", path=plans_path, stage="A.ingest",
+            mode=args.mode, run_id=resolved_run_id, role="output", root_dir=out_dir,
+            content_type="text/csv",
+        )]
         if isinstance(anoms, pd.DataFrame) and not anoms.empty:
             out_arts.append(
                 artifact_from_path(
@@ -874,6 +884,7 @@ def main() -> int:
             "inputs": [],
             "params": {
                 "only_status": only_status,
+                "planning_evaluation_date": _dt.date.today().isoformat(),
                 "exclude_household": int(bool(args.exclude_household)),
                 "require_tx_id": int(bool(args.require_tx_id)),
                 "fx_rates": bool(args.fx_rates),

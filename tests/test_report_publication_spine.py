@@ -132,7 +132,8 @@ def _fake_pdf(html_path: Path, pdf_path: Path, **_kwargs) -> Path:
     return Path(pdf_path)
 
 
-def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("observed_only",[False, True])
+def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: Path, monkeypatch, observed_only) -> None:
     run_id = "20260825T190000Z_FBPM"
     run_root = tmp_path / "out" / "run" / "accounting" / run_id
     metrics_dir = tmp_path / "out" / "metrics" / run_id
@@ -142,6 +143,19 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     # Renderer input paths must be declared in their report manifest.
     # Other manifest sources are allowed (QA gates for the enclosing bundle).
     actual_renderer_inputs: dict[str, set[Path]] = {}
+    forecast_calls = []
+    def fake_projection(root, dest):
+        forecast_calls.append(root)
+        dest.mkdir(parents=True, exist_ok=True)
+        import shutil
+        for name in ("monthly_cash_accountability.csv","monthly_cash_accountability_qa.csv"):
+            shutil.copy2(root/name,dest/name)
+        pd.DataFrame([{"tx_id":"p","Date":"2026-09-01","status":"planeado"}]).to_csv(dest/"selected_plans.csv",index=False)
+        plan=root/"ledger_planning_snapshot.csv"
+        shutil.copy2(dest/"selected_plans.csv",plan)
+        return {"as_of_date":"2026-08-25","through_date":"2027-01-31","observed_as_of_date":"2026-08-25","planned_rows":1},plan
+    monkeypatch.setattr("accounting.reports.treasury_accountability.projection.build_default_projection",fake_projection)
+
     for kind, target in [
         ("annual", "render_annual"),
         ("treasury", "render_treasury"),
@@ -168,6 +182,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
         out_dir=out_dir,
         scope_tag="FBPM",
         generated_at_utc="2026-08-25T19:00:00Z",
+        **({"treasury_observed_only":True} if observed_only else {}),
     )
 
     catalog = json.loads(outputs["catalog"].read_text(encoding="utf-8"))
@@ -193,6 +208,12 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
     assert "run/family_business_accountability_cycles.csv" in treasury_sources
     # The renderer reads annual metrics; the manifest must attribute this input.
     assert "metrics/annual_balance_dashboard_metrics.csv" in treasury_sources
+    assert bool(forecast_calls) is not observed_only
+    if not observed_only:
+        assert treasury_manifest["projection"]["through_date"]=="2027-01-31"
+        assert "2027-01" in next(r for r in catalog["reports"] if r["report_id"]=="treasury_accountability")["period_label"]
+        assert "reports/treasury_accountability/projection/monthly_cash_accountability.csv" in treasury_sources
+
     debt_manifest = json.loads(outputs["debt_manifest"].read_text(encoding="utf-8"))
     assert len(debt_manifest["sources"]) == 7
     for kind, manifest in [
@@ -201,7 +222,7 @@ def test_report_bundle_builds_catalog_manifests_and_pdf_from_one_run(tmp_path: P
         ("debt", debt_manifest),
     ]:
         declared_paths = {
-            ((run_root if source["path"].startswith("run/") else metrics_dir)
+            ({"run":run_root,"metrics":metrics_dir,"reports":out_dir}[source["path"].split("/",1)[0]]
              / source["path"].split("/", 1)[1]).resolve()
             for source in manifest["sources"]
         }

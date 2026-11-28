@@ -135,16 +135,18 @@ def transform_all_status(source: Path, output: Path, operations: list[dict]) -> 
     return audit
 
 
-def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: dict, *, projection: dict | None = None) -> list[dict]:
+def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: dict, *, projection: dict | None = None, projection_source: Path | None = None) -> list[dict]:
     out.mkdir(parents=True, exist_ok=False)
     meta = out / "meta"
     meta.mkdir()
     paid_source = base / "ledger_canonical.csv"
     all_source = base / "ledger_canonical_all_status.csv"
+    if projection_source is not None and (not projection or variant.get("operations")):
+        raise ValueError("separate planning snapshot is supported only for unchanged projected baseline")
     removed = transform_all_status(all_source, out / all_source.name, variant.get("operations", []))
     if projection:
         summary = build_projection_ledger(
-            paid_source, out / all_source.name, out / paid_source.name,
+            paid_source, projection_source if projection_source is not None else out / all_source.name, out / paid_source.name,
             as_of_date=projection["as_of_date"], through_date=projection["through_date"],
         )
         print("  analytic simulation ledger:", summary, flush=True)
@@ -172,6 +174,7 @@ def seed_execution(base: Path, out: Path, run_id: str, scenario: str, variant: d
             "projection_as_of_date": projection["as_of_date"],
             "projection_through_date": projection["through_date"],
             "projection_semantics": "paid_observed_plus_future_planned_not_realized",
+            **({"planning_source_sha256": digest(projection_source)} if projection_source is not None else {}),
         })
     artifacts = [
         artifact_from_path(name=name.removesuffix(".csv"), path=out / name, stage="A.ingest",

@@ -118,7 +118,7 @@ def _active_columns(group: pd.DataFrame) -> list[tuple[str, list[str]]]:
     return groups
 
 
-def _svg_chart(group: pd.DataFrame, currency: str) -> str:
+def _svg_chart(group: pd.DataFrame, currency: str, projection_start_period: str | None = None) -> str:
     width, height = 1180, 275
     left, right, top, bottom = 58, 20, 18, 38
     plot_width, plot_height = width - left - right, height - top - bottom
@@ -147,6 +147,12 @@ def _svg_chart(group: pd.DataFrame, currency: str) -> str:
         f'<svg class="cash-chart" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="Evolución mensual del control acumulado y flujo neto {_h(currency)}">'
     ]
+    if projection_start_period:
+        index=next((i for i,p in enumerate(group["period"]) if p>=projection_start_period),None)
+        if index is not None:
+            boundary=max(left,x(index)-plot_width/max(n-1,1)/2)
+            parts.append(f'<rect x="{boundary:.1f}" y="{top}" width="{width-right-boundary:.1f}" height="{plot_height}" fill="#edf0f4"/>')
+            parts.append(f'<text x="{boundary+5:.1f}" y="{top+10}" font-size="9" fill="#596577">Proyección</text>')
     for tick in [vmin + (vmax - vmin) * i / 4 for i in range(5)]:
         yy = y(tick)
         parts.append(
@@ -343,7 +349,7 @@ def _series_html(group: pd.DataFrame, *, projection_start_period: str | None = N
       <div class="chart-card">
         <div class="chart-title">Control acumulado y flujo neto mensual · {_h(currency)}</div>
         <div class="chart-subtitle">{"Evolución observada hasta el cierre anterior; desde el mes en curso refleja transacciones pagadas y planeadas vigentes." if projected else "La línea es el control acumulado de origen cero; las barras muestran el movimiento neto. Sin datos previos al primer asiento del Box."}</div>
-        {_svg_chart(group, currency)}
+        {_svg_chart(group, currency, projection_start_period)}
       </div>
       {_table_html(group, projection_start_period=projection_start_period)}
       <div class="table-note">Calendario continuo desde enero de 2022. Los meses atenuados anteriores al primer asiento del Box no certifican actividad ni saldos físicos; el control de origen cero es sólo una convención contable. “Apoyo directo sin movimiento de caja” no implica fondos disponibles. Las rayas (—) significan cero movimiento registrado.</div>
@@ -653,6 +659,9 @@ def render_report(
     start_period: str = START_PERIOD,
     projection_as_of_date: str | None = None,
     projection_through_date: str | None = None,
+    observed_as_of_date: str | None = None,
+    observed_accountability_path: Path | None = None,
+    projection_planned_rows: int | None = None,
 ) -> dict[str, Path]:
     source = pd.read_csv(accountability_path)
     source_qa = pd.read_csv(qa_path) if qa_path and qa_path.exists() else pd.DataFrame()
@@ -672,6 +681,7 @@ def render_report(
     for col in [col for col in source.columns if col not in non_numeric]:
         source[col] = pd.to_numeric(source[col], errors="coerce")
 
+    observed_source = pd.read_csv(observed_accountability_path) if observed_accountability_path is not None else source
     max_period = source["period"].astype(str).max()
     projected = projection_as_of_date is not None
     if projected != (projection_through_date is not None):
@@ -682,10 +692,12 @@ def render_report(
         horizon_month = pd.Period(projection_through_date, freq="M")
         if horizon_month < pd.Period(projection_start_period, freq="M"):
             raise ValueError("projection horizon precedes evaluation month")
-        max_period = max(max_period, str(horizon_month))
+        if max_period > str(horizon_month):
+            raise ValueError("projected source extends beyond requested horizon")
+        max_period = str(horizon_month)
     cutoff_label = pd.Period(max_period, freq="M").end_time.strftime("%d/%m/%Y")
     if not cycles.empty:
-        cutoff = pd.Period(max_period, freq="M").end_time.normalize()
+        cutoff = pd.Timestamp(observed_as_of_date) if observed_as_of_date else pd.Period(max_period, freq="M").end_time.normalize()
         starts = pd.to_datetime(cycles["cycle_start"], errors="coerce")
         ends = pd.to_datetime(cycles["cycle_end"], errors="coerce")
         cycles = cycles.loc[starts.ge(pd.Timestamp("2022-03-01")) & ends.le(cutoff)].copy()
@@ -735,11 +747,13 @@ def render_report(
         for _, row in validation.iterrows()
     )
     css = Path(__file__).with_name("report.css").read_text(encoding="utf-8") + TIMESERIES_CSS
+    plan_note = f'<p class="method-note">Partidas planeadas incorporadas: {projection_planned_rows}. No se extrapolan recurrencias ni se inventan importes.</p>' if projection_planned_rows is not None else ""
     html_document = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rendición mensual de tesorería · {_h(max_period)}</title><style>{css}</style></head><body><div class="report-shell">
-      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">{"Histórico registrado y proyección de pagos/cobros vigentes, por Box y moneda. Las filas prospectivas aparecen en gris; no son movimientos realizados." if projected else "Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre."}</div><div class="meta-row"><span>{"Último cierre observado: " + _h(observed_close) + "; evaluación: " + _h(projection_as_of_date) + "; horizonte proyectado: " + _h(projection_through_date) if projected else "Corte contable: " + _h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el control acumulado de origen cero en el motor del Box. {"Los meses grises son proyecciones bajo el supuesto de cumplimiento de planes, no evidencia física de pagos. La conciliación prueba solo consistencia de la simulación." if projected else "La reconciliación comprueba la aritmética del registro."} No constituyen saldos bancarios ni una afirmación sobre efectivo de terceros. ARS y USD se mantienen siempre separados.</div></header>
+      <header class="hero"><div class="eyebrow">Family Business / Property Management</div><h1>Rendición mensual de tesorería</h1><div class="hero-sub">{"Histórico registrado y proyección de pagos/cobros vigentes, por Box y moneda. Las filas prospectivas aparecen en gris; no son movimientos realizados." if projected else "Movimientos efectivos de caja, aplicación mensual y evolución del control acumulado por Box y moneda. Cada fila explica cómo el flujo lleva de la apertura al cierre."}</div><div class="meta-row"><span>{("Datos observados hasta: " + _h(observed_as_of_date) if observed_as_of_date else "Último cierre observado: " + _h(observed_close)) + "; evaluación: " + _h(projection_as_of_date) + "; horizonte proyectado: " + _h(projection_through_date) if projected else "Corte contable: " + _h(cutoff_label)}</span><span>Período: {_h(start_period)} → {_h(max_period)}</span><span>Fuente: {_h(accountability_path.name)}</span><span>Convención: control de origen cero</span></div><nav class="toc">{"".join(f'<a href="{href}">{_h(label)}</a>' for label, href in toc)}</nav><div class="method-note"><strong>Base de control:</strong> 0 al inicio de {_h(start_period)}. Apertura y cierre representan el control acumulado de origen cero en el motor del Box. {"Los meses grises incluyen lo realizado más los planes vigentes desde la fecha de evaluación. Los meses sin planes registrados no representan una previsión de ingresos/gastos nulos. La conciliación prueba solo consistencia de la simulación." if projected else "La reconciliación comprueba la aritmética del registro."} No constituyen saldos bancarios ni una afirmación sobre efectivo de terceros. ARS y USD se mantienen siempre separados.</div></header>
+      {plan_note}
       {_cycle_html(cycles)}
       {_stakeholder_support_html(stakeholder_support)}
-      {(_stakeholder_charts_html(accountability=source, semantic_audit=semantic_audit, stakeholder_support=stakeholder_support, annual_metrics=annual_metrics, out_dir=out_dir) if not semantic_audit.empty and not annual_metrics.empty and not stakeholder_support.empty else '')}
+      {(_stakeholder_charts_html(accountability=observed_source, semantic_audit=semantic_audit, stakeholder_support=stakeholder_support, annual_metrics=annual_metrics, out_dir=out_dir) if not semantic_audit.empty and not annual_metrics.empty and not stakeholder_support.empty else '')}
       {"".join(sections)}
       <section class="qa-card"><h2>Control de integridad del reporte</h2><div class="qa-grid">{qa_items}</div></section>
       <footer class="footer"><span>{"Fuente: monthly_cash_accountability.csv · flujos simulados sujetos a supuestos; no son movimientos efectivos verificados." if projected else "Fuente contable: monthly_cash_accountability.csv · movimientos reconciliados contra box motor."}</span><span>Generación reproducible; ver report_validation.csv.</span></footer>
