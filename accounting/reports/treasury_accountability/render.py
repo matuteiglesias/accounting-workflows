@@ -37,7 +37,7 @@ def _h(value: object) -> str:
 
 def _fmt_num(value: object, *, zero_dash: bool = True) -> str:
     if value is None or pd.isna(value):
-        return "No disponible"
+        return "N/A"
     number = float(value)
     if abs(number) < 0.005:
         return "-" if zero_dash else "0"
@@ -53,7 +53,7 @@ def _fmt_num(value: object, *, zero_dash: bool = True) -> str:
 
 def _compact(value: object) -> str:
     if value is None or pd.isna(value):
-        return "No disponible"
+        return "N/A"
     number = float(value)
     absolute = abs(number)
     sign = "−" if number < 0 else ""
@@ -383,7 +383,7 @@ def _stakeholder_support_html(support: pd.DataFrame) -> str:
     role_labels = {
         "tenant": "Inquilino/a", "tenant_family": "Familia inquilina",
         "family_funder": "Aportante familiar", "other": "Otro",
-        "unavailable": "No disponible",
+        "unavailable": "N/A",
     }
     rows = []
     for (currency, actor, role), group in work.groupby(

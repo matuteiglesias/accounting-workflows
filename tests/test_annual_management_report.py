@@ -92,7 +92,7 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     )
 
     html = outputs["html"].read_text(encoding="utf-8")
-    cells = pd.read_csv(outputs["cells"])
+    cells = pd.read_csv(outputs["cells"], keep_default_na=False)
     validation = pd.read_csv(outputs["validation"])
 
     assert html.count('class="report-page"') == 6
@@ -104,7 +104,7 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     assert '<div class="kpi-label">DISTRIBUCIONES REGISTRADAS</div>' not in html
     assert "Las distribuciones registradas forman parte de los retiros" in html
     assert "Para profundizar en el Viewer" in html
-    assert "No disponible" in html
+    assert "N/A" in html
     assert "Trazabilidad detallada" in html
     assert "Posición y movimientos de deuda" in html
     assert "repay-1" not in html
@@ -128,7 +128,7 @@ def test_annual_report_renders_exact_governed_cells_without_semantic_leakage(
     assert (
         (cells["metric_id"] == "CTRL.BOX.CUM_NET")
         & (cells["value_status"] == "unavailable")
-        & (cells["display_value"] == "No disponible")
+        & (cells["display_value"] == "N/A")
     ).any()
 
 
@@ -200,7 +200,7 @@ def test_annual_report_renders_box_controls_by_native_currency_without_total(
         out_dir=tmp_path / "report",
     )
     html = outputs["html"].read_text(encoding="utf-8")
-    cells = pd.read_csv(outputs["cells"])
+    cells = pd.read_csv(outputs["cells"], keep_default_na=False)
 
     assert "Movimiento neto registrado" in html
     assert "Control acumulado de movimientos" in html

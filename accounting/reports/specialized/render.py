@@ -18,7 +18,7 @@ TOLERANCE = 0.01
 
 def _money(value: float, currency: str) -> str:
     if value is None or pd.isna(value):
-        return "No disponible"
+        return "N/A"
     if value == 0:
         return "-"
     return f"{currency} {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -34,7 +34,7 @@ def _scope_label(scope: str) -> str:
 
 def _period_selection(frame: pd.DataFrame, policy: str, as_of_date: str) -> tuple[pd.DataFrame, str]:
     if frame.empty:
-        return frame.copy(), "No disponible"
+        return frame.copy(), "N/A"
     cutoff = pd.Timestamp(as_of_date)
     year = str(cutoff.year)
     periods = frame["period"].astype(str)

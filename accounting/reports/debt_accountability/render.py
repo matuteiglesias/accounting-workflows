@@ -24,7 +24,7 @@ def _n(value: Any) -> float:
 
 def _money(value: Any, currency: str = "USD") -> str:
     if value is None or pd.isna(value):
-        return "No disponible"
+        return "N/A"
     number = _n(value)
     if number == 0:
         return "-"

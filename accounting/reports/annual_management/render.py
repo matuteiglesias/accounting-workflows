@@ -93,7 +93,7 @@ class MetricStore:
         if value is None or pd.isna(value) or status not in {
             "available", "ok", "pass", "structural_zero",
         }:
-            return "No disponible"
+            return "N/A"
         if float(value) == 0:
             return "-"
         if fmt in {"ratio", "fraction"}:
@@ -138,7 +138,7 @@ class MetricStore:
                 "sparse additive breakdown",
             )
         elif len(rows) != 1:
-            cell = Cell(None, "unavailable", "No disponible", len(rows), "")
+            cell = Cell(None, "unavailable", "N/A", len(rows), "")
         else:
             row = rows.iloc[0]
             status = _text(row.get("value_status")) or "available"
@@ -190,7 +190,7 @@ class MetricStore:
             raise KeyError(derived_id)
 
         if numerator.value is None or denominator.value is None:
-            cell = Cell(None, "unavailable", "No disponible", 0, "report-derived")
+            cell = Cell(None, "unavailable", "N/A", 0, "report-derived")
         elif abs(float(denominator.value)) <= 1e-12:
             cell = Cell(None, "not_applicable", "—", 0, "report-derived")
         else:
@@ -305,7 +305,7 @@ def _page_header(meta: dict[str, Any], number: int, title: str, question: str) -
         '<section class="report-page"><header class="page-header"><div>'
         f'<div class="brand">{_esc(meta["title"])}</div>'
         f'<div class="subtitle">{_esc(meta["subtitle"])}</div></div>'
-        f'<div class="period-box"><strong>Corte contable: {_esc(_display_date(meta["as_of_date"]) if meta["as_of_date"] else "No disponible")}</strong>'
+        f'<div class="period-box"><strong>Corte contable: {_esc(_display_date(meta["as_of_date"]) if meta["as_of_date"] else "N/A")}</strong>'
         f'<span>{_esc(periods)}</span></div></header><div class="page-body">'
         f'<div class="section-title">{number}. {_esc(title)}</div>'
         f'<div class="section-question">{_esc(question)}</div>'
@@ -416,7 +416,7 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + _table("Control acumulado de movimientos · USD (stock; origen cero; no es saldo bancario)", periods, model["treasury"]["cumulative_usd"], compact=True)
         + '</div><div class="span-5"><div class="panel"><h2>Estado de caja</h2>'
         + '<div class="status-big">Control contable, no saldo bancario</div>'
-        + '<p class="caveat">El control acumulado usa origen cero y no es saldo bancario ni liquidez verificada. Si faltan las filas CTRL, se muestra No disponible; no se reutilizan métricas de caja anteriores.</p></div></div>'
+        + '<p class="caveat">El control acumulado usa origen cero y no es saldo bancario ni liquidez verificada. Si faltan las filas CTRL, se muestra N/A; no se reutilizan métricas de caja anteriores.</p></div></div>'
         + '<div class="span-7">'
         + _table("Operaciones de tesorería / FX", periods, model["treasury"]["fx"], compact=True)
         + '</div><div class="span-5"><div class="panel"><h2>Espacio de tendencia FX</h2><div class="chart-slot tall"></div></div></div></div>'
@@ -539,7 +539,7 @@ def build_report_model(
                 fmt=spec.get("format","money"),
                 track={"page_id":"summary","component_id":component,"row_id":spec["label"]})
             label = currency + " " if spec.get("format") == "fraction" or cell.value is None else ""
-            vals.append("-" if cell.display == "-" else label + cell.display)
+            vals.append(cell.display if cell.display in {"-", "N/A"} else label + cell.display)
         return vals
 
     kpis = [{"label": spec["label"], "values": summary_cells(spec,last,"kpis")}
@@ -686,7 +686,7 @@ def build_report_model(
         statuses = sorted(set(item for item in subset["value_status"].tolist() if item)) if not subset.empty else []
         quality_rows.append({
             "label": spec["label"],
-            "status": "OK" if "available" in statuses else "No disponible",
+            "status": "OK" if "available" in statuses else "N/A",
             "detail": "status=" + (",".join(statuses) or "sin observaciones"),
         })
 
