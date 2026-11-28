@@ -41,6 +41,9 @@ USD_CCL_POLICY_FIXTURE ?= $(ROOT)/fixtures/valuation_policy_v1.json
 USD_CCL_MANAGEMENT_LEDGER_FIXTURE ?= $(ROOT)/fixtures/management_usd_ccl_flow_fixture.csv
 USD_CCL_FLOW_POLICY ?= $(ROOT)/reference/fx/ccl_txn_prev_available_v1.json
 CCL_RATES ?=
+CCL_SHEET_NAME ?= CCL CANON
+CCL_SNAPSHOT_DIR ?= $(OUT)/treasury_usd_ccl/$(RUN_ID)
+TREASURY_USD_CCL_OUT ?= $(CCL_SNAPSHOT_DIR)/projection
 
 ACCOUNT_SA ?=
 ACCOUNT_SHEET_URL ?=
@@ -115,6 +118,9 @@ help:
 	@echo "  make run-ingest"
 	@echo "  make run-usd-ccl-valuation RUN_ROOT=<exact-run> CCL_RATES=<local.csv>"
 	@echo "  make run-usd-ccl-management-flows RUN_ROOT=<exact-run> CCL_RATES=<local.csv>"
+	@echo "  make export-ccl-snapshot RUN_ID=<exact-run-id> CUTOFF_DATE=YYYY-MM-DD"
+	@echo "  make run-usd-ccl-treasury RUN_ID=<exact-run-id> RUN_ROOT=<exact-run> CUTOFF_DATE=YYYY-MM-DD"
+	@echo "  make run-usd-ccl-treasury-report RUN_ID=<exact-run-id> RUN_ROOT=<exact-run> CUTOFF_DATE=YYYY-MM-DD"
 	@echo ""
 	@echo "Publication / professional:"
 	@echo "  make publish-latest"
@@ -357,6 +363,48 @@ run-usd-ccl-management-flows:
 		--run-root "$(RUN_ROOT)" \
 		--rates "$(CCL_RATES)" \
 		--policy "$(USD_CCL_FLOW_POLICY)"
+
+
+.PHONY: export-ccl-snapshot run-usd-ccl-treasury run-usd-ccl-treasury-report
+export-ccl-snapshot:
+	@$(call require_var,ACCOUNT_SHEET_URL)
+	@$(call require_var,ACCOUNT_SA)
+	@$(call require_var,CUTOFF_DATE)
+	@$(PY) -m accounting.valuation.ccl_snapshot \
+		--sheet-url "$(ACCOUNT_SHEET_URL)" \
+		--service-account "$(ACCOUNT_SA)" \
+		--sheet-name "$(CCL_SHEET_NAME)" \
+		--cutoff-date "$(CUTOFF_DATE)" \
+		--output-dir "$(CCL_SNAPSHOT_DIR)"
+
+run-usd-ccl-treasury:
+	@$(call require_var,RUN_ROOT)
+	@$(call require_var,CUTOFF_DATE)
+	@test -s "$(RUN_ROOT)/monthly_cash_accountability.csv" || (echo "ERROR: missing monthly cash accountability"; exit 2)
+	@test -s "$(CCL_SNAPSHOT_DIR)/monthly_ccl_mean.csv" || (echo "ERROR: run export-ccl-snapshot first"; exit 2)
+	@SNAPSHOT_SHA=$$($(PY) -c 'import json; print(json.load(open("$(CCL_SNAPSHOT_DIR)/ccl_snapshot_manifest.json"))["snapshot_sha256"])'); \
+	$(PY) -m accounting.management.usd_ccl_treasury \
+		--accountability "$(RUN_ROOT)/monthly_cash_accountability.csv" \
+		--fx-monthly-mean "$(CCL_SNAPSHOT_DIR)/monthly_ccl_mean.csv" \
+		--output-dir "$(TREASURY_USD_CCL_OUT)" \
+		--run-id "$(RUN_ID)" \
+		--cutoff-date "$(CUTOFF_DATE)" \
+		--fx-snapshot-sha256 "$$SNAPSHOT_SHA"
+
+run-usd-ccl-treasury-report:
+	@$(call require_var,RUN_ROOT)
+	@$(call require_var,CUTOFF_DATE)
+	@test -s "$(TREASURY_USD_CCL_OUT)/monthly_treasury_usd_ccl.csv" || (echo "ERROR: run-usd-ccl-treasury first"; exit 2)
+	@$(PY) -m accounting.reports.treasury_usd_ccl.render \
+		--monthly "$(TREASURY_USD_CCL_OUT)/monthly_treasury_usd_ccl.csv" \
+		--aggregates "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_aggregates.csv" \
+		--cumulative-control "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_cumulative_control.csv" \
+		--projection-manifest "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_reconciliation_manifest.json" \
+		--fx-manifest "$(CCL_SNAPSHOT_DIR)/ccl_snapshot_manifest.json" \
+		--out-dir "$(RUN_REPORTS_DIR)/treasury_usd_ccl" \
+		--run-id "$(RUN_ID)" \
+		--cutoff-date "$(CUTOFF_DATE)" \
+		$(if $(REPORT_BROWSER_BIN),--browser-bin "$(REPORT_BROWSER_BIN)",)
 
 
 # ---------------------------------------------------------------------------

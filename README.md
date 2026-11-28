@@ -215,3 +215,18 @@ Operational Python entrypoints use `YYYY-MM-DDTHH:MM:SSZ LEVEL [stage] message`.
 ### Economic funding bridge (annual management)
 
 The annual report uses a governed economic-funding bridge, separate from the operating result, debt stock and physical Box cash. Designated external contributions to FB/PM are financing, not OPEX; tenant direct tax/service payments retain gross OPEX and count once as support, without a Box cash inflow. Pending contribution/repayment clearings are excluded from new support. Explicit distribution-linked debt recoveries are reported separately and must reconcile with the debt allocation authority. For exact-run replay, retain `private_review/distribution_recovery_pairs.csv`; for new cutoffs the optional local `private/distribution_recovery_registry.csv` (or `RESOURCE_RECOVERY_REGISTRY`) carries Box, recovery_date, distribution_tx_id and recovery_tx_id, and is snapshotted to the run by scope/cutoff. Never commit private registry IDs. The extended coverage is operating result + economic funding + linked debt recovery − gross draws; it is neither profit nor cash.
+
+
+### Monthly treasury in USD/CCL (optional, private review)
+Recover P07 with the existing monthly treasury mart, not transaction valuation.
+Use the same exact RUN_ID and cutoff for all three stages (load the authorized
+accounting environment before exporting rates):
+```sh
+make export-ccl-snapshot RUN_ID=<exact-run-id> CUTOFF_DATE=YYYY-MM-DD
+make run-usd-ccl-treasury RUN_ID=<exact-run-id> RUN_ROOT=<exact-run-dir> CUTOFF_DATE=YYYY-MM-DD
+make run-usd-ccl-treasury-report RUN_ID=<exact-run-id> RUN_ROOT=<exact-run-dir> CUTOFF_DATE=YYYY-MM-DD
+```
+CCL CANON weekday observations are averaged by month; only native ARS net
+flows are translated. Native USD, cash stocks and future planned rates remain
+separate. Missing or stale trailing-month rates give N/A, not zero. This is a
+companion artifact, not yet part of the default published report catalog.
