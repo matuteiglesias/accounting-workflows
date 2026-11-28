@@ -62,8 +62,8 @@ def _obligation_labels(detail: pd.DataFrame) -> dict[str, str]:
     return labels
 
 
-def _event_table(detail: pd.DataFrame, year: str) -> tuple[str, pd.DataFrame]:
-    current = detail.loc[detail["period"].astype(str).str.startswith(year)].copy()
+def _event_table(detail: pd.DataFrame, year: str | None = None) -> tuple[str, pd.DataFrame]:
+    current = (detail if year is None else detail.loc[detail["period"].astype(str).str.startswith(year)]).sort_values(["repayment_date","repayment_tx_id"],kind="stable").copy()
     blocks = []
     events = []
     labels = _obligation_labels(current)
@@ -159,8 +159,17 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
     debt_chart_html = "".join(debt_chart_blocks)
     monthly_debt_html, monthly_debt_trace = monthly_debt_position_table(position)
     applied = _n(model["repayments"].sum())
-    events_html, events = _event_table(detail, year)
-    event_amount=_n(events["repayment_amount"].sum()); remainder=_n(events["leftover_amount"].sum()); allocation_rows=int(events["allocation_rows"].sum())
+    events_html, events = _event_table(detail)
+    history_sections=[]
+    if not events.empty:
+        events["year"] = events.repayment_date.astype(str).str[:4]
+        for (yr,currency), group in events.groupby(["year","Currency"],sort=True):
+            history_sections.append(f'<tr><td>{_h(yr)}</td><td>{_h(currency)}</td><td class="num">{len(group)}</td>'
+                + "".join(f'<td class="num">{_money(group[col].sum(),currency)}</td>' for col in ["repayment_amount","allocated_amount","leftover_amount"]) + "</tr>")
+    historical_summary = "".join(history_sections)
+    event_count=len(events)
+    allocation_rows=int(events["allocation_rows"].sum()) if not events.empty else 0
+    history_start=str(detail.repayment_date.min())[:4] if not detail.empty else year
     relation_rows="".join(f'<tr><td>{_h(r.debtor)} → {_h(r.creditor)}</td><td>{_h(r.Currency)}</td><td class="num">{_money(r.open_principal,r.Currency)}</td><td class="num">{_money(r.open_interest,r.Currency)}</td><td class="num">{_money(r.open_total,r.Currency)}</td></tr>' for r in totals.itertuples() if _n(r.open_amount)>TOLERANCE)
     activity_rows="".join(f'<tr><td>{_h(r.debtor)} → {_h(r.creditor)}</td><td>{_h(r.Currency)}</td><td class="num">{_money(r.opening,r.Currency)}</td><td class="num">{_money(r.new,r.Currency)}</td><td class="num">{_money(r.interest,r.Currency)}</td><td class="num">{_money(r.repayments,r.Currency)}</td><td class="num">{_money(r.adjustments,r.Currency)}</td><td class="num">{_money(r.closing,r.Currency)}</td></tr>' for r in model.itertuples())
     yearly=[]
@@ -176,7 +185,7 @@ def render_report(*, position_path: Path, position_qa_path: Path, activity_path:
     <section class="page"><h2>2. Cómo cambió</h2>{debt_chart_html}<div class="equation">Apertura + nuevas obligaciones + interés − repagos aplicados ± ajustes = cierre</div><table><thead><tr><th>Año</th><th class="num">Apertura</th><th class="num">Nuevas obligaciones</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{''.join(yearly)}</tbody></table><p><strong>Los movimientos se suman. Los saldos se observan al cierre.</strong></p></section>
     <section class="page"><h2>2b. Historial mensual de posiciones desde 2022</h2>{monthly_debt_html}</section>
     <section class="page"><h2>3. Actividad por relación · {year} YTD</h2><table><thead><tr><th>Relación</th><th>Moneda</th><th class="num">Apertura</th><th class="num">Nueva</th><th class="num">Interés</th><th class="num">Repagos</th><th class="num">Ajustes</th><th class="num">Cierre</th></tr></thead><tbody>{activity_rows}</tbody></table></section>
-    <section class="page"><h2>4. Repagos y trazabilidad</h2><div class="grid"><div class="kpi"><span>Eventos</span><strong>{len(events)}</strong></div><div class="kpi"><span>Monto de eventos</span><strong>{_money(event_amount)}</strong></div><div class="kpi"><span>Aplicado</span><strong>{_money(applied)}</strong></div><div class="kpi"><span>Remanente</span><strong>{_money(remainder)}</strong><small>{allocation_rows} asignaciones</small></div></div><table><thead><tr><th>Fecha</th><th>Relación</th><th class="num">Evento</th><th class="num">Aplicado</th><th class="num">Sin asignar</th><th>Estado</th></tr></thead><tbody>{events_html}</tbody></table><p class="note">El remanente es un repago registrado aún no imputado completamente bajo la regla vigente; no es deuda adicional ni dinero faltante.</p></section>
+    <section class="page"><h2>4. Repagos y trazabilidad · {history_start}–{year}</h2><p>Historial completo al corte contable: {event_count} eventos, {allocation_rows} asignaciones. Los importes se muestran en la moneda de la obligación.</p><table><thead><tr><th>Año</th><th>Moneda</th><th>Eventos</th><th class="num">Monto</th><th class="num">Aplicado</th><th class="num">Remanente</th></tr></thead><tbody>{historical_summary}</tbody></table><h3>Detalle cronológico y obligaciones aplicadas</h3><table><thead><tr><th>Fecha</th><th>Relación</th><th class="num">Evento</th><th class="num">Aplicado</th><th class="num">Sin asignar</th><th>Estado</th></tr></thead><tbody>{events_html}</tbody></table><p class="note">El remanente es un repago registrado aún no imputado completamente bajo la regla vigente; no es deuda adicional ni dinero faltante.</p></section>
     <section class="page"><h2>5. Fuera de deuda y controles</h2><div class="gap-grid">{gap_rows}</div><p class="note">Una partida pendiente de asignación permanece visible sin establecer deudor jurídico ni habilitar repago ordinario.</p><div class="qa">{qa_html}</div></section><footer class="footer">Este informe describe obligaciones registradas en el sistema contable. No constituye por sí solo una determinación de responsabilidad jurídica.</footer></main></body></html>'''
     html_path=out_dir/"report.html"; html_path.write_text(doc,encoding="utf-8")
     outputs = {"html": html_path, "validation": validation_path}

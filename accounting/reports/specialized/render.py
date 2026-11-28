@@ -46,6 +46,11 @@ def _period_selection(frame: pd.DataFrame, policy: str, as_of_date: str) -> tupl
             year = fallback
         label = year + (f" YTD · corte {cutoff.strftime('%d/%m/%Y')}" if year == str(cutoff.year) else "")
         return selected, label
+    if policy == "all_repayment_history":
+        dates = pd.to_datetime(frame["repayment_date"], errors="raise")
+        selected = frame.loc[dates.le(cutoff)].sort_values(["repayment_date","repayment_tx_id"],kind="stable").copy()
+        start = str(dates.min().year) if not selected.empty else year
+        return selected, f"{start}–{year} · corte {cutoff.strftime('%d/%m/%Y')}"
     if policy == "all_history_months":
         start = HISTORY_START_MONTH
         last = str(cutoff.to_period("M"))

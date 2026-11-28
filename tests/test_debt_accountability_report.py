@@ -43,3 +43,21 @@ def test_debt_report_rejects_future_target_and_material_adjustment(tmp_path: Pat
     activity=pd.read_csv(p["activity"]); activity.loc[activity.activity_type.eq("adjustment"),"adjustments"]=5; activity.to_csv(p["activity"],index=False)
     with pytest.raises(ValueError,match="validation failed"):
         render_report(position_path=p["position"],position_qa_path=p["position_qa"],activity_path=p["activity"],activity_qa_path=p["activity_qa"],repayment_detail_path=p["detail"],gaps_path=p["gaps"],gaps_qa_path=p["gaps_qa"],out_dir=tmp_path/"bad",as_of_date="2026-08-31")
+
+
+def test_repayment_history_keeps_earlier_allocations_and_chronology(tmp_path):
+    from accounting.reports.debt_accountability.render import _event_table
+    from accounting.reports.specialized.render import _period_selection
+    p=_sources(tmp_path)
+    current=pd.read_csv(p["detail"])
+    earlier=current.assign(period="2025-09",repayment_tx_id="r0",repayment_date="2025-09-10",
+        target_debt_id="d0",target_opened_at="2023-06-01",repayment_amount=380,allocated_amount=380)
+    detail=pd.concat([current,earlier],ignore_index=True)
+    html,events=_event_table(detail)
+    assert events.repayment_tx_id.tolist()==["r0","r1"]
+    assert events.allocated_amount.sum()==440
+    assert html.index("10/09/2025")<html.index("20/08/2026")
+    assert len(_event_table(detail,"2026")[1])==1
+    selected,label=_period_selection(detail,"all_repayment_history","2026-08-31")
+    assert selected.repayment_tx_id.tolist()==["r0","r1"]
+    assert "2025–2026" in label
