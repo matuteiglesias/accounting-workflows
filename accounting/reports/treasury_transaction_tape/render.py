@@ -250,11 +250,44 @@ def _amount_cell(value: float, *, blank_zero: bool = False, signed: bool = False
     return html.escape(text)
 
 
+def _concept(row: pd.Series) -> str:
+    """Prefer source detail, never display a missing-value sentinel as text."""
+    labels = {
+        "rent": "Renta", "rent_in": "Renta",
+        "funding_cash_in": "Aporte / financiación",
+        "designated_expense": "Aporte para gastos",
+        "taxes": "Impuestos", "taxes_out": "Impuestos",
+        "services": "Servicios", "services_out": "Servicios",
+        "maintenance": "Mantenimiento", "maintenance_out": "Mantenimiento",
+        "legal": "Gastos legales", "legal_out": "Gastos legales",
+        "dividend": "Distribución", "dividends_out": "Distribución",
+        "principal": "Préstamo", "repayment": "Repago de deuda",
+        "debt_repayments_out": "Repago de deuda",
+        "debt_repayment_in": "Repago de deuda",
+        "interest": "Interés", "fx_conversion_proceeds": "Conversión FX · entrada",
+        "fx_conversion_outflow": "Conversión FX · salida",
+        "fx_cost_or_spread": "Costo de operación FX",
+        "internal_transfer": "Transferencia interna",
+        "personal_expense": "Gasto personal",
+    }
+    for field in ("Detalle", "cash_category", "semantic_subbucket"):
+        value = row.get(field)
+        if value is None or pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text.casefold() in {"", "nan", "none", "null", "n/a", "-"}:
+            continue
+        if field == "Detalle":
+            return text
+        return labels.get(text, text.replace("_", " ").capitalize())
+    return "Concepto no identificado"
+
+
 def _table_rows(group: pd.DataFrame) -> str:
     rows: list[str] = []
     for period, month in group.groupby("period", sort=True):
         for _, row in month.iterrows():
-            concept = str(row.get("Detalle") or row.get("cash_category") or row.get("semantic_subbucket") or "")
+            concept = _concept(row)
             rows.append(
                 "<tr>"
                 f"<td class='num in'>{_amount_cell(row['amount_in'], blank_zero=True)}</td>"

@@ -289,3 +289,16 @@ def test_transaction_tape_fails_closed_when_control_does_not_reconcile(tmp_path:
             out_dir=tmp_path / "report",
             as_of_date="2026-06-30",
         )
+
+
+@pytest.mark.parametrize("missing",[None,float("nan"),pd.NA,"","nan"," N/A ","-"])
+def test_concept_uses_semantic_fallback_for_missing_detail(missing):
+    from accounting.reports.treasury_transaction_tape.render import _concept
+    assert _concept(pd.Series({"Detalle":missing,"cash_category":"taxes_out"}))=="Impuestos"
+
+
+def test_concept_preserves_real_detail_and_exposes_unknown():
+    from accounting.reports.treasury_transaction_tape.render import _concept
+    assert _concept(pd.Series({"Detalle":"AySA 2026-1","cash_category":"services_out"}))=="AySA 2026-1"
+    assert _concept(pd.Series({"Detalle":None,"cash_category":float("nan"),"semantic_subbucket":"repayment"}))=="Repago de deuda"
+    assert _concept(pd.Series({"Detalle":None}))=="Concepto no identificado"
