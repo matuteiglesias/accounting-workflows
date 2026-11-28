@@ -722,6 +722,7 @@ def build_monthly_cash_accountability(
         matched = bridge.loc[
             bridge.period.eq(row["period"]) & bridge.Box.eq(row["Box"])
             & bridge.cash_currency.eq(row["Currency"]) & bridge.cash_direction.eq("out")
+            & bridge.cash_category.eq("debt_repayment")
         ]
         engine = float(matched.matched_native_cash.sum()) if not matched.empty else 0.0
         gap = float(row["debt_repayments_out"]) - engine
@@ -752,11 +753,11 @@ def build_monthly_cash_accountability(
         },
     ]
     if bridge is not None:
-        for _, event in bridge.loc[~bridge.status.eq("matched")].iterrows():
+        for _, event in bridge.loc[~bridge.status.isin(["matched","constructive_linked"])].iterrows():
             qa_rows.append({
                 "check": "treasury_debt_event_" + event.status,
                 "period": event.period, "Box": event.Box, "Currency": event.debt_currency or event.cash_currency,
-                "amount": event.unallocated if event.status == "partial" else pd.NA,
+                "amount": event.unallocated if event.status in {"partial","constructive_partial"} else pd.NA,
                 "status": "warn", "severity": "warning",
                 "detail": event.note,
             })

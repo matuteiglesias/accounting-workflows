@@ -225,6 +225,23 @@ def load_debt_ledger(args: argparse.Namespace) -> pd.DataFrame:
         dupes = df.columns[df.columns.duplicated()].tolist()
         raise ValueError(f"Duplicate columns remain after normalization: {dupes}")
 
+    # A paid draw can be a third-party-directed repayment, without changing
+    # its native treasury classification or manufacturing another cash event.
+    tags = df.get("tag", pd.Series("", index=df.index)).fillna("").astype(str)
+    directed = tags.str.contains(r"(?:^|;)settlement_draw_for:[^;]+(?:;|$)", regex=True)
+    for idx in df.index[directed]:
+        row = df.loc[idx]
+        creditors = [v.split(":", 1)[1] for v in tags.loc[idx].split(";")
+                     if v.startswith("settlement_draw_for:")]
+        if (len(creditors) != 1 or not creditors[0].strip()
+                or creditors[0] in (row["payer"], row["receiver"])
+                or row["Tipo"] not in ("Gasto", "Dividendo")
+                or row["status"] != "pagado" or row["Currency"] != "USD"
+                or row["amount"] <= 0):
+            raise ValueError("invalid directed settlement draw")
+        df.at[idx, "Tipo"] = VALID_REPAYMENT_TYPE
+        df.at[idx, "receiver"] = creditors[0]
+        df.at[idx, "tag"] = f"{tags.loc[idx]};physical_receiver:{row['receiver']}"
     df = df.loc[df["Tipo"].isin(VALID_DEBT_TYPES | {VALID_REPAYMENT_TYPE})].copy()
 
     if args.exclude_household and "Box" in df.columns:

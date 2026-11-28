@@ -44,3 +44,40 @@ def test_bridge_event_grain_native_cash_and_debt_allocations(tmp_path):
 
 def test_missing_lineage_is_unavailable(tmp_path):
     assert load_bridge(tmp_path) is None
+
+
+def test_directed_draw_links_to_debt_without_reclassifying_cash(tmp_path):
+    pd.DataFrame([dict(tx_id="draw",Date="2026-08-20",period="2026-08",Box="Property Management",
+      Currency="USD",movement_basis="actual_cash",cash_category="personal_draws",
+      cash_direction="out",amount_in=0,amount_out=490,payer="PM",receiver="MI")]).to_csv(
+          tmp_path/"box_treasury_transaction_detail.csv",index=False)
+    pd.DataFrame([dict(tx_id="draw",Box="Property Management",tag="settlement_draw_for:Primos",CCL="")]).to_csv(
+        tmp_path/"ledger_canonical.csv",index=False)
+    pd.DataFrame([dict(repayment_tx_id="draw",period="2026-08",repayment_date="2026-08-20",
+        debtor="PM",creditor="Primos",Currency="USD",repayment_amount=490,allocated_amount=478.54,
+        leftover_amount=11.46,target_debt_id="p",target_item_type="Prestamo")]).to_csv(
+        tmp_path/"monthly_debt_repayment_detail.csv",index=False)
+    r=load_bridge(tmp_path).iloc[0]
+    assert r.cash_category=="personal_draws"
+    assert r.status=="partial" and float(r.unallocated)==11.46 and float(r.matched_native_cash)==490
+
+
+def test_linked_constructive_settlement_does_not_repeat_draw_cash(tmp_path):
+    pd.DataFrame([dict(tx_id="draw",Date="2026-08-20",period="2026-08",Box="Property Management",
+        Currency="USD",movement_basis="actual_cash",cash_category="personal_draws",
+        cash_direction="out",amount_in=0,amount_out=490,payer="PM",receiver="MI")]).to_csv(
+        tmp_path/"box_treasury_transaction_detail.csv",index=False)
+    pd.DataFrame([
+        dict(tx_id="draw",transaction_id="1670.0",Box="Property Management",tag="settlement_draw_for:Primos"),
+        dict(tx_id="hector",transaction_id="1448",Box="Property Management",tag="settlement_via_draw:1670"),
+    ]).to_csv(tmp_path/"ledger_canonical.csv",index=False)
+    pd.DataFrame([dict(repayment_tx_id=tid,period="2026-08",repayment_date="2026-08-20",
+        debtor=debtor,creditor=creditor,Currency="USD",repayment_amount=490,allocated_amount=490,
+        leftover_amount=0,target_debt_id=tid+"-p",target_item_type="Prestamo")
+        for tid,debtor,creditor in [("draw","PM","Primos"),("hector","Hector","MI")]]).to_csv(
+        tmp_path/"monthly_debt_repayment_detail.csv",index=False)
+    d=load_bridge(tmp_path).set_index("tx_id")
+    assert d.loc["hector","status"]=="constructive_linked"
+    assert d.loc["hector","linked_draw_tx_id"]=="draw"
+    assert d.loc["hector","cash_amount"]==""
+    assert d.loc["draw","cash_amount"]==490

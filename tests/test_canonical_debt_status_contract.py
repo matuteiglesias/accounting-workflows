@@ -253,3 +253,19 @@ def test_explicit_ars_repayment_settles_usd_without_mutating_source(tmp_path):
     alloc = pd.read_csv(debt_dir / "debt_allocations.csv")
     assert "native_ARS:53243" in alloc["repayment_tag"].iloc[0]
     assert ledger.read_bytes() == before
+
+
+def test_directed_draw_is_debt_side_only(tmp_path):
+    ledger=tmp_path/"directed.csv"
+    pd.DataFrame([
+      dict(tx_id="claim",Date="2023-01-01",amount=978.54,Currency="USD",payer="PM",receiver="Primos",Flujo="Transfer",Tipo="Prestamo",status="cerrado",Box="Property Management"),
+      dict(tx_id="direct",Date="2026-08-20",amount=500,Currency="USD",payer="PM",receiver="Primos",Flujo="Repago",Tipo="Repago",status="pagado",Box="Property Management"),
+      dict(tx_id="draw",Date="2026-08-20",amount=490,Currency="USD",payer="PM",receiver="MI",Flujo="Transfer",Tipo="Gasto",status="pagado",Box="Property Management",tag="settlement_draw_for:Primos"),
+    ]).to_csv(ledger,index=False)
+    before=ledger.read_bytes()
+    debt_dir,_=_run_debt_pipeline(ledger,tmp_path)
+    events=pd.read_csv(debt_dir/"debt_repayment_events.csv")
+    assert set(events.creditor)=={"Primos"}
+    assert abs(events.allocated_amount.sum()-978.54)<1e-8
+    assert abs(events.leftover_amount.sum()-11.46)<1e-8
+    assert ledger.read_bytes()==before
