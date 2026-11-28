@@ -227,6 +227,7 @@ make run-usd-ccl-treasury RUN_ID=<exact-run-id> RUN_ROOT=<exact-run-dir> CUTOFF_
 make run-usd-ccl-treasury-report RUN_ID=<exact-run-id> RUN_ROOT=<exact-run-dir> CUTOFF_DATE=YYYY-MM-DD
 ```
 CCL CANON weekday observations are averaged by month; only native ARS net
-flows are translated. Native USD, cash stocks and future planned rates remain
-separate. Missing or stale trailing-month rates give N/A, not zero. This is a
+flows are translated. Native USD and cash stocks remain separate. The companion also includes the
+six-month planned treasury horizon, translating future ARS flows at the last
+observed daily CCL held constant, explicitly labeled as an assumption. Missing or stale trailing-month rates give N/A, not zero. This is a
 companion artifact, not yet part of the default published report catalog.

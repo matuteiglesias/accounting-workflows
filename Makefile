@@ -395,8 +395,10 @@ run-usd-ccl-treasury-report:
 	@$(call require_var,RUN_ROOT)
 	@$(call require_var,CUTOFF_DATE)
 	@test -s "$(TREASURY_USD_CCL_OUT)/monthly_treasury_usd_ccl.csv" || (echo "ERROR: run-usd-ccl-treasury first"; exit 2)
+	@$(PY) -m accounting.management.usd_ccl_rolling --run-root "$(RUN_ROOT)" --fx-dir "$(CCL_SNAPSHOT_DIR)" --out-dir "$(TREASURY_USD_CCL_OUT)/rolling"
 	@$(PY) -m accounting.reports.treasury_usd_ccl.render \
 		--monthly "$(TREASURY_USD_CCL_OUT)/monthly_treasury_usd_ccl.csv" \
+		--rolling-path "$(TREASURY_USD_CCL_OUT)/rolling/rolling.csv" \
 		--aggregates "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_aggregates.csv" \
 		--cumulative-control "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_cumulative_control.csv" \
 		--projection-manifest "$(TREASURY_USD_CCL_OUT)/treasury_usd_ccl_reconciliation_manifest.json" \

@@ -125,7 +125,7 @@ def _html_document(monthly: pd.DataFrame, aggregates: pd.DataFrame, *, run_id: s
 def render_report(*, monthly_path: Path, aggregates_path: Path, cumulative_control_path: Path,
                   projection_manifest_path: Path, fx_manifest_path: Path, out_dir: Path,
                   run_id: str, cutoff_date: str, browser_bin: str | Path | None = None,
-                  render_pdf: bool = True) -> dict[str, Path]:
+                  render_pdf: bool = True, rolling_path: Path | None = None) -> dict[str, Path]:
     monthly = _read_projection(monthly_path, run_id=run_id, cutoff_date=cutoff_date)
     aggregates = _read_aggregates(aggregates_path, run_id=run_id, cutoff_date=cutoff_date)
     control = pd.read_csv(cumulative_control_path, dtype=str).fillna("")
@@ -137,6 +137,21 @@ def render_report(*, monthly_path: Path, aggregates_path: Path, cumulative_contr
     html_path = out_dir / "report.html"
     html_path.write_text(_html_document(monthly, aggregates, run_id=run_id, cutoff_date=cutoff_date,
                                         projection_manifest=projection_manifest, fx_manifest=fx_manifest), encoding="utf-8")
+    if rolling_path is not None:
+        rolling=pd.read_csv(rolling_path,dtype=str).fillna("")
+        policy=json.loads(rolling_path.with_suffix(".json").read_text())
+        if policy["output_sha256"]!=_sha256(rolling_path) or policy["as_of_date"][:7]!=cutoff_date[:7] or policy["observed_sha256"]!=projection_manifest["source_accountability_sha256"] or policy["daily_sha256"]!=fx_manifest["snapshot_sha256"] or policy["means_sha256"]!=projection_manifest["fx_monthly_mean_sha256"]:
+            raise TreasuryUSDCCLReportError("rolling projection provenance mismatch")
+        sections=[]
+        for box,g in rolling.groupby("Box",sort=True):
+            body=[]
+            for r in g.itertuples(index=False):
+                coverage="Sin filas planeadas" if r.coverage=="no_rows_in_plan" else ("Observado + planes" if r.cash_basis=="observed_plus_plans" else "Planeado")
+                basis="Media observada" if r.rate_basis=="observed_month_mean" else "CCL constante supuesto" if r.rate_basis=="forward_fill_last_daily" else "N/A"
+                body.append("<tr>"+ "".join("<td>"+_h(v)+"</td>" for v in (r.period,_number(r.rate),_number(r.in_usd_ccl),_number(r.out_usd_ccl),_number(r.net_usd_ccl),basis,coverage))+"</tr>")
+            sections.append("<h3>"+_h(box)+"</h3><table class='ccl-table'><thead><tr><th>Mes</th><th>CCL ARS/USD</th><th>Entradas USD/CCL</th><th>Salidas USD/CCL</th><th>Neto USD/CCL</th><th>Tipo de tasa</th><th>Base de caja</th></tr></thead><tbody>"+"".join(body)+"</tbody></table>")
+        appendix="<section class='box-section' style='padding:12px'><h2>Horizonte móvil · flujos ARS traducidos a USD/CCL</h2><p>Hasta "+_h(policy["through_date"])+". Tasa futura constante "+_h(_number(policy["last_rate"]))+" del "+_h(policy["last_rate_date"])+". No es pronóstico de mercado. Los meses sin partidas no implican ausencia de gastos reales. No incluye USD nativo.</p>"+"".join(sections)+"</section>"
+        html_path.write_text(html_path.read_text().replace("</body>",appendix+"</body>"),encoding="utf-8")
     html_text = html_path.read_text(encoding="utf-8")
     pdf_path = out_dir / "report.pdf"
     if render_pdf:
@@ -165,6 +180,8 @@ def render_report(*, monthly_path: Path, aggregates_path: Path, cumulative_contr
         "sources": [{"name": path.name, "path": str(path), "sha256": _sha256(path)} for path in [monthly_path, aggregates_path, cumulative_control_path, projection_manifest_path, fx_manifest_path]],
         "outputs": {"html": {"path": str(html_path), "sha256": _sha256(html_path)}, "validation": {"path": str(validation_path), "sha256": _sha256(validation_path)}},
     }
+    if rolling_path is not None:
+        manifest["sources"].extend({"name":p.name,"path":str(p),"sha256":_sha256(p)} for p in (rolling_path,rolling_path.with_suffix(".json")))
     if render_pdf:
         manifest["outputs"]["pdf"] = {"path": str(pdf_path), "sha256": _sha256(pdf_path)}
     manifest_path = out_dir / "report_manifest.json"
@@ -180,10 +197,11 @@ def main() -> int:
     parser.add_argument("--cumulative-control", required=True, type=Path); parser.add_argument("--projection-manifest", required=True, type=Path)
     parser.add_argument("--fx-manifest", required=True, type=Path); parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--run-id", required=True); parser.add_argument("--cutoff-date", required=True); parser.add_argument("--browser-bin")
+    parser.add_argument("--rolling-path",type=Path)
     args = parser.parse_args()
     outputs = render_report(monthly_path=args.monthly, aggregates_path=args.aggregates, cumulative_control_path=args.cumulative_control,
                             projection_manifest_path=args.projection_manifest, fx_manifest_path=args.fx_manifest, out_dir=args.out_dir,
-                            run_id=args.run_id, cutoff_date=args.cutoff_date, browser_bin=args.browser_bin)
+                            run_id=args.run_id, cutoff_date=args.cutoff_date, browser_bin=args.browser_bin, rolling_path=args.rolling_path)
     for name, path in outputs.items(): print(f"{name}={path}")
     return 0
 
