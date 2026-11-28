@@ -387,7 +387,7 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         )
         + '<div class="page-grid"><div class="span-7">'
         + _table("Puente de aplicación · ARS", periods, model["application"]["bridge_ars"])
-        + '<p class="caveat">Dividendos se muestran como categoría separada y no se restan una segunda vez del resultado post-retiros.</p></div>'
+        + '<p class="caveat">Los aportes por actor desglosan el total; los subgrupos de inquilinos y los pagos de MI por Household son subconjuntos, no aportes adicionales. Los dividendos no se restan dos veces.</p></div>'
         + '<div class="span-5">'
         + _table("Puente de aplicación · USD", periods, model["application"]["bridge_usd"], compact=True)
         + '</div>'
@@ -395,6 +395,9 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + _table("Aportes y financiación por actor · ARS", periods, model["application"]["funding"], compact=True)
         + (_table("Aportes y financiación por actor · USD", periods, model["application"]["funding_usd"], compact=True) if model["application"]["funding_usd"] else "")
         + '</div><div class="span-5">'
+        + (_table("Gastos por circuito de pago · ARS", periods, model["application"]["expense_ars"], compact=True)
+           + '<p class="caveat">Distribución del OPEX por circuito de pago, no aportes nuevos. FB y PM pueden aplicar fondos de terceros; no sumar estas filas al puente de financiación.</p>' if model["application"]["expense_ars"] else "")
+        + (_table("Gastos por circuito de pago · USD", periods, model["application"]["expense_usd"], compact=True) if model["application"]["expense_usd"] else "")
         + _table("Distribuciones ARS", periods, model["application"]["distributions_ars"], compact=True)
         + _table("Distribuciones USD", periods, model["application"]["distributions_usd"], compact=True)
         + '</div><div class="span-12">'
@@ -567,20 +570,34 @@ def build_report_model(
         portfolio.append({"label": label, "value": cell.display, "share": share})
 
     def application_bridge(currency):
-        specs = [
-            ("Resultado operativo","IS.NET.OPERATING"),
-            ("+ Aportes y financiación","FUND.ECONOMIC.TOTAL"),
-            ("de los aportes: directos inquilinos","FUND.ECONOMIC.DIRECT_TENANT"),
-            ("de los aportes: otros pagos directos","FUND.ECONOMIC.DIRECT_OTHER"),
-            ("+ Recuperos ligados a distribución","FUND.ECONOMIC.LINKED_RECOVERY"),
-            ("− Retiros y distribuciones","DIST.DRAWS.PERSONAL"),
-            ("de los retiros: dividendos","DIST.DIVIDENDS"),
-            ("= Resultado post-retiros (cobertura)","COV.RESOURCE.AFTER_DRAWS"),
-            ("Tasa de cobertura","COV.RESOURCE.RATIO"),
-        ]
-        return [{"label":label,"metric_id":mid,"currency":currency,
-                 "format":"fraction" if mid.endswith(".RATIO") else "money",
-                 "indent":1 if label.startswith("de los") else 0} for label,mid in specs]
+        def spec(label, mid, **kwargs):
+            return dict(label=label,metric_id=mid,currency=currency,**kwargs)
+        rows = [spec("Resultado operativo","IS.NET.OPERATING"),
+                spec("+ Aportes y financiación","FUND.ECONOMIC.TOTAL")]
+        available = store.metrics.loc[store.metrics.metric_id.eq("FUND.ECONOMIC.BY_ACTOR")
+                                      & store.metrics.Currency.eq(currency)]
+        observed = set(available.dimension_value)-{""}
+        actors = [x for x in FUNDING_ACTORS if x in observed] + sorted(observed-set(FUNDING_ACTORS))
+        for actor in actors:
+            rows.append(spec("de: "+("Héctor / Silvina" if actor=="Héctor" else actor),
+                "FUND.ECONOMIC.BY_ACTOR",dimension_name="funding_actor",dimension_value=actor,
+                missing_policy="zero",indent=1))
+            if actor=="Inquilino":
+                detail = store.metrics.loc[store.metrics.metric_id.eq("FUND.ECONOMIC.TENANT_DETAIL") & store.metrics.Currency.eq(currency)]
+                # Stable labels across years. Source explicitly identifies two
+                # named large contributors; all other funding remains in Otros.
+                for tenant in ["Chino Juan","Vidriero","Otros inquilinos"]:
+                    if tenant in set(detail.dimension_value):
+                        rows.append(spec("   "+tenant,"FUND.ECONOMIC.TENANT_DETAIL",
+                            dimension_name="tenant_actor",dimension_value=tenant,missing_policy="zero",indent=2))
+            if actor=="Household" and not store.metrics.loc[store.metrics.metric_id.eq("FUND.ECONOMIC.HH.PAID_BY_MI") & store.metrics.Currency.eq(currency)].empty:
+                rows.append(spec("   de Household: pagado por MI","FUND.ECONOMIC.HH.PAID_BY_MI",missing_policy="zero",indent=2))
+        rows += [spec("+ Recuperos ligados a distribución","FUND.ECONOMIC.LINKED_RECOVERY"),
+                 spec("− Retiros y distribuciones","DIST.DRAWS.PERSONAL"),
+                 spec("de los retiros: dividendos","DIST.DIVIDENDS",indent=1),
+                 spec("= Resultado post-retiros (cobertura)","COV.RESOURCE.AFTER_DRAWS"),
+                 spec("Tasa de cobertura","COV.RESOURCE.RATIO",format="fraction")]
+        return rows
     bridge_ars = application_bridge("ARS")
     bridge_usd = application_bridge("USD")
     # Dynamic long tail: never omit contributors outside the named cohort.
@@ -597,6 +614,15 @@ def build_report_model(
                      missing_policy="zero") for actor in actors]
     funding = funding_specs("ARS")
     funding_usd = funding_specs("USD")
+    def expense_specs(currency):
+        data = store.metrics.loc[store.metrics.metric_id.eq("OPEX.PAID.BY_CIRCUIT") & store.metrics.Currency.eq(currency)]
+        observed=set(data.dimension_value)-{""}
+        ordered=["FB","PM","Primos","Alejandro","Matías","Héctor / Silvina","Household","Inquilinos"]
+        return [dict(label=actor,metric_id="OPEX.PAID.BY_CIRCUIT",currency=currency,
+                     dimension_name="expense_source",dimension_value=actor,missing_policy="zero")
+                for actor in [x for x in ordered if x in observed]+sorted(observed-set(ordered))]
+    expense_ars=expense_specs("ARS")
+    expense_usd=expense_specs("USD")
     distributions_ars = [
         {"label": "Retiros personales ARS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
         {"label": "Dividendos ARS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
@@ -728,6 +754,8 @@ def build_report_model(
             "bridge_usd": _rows(store, bridge_usd, periods, "application", "bridge_usd"),
             "funding": _rows(store, funding, periods, "application", "funding"),
             "funding_usd": _rows(store, funding_usd, periods, "application", "funding_usd"),
+            "expense_ars": _rows(store, expense_ars, periods, "application", "expense_ars"),
+            "expense_usd": _rows(store, expense_usd, periods, "application", "expense_usd"),
             "distributions_ars": _rows(store, distributions_ars, periods, "application", "dist_ars"),
             "distributions_usd": _rows(store, distributions_usd, periods, "application", "dist_usd"),
         },

@@ -309,6 +309,47 @@ def build_annual_balance_dashboard(
                 "annual flow = sum unique funding transaction amounts",run_id,as_of_date,
                 dim_name="funding_actor",dim_value=actor,suit="safe_with_caveat",
                 caveat="Includes designated advances and direct payments, excludes debt settlements and pending clearing."))
+        # Non-additive provenance subset: MI physically paid on behalf of HH.
+        # Retain HH as economic contributor; never add this subset to funding.
+        audit = pd.read_csv(run_root / "classification_audit.csv", keep_default_na=False)
+        tags = audit.set_index("tx_id").tag if "tag" in audit else pd.Series(dtype=str)
+        physical = fund.loc[fund.funding_actor.eq("Household") &
+            fund.tx_id.map(tags).fillna("").str.contains(r"(?:^|;)physical_payer:MI(?:;|$)",regex=True)]
+        for (period,currency), amount in physical.groupby(["period","Currency"]).amount.sum().items():
+            additions.append(_legacy._base("FUND.ECONOMIC.HH.PAID_BY_MI",period,currency,amount,"available",
+                "flow","economic_funding","2. Funding and distributions",RESOURCE_MEMBERS,
+                "Household economic funding explicitly tagged physical_payer:MI",
+                "non-additive subset of Household funding",run_id,as_of_date,suit="safe_with_caveat",
+                caveat="Physical payment origin; already included in Household contribution, not additional funding."))
+        # Named tenant support is a partition of Inquilino, not an extra inflow.
+        tenant = fund.loc[fund.funding_actor.eq("Inquilino")].copy()
+        tenant["tenant"] = tenant.tx_id.map(tags).fillna("").str.extract(
+            r"(?:^|;)tenant_support_actor:([^;]+)(?:;|$)",expand=False).fillna("Otros inquilinos")
+        for (period,currency,actor), value in tenant.groupby(["period","Currency","tenant"]).amount.sum().items():
+            additions.append(_legacy._base("FUND.ECONOMIC.TENANT_DETAIL",period,currency,value,"available",
+                "flow","economic_funding","2. Funding and distributions",RESOURCE_MEMBERS,
+                "explicit tenant_support_actor marker; remaining tenant funding retained",
+                "non-additive breakdown of Inquilino",run_id,as_of_date,suit="safe_with_caveat",
+                dim_name="tenant_actor",dim_value=actor,caveat="Tenant funding only; rental revenue excluded."))
+        # Expense execution is a separate partition of OPEX. Explicit source
+        # attribution takes precedence over the payment operator, preserving
+        # both in the original ledger and not creating a fresh contribution.
+        expenses = audit.loc[audit.semantic_bucket.eq("property_opex") & audit.direction.eq("out")].copy()
+        expenses["period"] = expenses.period.astype(str).str[:4]
+        overrides = expenses.get("tag",pd.Series("",index=expenses.index)).fillna("").str.extract(
+            r"(?:^|;)expense_source:([^;]+)(?:;|$)",expand=False)
+        aliases = {"MI":"Matías","INQ":"Inquilinos","HECTOR":"Héctor / Silvina","HÉCTOR":"Héctor / Silvina",
+                   "HH":"Household","FERNANDO":"Primos","FB":"FB","PM":"PM"}
+        expenses["source_actor"] = overrides.fillna(expenses.payer).map(
+            lambda x: aliases.get(str(x).upper(),str(x) or "Sin identificar"))
+        expenses["amount"] = pd.to_numeric(expenses.amount,errors="raise")
+        for (period,currency,actor), value in expenses.groupby(["period","Currency","source_actor"]).amount.sum().items():
+            additions.append(_legacy._base("OPEX.PAID.BY_CIRCUIT",period,currency,value,"available",
+                "flow","property_opex","2. Funding and distributions","classification_audit.csv",
+                "paid OPEX by explicit expense_source or recorded payer",
+                "sum unique expense rows; separate from funding",run_id,as_of_date,suit="safe_with_caveat",
+                dim_name="expense_source",dim_value=actor,
+                caveat="Payment attribution; Box-funded expenses may include third-party advances. Do not add to funding or infer legal liability."))
         metrics = pd.concat([metrics,pd.DataFrame(additions,columns=_legacy.ANNUAL_METRICS_COLUMNS)],ignore_index=True)
     cash_rewritten = bridge is not None
 

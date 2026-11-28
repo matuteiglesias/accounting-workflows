@@ -40,7 +40,11 @@ def build_resource_bridge(audit: pd.DataFrame, pairs: pd.DataFrame | None = None
     known = a.get("cash_effect", pd.Series("", index=a.index)).isin(
         ["no_cash_in_box_direct_payment","no_cash_out_box_direct_payment"])
     direct_tenant = direct & payer.eq("INQ")
-    direct_other = direct & ~payer.eq("INQ") & known
+    # Funds already held by a Box are not fresh external funding, even
+    # when a person executes the payment on that Box's behalf.
+    tags = a.get("tag", pd.Series("", index=a.index)).fillna("").astype(str)
+    box_funded = tags.str.contains(r"(?:^|;)expense_source:(?:FB|PM)(?:;|$)", regex=True)
+    direct_other = direct & ~payer.eq("INQ") & known & ~box_funded
     masks = {"contribution": core & ~designated & ~clearing,
              "designated_advance": designated, "direct_tenant_support": direct_tenant,
              "direct_other_support": direct_other,

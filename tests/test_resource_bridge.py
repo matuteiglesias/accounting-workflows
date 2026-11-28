@@ -88,3 +88,13 @@ def test_named_direct_support_and_long_tail_count_once():
     assert monthly.economic_funding.item()==170
     assert monthly.direct_other_support.item()==50
     assert m.groupby("funding_actor").amount.sum().to_dict()=={"Matías":100,"Héctor":50,"Alen":20}
+
+
+def test_box_financed_direct_payment_is_not_fresh_personal_funding():
+    a=pd.DataFrame([dict(tx_id="a",period="2026-01",Currency="ARS",Box="Family Business",
+        payer="Alejandro",receiver="Impuestos",Flujo="Pagos",Tipo="Impuestos",
+        semantic_bucket="property_opex",semantic_subbucket="taxes",direction="out",
+        amount=100,cash_effect="no_cash_in_box_direct_payment",tag="expense_source:FB;payment_operator:Alejandro")])
+    monthly,members=build_resource_bridge(a)
+    assert monthly.economic_funding.item()==0
+    assert members.empty
