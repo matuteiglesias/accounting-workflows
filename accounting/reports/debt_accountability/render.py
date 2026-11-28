@@ -23,7 +23,11 @@ def _n(value: Any) -> float:
 
 
 def _money(value: Any, currency: str = "USD") -> str:
+    if value is None or pd.isna(value):
+        return "No disponible"
     number = _n(value)
+    if number == 0:
+        return "-"
     rendered = f"{abs(number):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{'−' if number < 0 else ''}{currency} {rendered}"
 

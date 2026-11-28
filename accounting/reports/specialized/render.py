@@ -17,6 +17,10 @@ TOLERANCE = 0.01
 
 
 def _money(value: float, currency: str) -> str:
+    if value is None or pd.isna(value):
+        return "No disponible"
+    if value == 0:
+        return "-"
     return f"{currency} {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 

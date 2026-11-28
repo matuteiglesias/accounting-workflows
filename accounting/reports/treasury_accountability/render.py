@@ -40,7 +40,7 @@ def _fmt_num(value: object, *, zero_dash: bool = True) -> str:
         return "No disponible"
     number = float(value)
     if abs(number) < 0.005:
-        return "—" if zero_dash else "0"
+        return "-" if zero_dash else "0"
     negative = number < 0
     number = abs(number)
     if abs(number - round(number)) < 0.005:
@@ -236,7 +236,7 @@ def _table_html(group: pd.DataFrame, *, projection_start_period: str | None = No
         parts.append(f'<tr class="{row_class}"><td class="month">{_h(row["period"])}</td>')
         for col in flat_cols:
             value = row.get(col, 0)
-            display = _fmt_num(value, zero_dash=col not in {"opening_control", "closing_control"})
+            display = _fmt_num(value)
             classes = []
             if col in first_of_group:
                 classes.append("group-divider")

@@ -94,6 +94,8 @@ class MetricStore:
             "available", "ok", "pass", "structural_zero",
         }:
             return "No disponible"
+        if float(value) == 0:
+            return "-"
         if fmt in {"ratio", "fraction"}:
             pct = float(value) * 100.0 if fmt == "fraction" or abs(float(value)) <= 10 else float(value)
             return f"{pct:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -537,7 +539,7 @@ def build_report_model(
                 fmt=spec.get("format","money"),
                 track={"page_id":"summary","component_id":component,"row_id":spec["label"]})
             label = currency + " " if spec.get("format") == "fraction" or cell.value is None else ""
-            vals.append(label + cell.display)
+            vals.append("-" if cell.display == "-" else label + cell.display)
         return vals
 
     kpis = [{"label": spec["label"], "values": summary_cells(spec,last,"kpis")}

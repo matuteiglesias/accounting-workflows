@@ -43,10 +43,12 @@ ACCOUNTABILITY_REQUIRED = {
 
 
 def _money(value: Any) -> str:
-    number = float(pd.to_numeric(pd.Series([value]), errors="coerce").fillna(0.0).iloc[0])
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number):
+        return "No disponible"
     text = f"{abs(number):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    if abs(number) <= TOLERANCE:
-        return "0,00"
+    if number == 0:
+        return "-"
     return f"-{text}" if number < 0 else text
 
 
