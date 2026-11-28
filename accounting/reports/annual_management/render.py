@@ -398,6 +398,8 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + (_table("Gastos por circuito de pago · ARS", periods, model["application"]["expense_ars"], compact=True)
            + '<p class="caveat">Distribución del OPEX por circuito de pago, no aportes nuevos. FB y PM pueden aplicar fondos de terceros; no sumar estas filas al puente de financiación.</p>' if model["application"]["expense_ars"] else "")
         + (_table("Gastos por circuito de pago · USD", periods, model["application"]["expense_usd"], compact=True) if model["application"]["expense_usd"] else "")
+        + (_table("OPEX por financiación identificada / circuito residual · ARS", periods, model["application"]["funded_ars"], compact=True) + '<p class="caveat">Aportes vinculados al gasto; el remanente conserva el circuito. No sumar a gastos por circuito ni a aportes.</p>' if model["application"].get("funded_ars") else "")
+        + (_table("OPEX por financiación identificada / circuito residual · USD", periods, model["application"]["funded_usd"], compact=True) if model["application"].get("funded_usd") else "")
         + _table("Distribuciones ARS", periods, model["application"]["distributions_ars"], compact=True)
         + _table("Distribuciones USD", periods, model["application"]["distributions_usd"], compact=True)
         + '</div><div class="span-12">'
@@ -590,8 +592,6 @@ def build_report_model(
                     if tenant in set(detail.dimension_value):
                         rows.append(spec("   "+tenant,"FUND.ECONOMIC.TENANT_DETAIL",
                             dimension_name="tenant_actor",dimension_value=tenant,missing_policy="zero",indent=2))
-            if actor=="Household" and not store.metrics.loc[store.metrics.metric_id.eq("FUND.ECONOMIC.HH.PAID_BY_MI") & store.metrics.Currency.eq(currency)].empty:
-                rows.append(spec("   de Household: pagado por MI","FUND.ECONOMIC.HH.PAID_BY_MI",missing_policy="zero",indent=2))
         rows += [spec("+ Recuperos ligados a distribución","FUND.ECONOMIC.LINKED_RECOVERY"),
                  spec("− Retiros y distribuciones","DIST.DRAWS.PERSONAL"),
                  spec("de los retiros: dividendos","DIST.DIVIDENDS",indent=1),
@@ -614,15 +614,17 @@ def build_report_model(
                      missing_policy="zero") for actor in actors]
     funding = funding_specs("ARS")
     funding_usd = funding_specs("USD")
-    def expense_specs(currency):
-        data = store.metrics.loc[store.metrics.metric_id.eq("OPEX.PAID.BY_CIRCUIT") & store.metrics.Currency.eq(currency)]
+    def expense_specs(currency,metric_id="OPEX.PAID.BY_CIRCUIT",dimension_name="expense_source"):
+        data = store.metrics.loc[store.metrics.metric_id.eq(metric_id) & store.metrics.Currency.eq(currency)]
         observed=set(data.dimension_value)-{""}
         ordered=["FB","PM","Primos","Alejandro","Matías","Héctor / Silvina","Household","Inquilinos"]
-        return [dict(label=actor,metric_id="OPEX.PAID.BY_CIRCUIT",currency=currency,
-                     dimension_name="expense_source",dimension_value=actor,missing_policy="zero")
+        return [dict(label=actor,metric_id=metric_id,currency=currency,
+                     dimension_name=dimension_name,dimension_value=actor,missing_policy="zero")
                 for actor in [x for x in ordered if x in observed]+sorted(observed-set(ordered))]
     expense_ars=expense_specs("ARS")
     expense_usd=expense_specs("USD")
+    funded_ars=expense_specs("ARS","OPEX.FUNDED.BY_SOURCE","funding_source")
+    funded_usd=expense_specs("USD","OPEX.FUNDED.BY_SOURCE","funding_source")
     distributions_ars = [
         {"label": "Retiros personales ARS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
         {"label": "Dividendos ARS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
@@ -756,6 +758,8 @@ def build_report_model(
             "funding_usd": _rows(store, funding_usd, periods, "application", "funding_usd"),
             "expense_ars": _rows(store, expense_ars, periods, "application", "expense_ars"),
             "expense_usd": _rows(store, expense_usd, periods, "application", "expense_usd"),
+            "funded_ars": _rows(store, funded_ars, periods, "application", "funded_ars"),
+            "funded_usd": _rows(store, funded_usd, periods, "application", "funded_usd"),
             "distributions_ars": _rows(store, distributions_ars, periods, "application", "dist_ars"),
             "distributions_usd": _rows(store, distributions_usd, periods, "application", "dist_usd"),
         },

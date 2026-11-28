@@ -350,6 +350,21 @@ def build_annual_balance_dashboard(
                 "sum unique expense rows; separate from funding",run_id,as_of_date,suit="safe_with_caveat",
                 dim_name="expense_source",dim_value=actor,
                 caveat="Payment attribution; Box-funded expenses may include third-party advances. Do not add to funding or infer legal liability."))
+        from accounting.metrics.expense_funding import partition
+        ledger_path=run_root/"ledger_canonical.csv"
+        if ledger_path.exists():
+            ledger=pd.read_csv(ledger_path,keep_default_na=False,dtype={"transaction_id":str})
+            allocation=partition(audit,ledger,members)
+            allocation.to_csv(metrics_dir/"expense_funding_membership.csv",index=False)
+            paths["expense_funding_membership"]=metrics_dir/"expense_funding_membership.csv"
+            allocation["year"]=allocation.period.astype(str).str[:4]
+            for (period,currency,actor), value in allocation.groupby(["year","Currency","funding_source"]).amount.sum().items():
+                additions.append(_legacy._base("OPEX.FUNDED.BY_SOURCE",period,currency,value,"available",
+                    "flow","property_opex","2. Funding and distributions","expense_funding_membership.csv",
+                    "explicit linked contributions; unallocated remainder attributed to payment circuit",
+                    "sum of conserved expense portions; no double funding",run_id,as_of_date,suit="safe_with_caveat",
+                    dim_name="funding_source",dim_value=actor,
+                    caveat="Identified financing source or residual payment circuit; not ultimate personal liability. Nonadditive to OPEX circuit or funding totals."))
         metrics = pd.concat([metrics,pd.DataFrame(additions,columns=_legacy.ANNUAL_METRICS_COLUMNS)],ignore_index=True)
     cash_rewritten = bridge is not None
 
