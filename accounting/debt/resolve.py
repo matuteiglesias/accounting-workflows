@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
@@ -228,6 +229,30 @@ def load_debt_ledger(args: argparse.Namespace) -> pd.DataFrame:
 
     if args.exclude_household and "Box" in df.columns:
         df = df.loc[df["Box"].astype(str).str.strip().str.lower() != "household"].copy()
+
+    # Explicit source instruction: a native ARS repayment settles a USD
+    # obligation at the ledger's recorded CCL. Only this debt-resolution
+    # copy is converted; canonical treasury remains native ARS.
+    tags = df.get("tag", pd.Series("", index=df.index)).fillna("").astype(str)
+    converted = tags.str.contains(r"(?:^|;)repay_usd_at_ccl(?:;|$)", regex=True)
+    for idx in df.index[converted]:
+        row = df.loc[idx]
+        if row["Currency"].upper() != "ARS" or row["Tipo"] != "Repago" or row["status"] != "pagado":
+            raise ValueError("repay_usd_at_ccl requires a paid ARS repayment")
+        try:
+            amount = Decimal(str(row["amount"]))
+            rate = Decimal(str(row.get("CCL", "")))
+            if not amount.is_finite() or not rate.is_finite() or amount <= 0 or rate <= 0:
+                raise ValueError("invalid native amount or CCL")
+            usd = (amount / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if usd <= 0:
+                raise ValueError("converted repayment rounds to zero")
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError(f"Invalid explicit USD repayment conversion for {row['tx_id']}") from exc
+        df.at[idx, "Currency"] = "USD"
+        df.at[idx, "amount"] = float(usd)
+        # Allocation output already carries repayment_tag and source identity.
+        df.at[idx, "tag"] = f"{tags.loc[idx]};native_ARS:{amount};CCL:{rate}"
 
     allowed_currencies = _parse_list_arg(args.currencies)
     if allowed_currencies:

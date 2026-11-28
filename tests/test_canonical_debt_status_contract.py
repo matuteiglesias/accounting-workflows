@@ -231,3 +231,25 @@ def test_planned_principal_and_interest_do_not_create_historical_debt(tmp_path):
     items = pd.read_csv(debt_dir / "debt_open_items.csv")
     assert items["source_tx_id"].tolist() == ["recognized"]
     assert items["open_amount"].sum() == 100
+
+
+def test_explicit_ars_repayment_settles_usd_without_mutating_source(tmp_path):
+    ledger = tmp_path / "explicit_fx.csv"
+    common = {"payer": "PM", "receiver": "MI", "Box": "Property Management"}
+    pd.DataFrame([
+        dict(common, tx_id="loan", Date="2024-01-01", amount=100, Currency="USD",
+             Flujo="Transfer", Tipo="Prestamo", status="abierto"),
+        dict(common, tx_id="converted", Date="2024-06-01", amount=53243, Currency="ARS",
+             Flujo="Transfer", Tipo="Repago", status="pagado", CCL=1090.83, tag="repay_usd_at_ccl"),
+        dict(common, tx_id="unmarked", Date="2024-06-02", amount=1000, Currency="ARS",
+             Flujo="Transfer", Tipo="Repago", status="pagado", CCL=1000),
+    ]).to_csv(ledger, index=False)
+    before = ledger.read_bytes()
+    debt_dir, _ = _run_debt_pipeline(ledger, tmp_path)
+    events = pd.read_csv(debt_dir / "debt_repayment_events.csv")
+    assert events["repayment_tx_id"].tolist() == ["converted"]
+    assert events["repayment_amount"].tolist() == [48.81]
+    assert abs(pd.read_csv(debt_dir / "debt_open_items.csv")["open_amount"].sum() - 51.19) < 1e-8
+    alloc = pd.read_csv(debt_dir / "debt_allocations.csv")
+    assert "native_ARS:53243" in alloc["repayment_tag"].iloc[0]
+    assert ledger.read_bytes() == before
