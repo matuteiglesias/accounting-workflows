@@ -303,6 +303,16 @@ def artifact_contract_for_name(name: str, relpath: str = "") -> Dict[str, str]:
             "source_authority": "source_of_truth_for_debt_activity",
             "notes": "Canonical debt movement wrapper; use for debt activity, not closing debt stock.",
         }
+    if key == "treasury_debt_repayment_bridge.csv":
+        return {
+            "artifact_role": "diagnostic",
+            "accounting_nature": "transaction",
+            "grain": "tx",
+            "currency_policy": "no_cross_currency_sum",
+            "frontend_suitability": "internal_only",
+            "source_authority": "diagnostic_only",
+            "notes": "Event-level native cash and debt allocations; never sum across currencies.",
+        }
     if key == "monthly_debt_repayment_detail.csv":
         return {
             "artifact_role": "canonical_source",

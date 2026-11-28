@@ -63,6 +63,12 @@ def test_accountability_is_native_currency_and_reconciles(tmp_path):
         ]
     ).to_csv(tmp_path / "monthly_debt_activity.csv", index=False)
 
+    # A monthly aggregate alone is not repayment lineage.
+    pd.DataFrame([dict(period="2026-05", repayment_tx_id="repay_usd",
+        repayment_date="2026-05-05", debtor="PM", creditor="MI", Currency="USD",
+        repayment_amount=100, allocated_amount=100, leftover_amount=0,
+        target_debt_id="principal:1", target_item_type="Prestamo")]).to_csv(
+            tmp_path / "monthly_debt_repayment_detail.csv", index=False)
     paths = build_monthly_cash_accountability(tmp_path)
     out = pd.read_csv(paths["monthly_cash_accountability"])
     assert set(out["Currency"]) == {"ARS", "USD"}

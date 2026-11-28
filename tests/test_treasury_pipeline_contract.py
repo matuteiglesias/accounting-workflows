@@ -49,3 +49,11 @@ def test_treasury_contract_does_not_move_accounting_logic_into_reports():
     ).read_text(encoding="utf-8")
     assert "Economic attribution does not imply cash movement" in design
     assert "No HTML/report logic" in design
+
+
+def test_repayment_bridge_contract_is_private_and_separates_currencies():
+    bridge = artifact_contract_for_name("treasury_debt_repayment_bridge.csv")
+    assert bridge["artifact_role"] == "diagnostic"
+    assert bridge["currency_policy"] == "no_cross_currency_sum"
+    assert bridge["frontend_suitability"] == "internal_only"
+    assert bridge["source_authority"] == "diagnostic_only"

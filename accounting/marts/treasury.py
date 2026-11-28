@@ -15,6 +15,7 @@ import pandas as pd
 
 from accounting.cutoff import load_run_cutoff_if_present
 from accounting.marts.treasury_transaction_detail import write_treasury_transaction_detail
+from accounting.marts.treasury_debt_bridge import load_bridge, COLUMNS as BRIDGE_COLUMNS
 from accounting.artifacts.producer_provenance import register_mart_outputs
 
 
@@ -709,36 +710,27 @@ def build_monthly_cash_accountability(
     # Validated account snapshots and anchor diagnostics are intentionally not
     # part of this producer contract.
     out = out.sort_values(["Box", "Currency", "period"]).reset_index(drop=True)
-    debt_path = run_root / "monthly_debt_activity.csv"
-    debt = pd.read_csv(debt_path) if debt_path.exists() else pd.DataFrame()
-    if not debt.empty:
-        debt["repayments"] = pd.to_numeric(debt["repayments"], errors="coerce").fillna(0.0)
-        repayment = debt.loc[debt["activity_type"].astype(str).eq("repayment")].copy()
-        debt_repayments = (
-            repayment.groupby(["period", "debtor", "Currency"], dropna=False, as_index=False)["repayments"]
-            .sum()
-        )
-        coverage = set(zip(debt["debtor"].astype(str), debt["Currency"].astype(str)))
-    else:
-        debt_repayments = pd.DataFrame(columns=["period", "debtor", "Currency", "repayments"])
-        coverage = set()
-
+    bridge = load_bridge(run_root)
+    bridge_path = run_root / "treasury_debt_repayment_bridge.csv"
     engine_vals = []
     for _, row in out.iterrows():
-        pair = (_text(row["Box"]), _text(row["Currency"]))
-        if pair not in coverage:
+        if bridge is None:
             engine_vals.append((pd.NA, pd.NA, "unavailable"))
             continue
-        match = debt_repayments.loc[
-            debt_repayments["period"].astype(str).eq(_text(row["period"]))
-            & debt_repayments["debtor"].astype(str).eq(_text(row["Box"]))
-            & debt_repayments["Currency"].astype(str).eq(_text(row["Currency"]))
+        # These legacy columns now compare outgoing native cash to event
+        # coverage in native units, NOT USD principal reduction.
+        matched = bridge.loc[
+            bridge.period.eq(row["period"]) & bridge.Box.eq(row["Box"])
+            & bridge.cash_currency.eq(row["Currency"]) & bridge.cash_direction.eq("out")
         ]
-        engine = float(match["repayments"].sum()) if not match.empty else 0.0
+        engine = float(matched.matched_native_cash.sum()) if not matched.empty else 0.0
         gap = float(row["debt_repayments_out"]) - engine
-        engine_vals.append(
-            (engine, gap, "reconciled" if abs(gap) <= tolerance else "residual")
-        )
+        # Incoming events and allocation residuals are visible at bridge grain.
+        lane = bridge.loc[bridge.period.eq(row["period"]) & bridge.Box.eq(row["Box"])
+                          & bridge.cash_currency.eq(row["Currency"])]
+        review = lane.status.isin(["cash_only","mismatch","partial"]).any()
+        engine_vals.append((engine, gap, "reconciled" if abs(gap)<=tolerance and not review else "residual"))
+    (bridge if bridge is not None else pd.DataFrame(columns=BRIDGE_COLUMNS)).to_csv(bridge_path,index=False)
     out["debt_engine_repayments"] = [v[0] for v in engine_vals]
     out["debt_repayment_gap"] = [v[1] for v in engine_vals]
     out["debt_reconciliation_status"] = [v[2] for v in engine_vals]
@@ -759,6 +751,15 @@ def build_monthly_cash_accountability(
             "detail": "zero-origin inferred control only; not validated liquidity",
         },
     ]
+    if bridge is not None:
+        for _, event in bridge.loc[~bridge.status.eq("matched")].iterrows():
+            qa_rows.append({
+                "check": "treasury_debt_event_" + event.status,
+                "period": event.period, "Box": event.Box, "Currency": event.debt_currency or event.cash_currency,
+                "amount": event.unallocated if event.status == "partial" else pd.NA,
+                "status": "warn", "severity": "warning",
+                "detail": event.note,
+            })
     for _, row in out.iterrows():
         unknown = float(row["unknown_cash_in"]) + float(row["unknown_cash_out"])
         if abs(unknown) > tolerance:
@@ -781,7 +782,7 @@ def build_monthly_cash_accountability(
                 "check": "cash_debt_repayment_matches_debt_engine",
                 "period": row["period"], "Box": row["Box"], "Currency": row["Currency"],
                 "amount": row["debt_repayment_gap"], "status": "warn", "severity": "warning",
-                "detail": "cash says money moved; debt engine says how much was allocated",
+                "detail": "native outgoing cash event coverage or allocation exception; see transaction bridge",
             })
     out = out[ACCOUNTABILITY_COLUMNS].sort_values(
         ["period", "Box", "Currency"]
@@ -793,6 +794,7 @@ def build_monthly_cash_accountability(
     return {
         "monthly_cash_accountability": accountability_path,
         "monthly_cash_accountability_qa": qa_path,
+        "treasury_debt_repayment_bridge": bridge_path,
     }
 
 
