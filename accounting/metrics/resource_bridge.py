@@ -12,7 +12,7 @@ from accounting.cutoff import load_run_cutoff_if_present
 
 SOURCE = "monthly_resource_bridge.csv"
 MEMBERS = "resource_bridge_membership.csv"
-COMPONENTS = ("contribution", "designated_advance", "direct_tenant_support", "clearing_pending", "linked_debt_recovery")
+COMPONENTS = ("contribution", "designated_advance", "direct_tenant_support", "direct_other_support", "clearing_pending", "linked_debt_recovery")
 BOXES = {"Family Business": "FB", "Property Management": "PM"}
 
 def build_resource_bridge(audit: pd.DataFrame, pairs: pd.DataFrame | None = None,
@@ -31,11 +31,19 @@ def build_resource_bridge(audit: pd.DataFrame, pairs: pd.DataFrame | None = None
             receiver.eq(owner) & ~payer.isin(["", "FB", "PM", "FX"]))
     designated = core & a.semantic_subbucket.eq("designated_expense")
     clearing = core & a.Tipo.str.casefold().eq("repago")
+    # Direct external tax/service payment counts once, alongside its OPEX.
+    # Do not count funding/expense mirror pairs, ordinary Box expenses or debt.
     direct = (a.semantic_bucket.eq("property_opex") & a.direction.eq("out") &
-              a.semantic_subbucket.isin(["taxes","services"]) & payer.eq("INQ") &
+              a.semantic_subbucket.isin(["taxes","services"]) &
+              ~payer.isin(["","FB","PM","FX"]) &
               ~receiver.isin(["FB","PM","HH","INQ",""]))
+    known = a.get("cash_effect", pd.Series("", index=a.index)).isin(
+        ["no_cash_in_box_direct_payment","no_cash_out_box_direct_payment"])
+    direct_tenant = direct & payer.eq("INQ")
+    direct_other = direct & ~payer.eq("INQ") & known
     masks = {"contribution": core & ~designated & ~clearing,
-             "designated_advance": designated, "direct_tenant_support": direct,
+             "designated_advance": designated, "direct_tenant_support": direct_tenant,
+             "direct_other_support": direct_other,
              "clearing_pending": clearing}
     members=[]
     for name, mask in masks.items():
@@ -59,6 +67,13 @@ def build_resource_bridge(audit: pd.DataFrame, pairs: pd.DataFrame | None = None
                 raise ValueError("linked recovery not fully allocated by debt engine")
             members.append((pair.recovery_tx_id,inc.period,inc.Currency,inc.Box,"linked_debt_recovery",inc.amount,pair.distribution_tx_id))
     m=pd.DataFrame(members,columns=["tx_id","period","Currency","Box","component","amount","linked_distribution_tx_id"])
+    actor_map = {"MI":"Matías","MATIAS":"Matías","MATÍAS":"Matías","INQ":"Inquilino",
+                 "HECTOR":"Héctor","HÉCTOR":"Héctor","PRIMOS":"Primos","ALEJANDRO":"Alejandro",
+                 "HH":"Household"}
+    def actor_of(row):
+        raw = str(row.payer).strip()
+        return actor_map.get(raw.upper(), raw or "Sin identificar")
+    m["funding_actor"] = m.tx_id.map(a.set_index("tx_id").apply(actor_of,axis=1))
     if m.tx_id.duplicated().any():
         raise ValueError("resource bridge: duplicate funding membership")
     keys=a[["period","Currency"]].drop_duplicates().sort_values(["period","Currency"])
@@ -68,7 +83,7 @@ def build_resource_bridge(audit: pd.DataFrame, pairs: pd.DataFrame | None = None
         monthly=monthly.merge(v,on=["period","Currency"],how="left")
     for component in COMPONENTS:
         monthly[component] = pd.to_numeric(monthly[component], errors="raise").fillna(0.0)
-    monthly["economic_funding"]=monthly.contribution+monthly.designated_advance+monthly.direct_tenant_support
+    monthly["economic_funding"]=monthly.contribution+monthly.designated_advance+monthly.direct_tenant_support+monthly.direct_other_support
     return monthly,m
 
 def load_recovery_pairs(run_root: Path) -> pd.DataFrame | None:

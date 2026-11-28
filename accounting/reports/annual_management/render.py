@@ -392,7 +392,8 @@ def _render_html(model: dict[str, Any], css: str) -> str:
         + _table("Puente de aplicación · USD", periods, model["application"]["bridge_usd"], compact=True)
         + '</div>'
         + '<div class="span-7">'
-        + _table("Apoyo bruto por actor / origen (incluye deuda; no suma al puente)", periods, model["application"]["funding"], compact=True)
+        + _table("Aportes y financiación por actor · ARS", periods, model["application"]["funding"], compact=True)
+        + (_table("Aportes y financiación por actor · USD", periods, model["application"]["funding_usd"], compact=True) if model["application"]["funding_usd"] else "")
         + '</div><div class="span-5">'
         + _table("Distribuciones ARS", periods, model["application"]["distributions_ars"], compact=True)
         + _table("Distribuciones USD", periods, model["application"]["distributions_usd"], compact=True)
@@ -570,6 +571,7 @@ def build_report_model(
             ("Resultado operativo","IS.NET.OPERATING"),
             ("+ Aportes y financiación","FUND.ECONOMIC.TOTAL"),
             ("de los aportes: directos inquilinos","FUND.ECONOMIC.DIRECT_TENANT"),
+            ("de los aportes: otros pagos directos","FUND.ECONOMIC.DIRECT_OTHER"),
             ("+ Recuperos ligados a distribución","FUND.ECONOMIC.LINKED_RECOVERY"),
             ("− Retiros y distribuciones","DIST.DRAWS.PERSONAL"),
             ("de los retiros: dividendos","DIST.DIVIDENDS"),
@@ -581,17 +583,20 @@ def build_report_model(
                  "indent":1 if label.startswith("de los") else 0} for label,mid in specs]
     bridge_ars = application_bridge("ARS")
     bridge_usd = application_bridge("USD")
-    funding = [
-        {
-            "label": actor,
-            "metric_id": "FUND.CONTRIB.BY_FUNDING_ACTOR",
-            "currency": "ARS",
-            "dimension_name": "funding_actor",
-            "dimension_value": actor,
-            "missing_policy": "zero",
-        }
-        for actor in FUNDING_ACTORS
-    ]
+    # Dynamic long tail: never omit contributors outside the named cohort.
+    def funding_specs(currency):
+        available = store.metrics.loc[store.metrics.metric_id.eq("FUND.ECONOMIC.BY_ACTOR")
+                                      & store.metrics.Currency.eq(currency)]
+        if available.empty:
+            return []
+        observed = set(available.dimension_value) - {""}
+        actors = [x for x in FUNDING_ACTORS if x in observed] + sorted(observed-set(FUNDING_ACTORS))
+        return [dict(label="Héctor / Silvina" if actor=="Héctor" else actor,
+                     metric_id="FUND.ECONOMIC.BY_ACTOR",currency=currency,
+                     dimension_name="funding_actor",dimension_value=actor,
+                     missing_policy="zero") for actor in actors]
+    funding = funding_specs("ARS")
+    funding_usd = funding_specs("USD")
     distributions_ars = [
         {"label": "Retiros personales ARS", "metric_id": "DIST.DRAWS.PERSONAL", "currency": "ARS"},
         {"label": "Dividendos ARS", "metric_id": "DIST.DIVIDENDS", "currency": "ARS"},
@@ -722,6 +727,7 @@ def build_report_model(
             "bridge_ars": _rows(store, bridge_ars, periods, "application", "bridge_ars"),
             "bridge_usd": _rows(store, bridge_usd, periods, "application", "bridge_usd"),
             "funding": _rows(store, funding, periods, "application", "funding"),
+            "funding_usd": _rows(store, funding_usd, periods, "application", "funding_usd"),
             "distributions_ars": _rows(store, distributions_ars, periods, "application", "dist_ars"),
             "distributions_usd": _rows(store, distributions_usd, periods, "application", "dist_usd"),
         },

@@ -278,6 +278,7 @@ def build_annual_balance_dashboard(
                 "FUND.ECONOMIC.CONTRIBUTIONS": row.contribution,
                 "FUND.ECONOMIC.DESIGNATED": row.designated_advance,
                 "FUND.ECONOMIC.DIRECT_TENANT": row.direct_tenant_support,
+                "FUND.ECONOMIC.DIRECT_OTHER": row.direct_other_support,
                 "FUND.ECONOMIC.CLEARING_PENDING": row.clearing_pending,
                 "FUND.ECONOMIC.LINKED_RECOVERY": row.linked_debt_recovery,
             }
@@ -297,7 +298,17 @@ def build_annual_balance_dashboard(
                     "explicit paid transaction membership; linked recovery separately allocated",
                     "annual ratio = annual resource coverage / operating result" if ratio else
                     ("annual flow = net operating + economic funding + linked debt recovery - draws" if coverage_metric else "annual flow = sum monthly governed resource component"),
-                    run_id,as_of_date,suit="safe_with_caveat",caveat="Economic financing includes reimbursable advances and direct tenant support; not profit or cash. Linked recovery is debt settlement, not fresh funding. Pending clearing excluded."))
+                    run_id,as_of_date,suit="safe_with_caveat",caveat="Economic financing includes reimbursable advances and direct external support; not profit or cash. Linked recovery is debt settlement, not fresh funding. Pending clearing excluded."))
+        members = pd.read_csv(metrics_dir / RESOURCE_MEMBERS, keep_default_na=False)
+        fund = members.loc[members.component.isin(["contribution","designated_advance","direct_tenant_support","direct_other_support"])].copy()
+        fund["period"] = fund.period.astype(str).str[:4]
+        for (period,currency,actor), amount in fund.groupby(["period","Currency","funding_actor"]).amount.sum().items():
+            additions.append(_legacy._base("FUND.ECONOMIC.BY_ACTOR",period,currency,amount,"available",
+                "flow","economic_funding","2. Funding and distributions",RESOURCE_MEMBERS,
+                "economic funding members; grouped by actual contributor",
+                "annual flow = sum unique funding transaction amounts",run_id,as_of_date,
+                dim_name="funding_actor",dim_value=actor,suit="safe_with_caveat",
+                caveat="Includes designated advances and direct payments, excludes debt settlements and pending clearing."))
         metrics = pd.concat([metrics,pd.DataFrame(additions,columns=_legacy.ANNUAL_METRICS_COLUMNS)],ignore_index=True)
     cash_rewritten = bridge is not None
 

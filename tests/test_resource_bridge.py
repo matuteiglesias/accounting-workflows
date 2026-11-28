@@ -72,3 +72,19 @@ def test_recovery_registry_is_pinned_and_cutoff_scoped(tmp_path,monkeypatch):
     assert load_recovery_pairs(run).to_dict("records")==[{"distribution_tx_id":"a","recovery_tx_id":"b"}]
     registry.unlink()
     assert load_recovery_pairs(run).recovery_tx_id.tolist()==["b"]
+
+
+def test_named_direct_support_and_long_tail_count_once():
+    rows=[]
+    def add(tid,payer,receiver,amount,bucket,sub,direction,effect):
+        rows.append(dict(tx_id=tid,period="2026-01",Currency="ARS",Box="Property Management",
+          payer=payer,receiver=receiver,Flujo="Pagos",Tipo="Servicio",semantic_bucket=bucket,
+          semantic_subbucket=sub,direction=direction,amount=amount,cash_effect=effect))
+    add("hector","Hector","Servicios",50,"property_opex","services","out","no_cash_in_box_direct_payment")
+    add("mi","MI","PM",100,"funding_contribution","designated_expense","in","cash_in_box")
+    add("mirror","PM","Servicios",100,"property_opex","services","out","cash_out_box")
+    add("tail","Alen","PM",20,"funding_contribution","designated_expense","in","cash_in_box")
+    monthly,m=build_resource_bridge(pd.DataFrame(rows))
+    assert monthly.economic_funding.item()==170
+    assert monthly.direct_other_support.item()==50
+    assert m.groupby("funding_actor").amount.sum().to_dict()=={"Matías":100,"Héctor":50,"Alen":20}
