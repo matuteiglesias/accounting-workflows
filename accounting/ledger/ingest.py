@@ -486,8 +486,19 @@ def build_ledger_base(
 
     df = _coerce_money_and_dates(df)
 
-    # Box is the sole ledger-partition key. Normalize canonical spelling before
-    # selecting the declared universe; counterparty/semantic fields play no role.
+    # Explicit source-approved scope marker allows staged migration without
+    # introducing an unfamiliar Box value into the shared legacy sheet.
+    # No inference from counterparties or description.
+    if source_has_box and "tag" in df.columns:
+        personal = df["tag"].astype("string").fillna("").str.contains(
+            r"(?:^|;)scope_personal(?:;|$)", regex=True
+        )
+        if personal.any():
+            df["source_box_label"] = df["Box"].where(personal, pd.NA)
+            df.loc[personal, "Box"] = "Personal"
+
+    # Canonical Box is the sole ledger-partition key after explicit migration.
+    # Counterparties play no role.
     if boxes is not None:
         if exclude_household:
             raise ValueError("Use boxes or legacy exclude_household, not both")

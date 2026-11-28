@@ -246,7 +246,12 @@ def build_open_items(df: pd.DataFrame, verbose: bool = False) -> List[OpenItem]:
     # if trace:
     #     LOG.debug(" ".join(str(x) for x in args))
 
-    debt_rows = df.loc[df["Tipo"].isin(VALID_DEBT_TYPES)].copy()
+    # Planned lending/interest is not a realized obligation in the historical engine.
+    # Keep the row in all-status provenance; scenario execution is separate.
+    debt_rows = df.loc[
+        df["Tipo"].isin(VALID_DEBT_TYPES)
+        & ~df["status"].astype(str).str.strip().str.casefold().eq("planeado")
+    ].copy()
     # Approved exception: Costos -> PM Prestamo rows represent unresolved cost
     # allocation inside Property Management, never established person debt.
     cost_gap = (

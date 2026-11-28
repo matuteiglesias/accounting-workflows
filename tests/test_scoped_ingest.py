@@ -147,3 +147,31 @@ def test_canonical_ingest_writes_scoped_ledgers_and_metadata(tmp_path):
         monkeypatch.undo()
     assert (first["annual_balance_dashboard_metrics"].read_bytes()
             == second["annual_balance_dashboard_metrics"].read_bytes())
+
+
+def test_explicit_personal_scope_marker_preserves_identity_and_isolates(tmp_path):
+    source = pd.read_csv(FIXTURE)
+    base = source.iloc[0].copy()
+    base["Box"] = "Property Management"
+    base["tx_id"] = "personal-obligation"
+    base["tag"] = "scope_personal;recognition_of:example"
+    base["status"] = "pagado"
+    native = base.copy()
+    native["tx_id"] = "ordinary-pm"
+    native["tag"] = ""
+    path = tmp_path / "personal.csv"
+    pd.DataFrame([base, native]).to_csv(path, index=False)
+    for boxes, expected, tag in [
+        ("Family Business,Property Management", ["ordinary-pm"], "FBPM"),
+        ("Personal", ["personal-obligation"], "PERSONAL"),
+    ]:
+        dest = tmp_path / tag
+        subprocess.run([sys.executable, "-m", "accounting.ledger.ingest",
+                        "--fixture", str(path), "--out-dir", str(dest),
+                        "--mode", "smoke", "--run-id", tag, "--boxes", boxes], check=True)
+        ledger = pd.read_csv(dest / "ledger_canonical_all_status.csv")
+        assert ledger["tx_id"].tolist() == expected
+        if tag == "PERSONAL":
+            assert ledger["Box"].tolist() == ["Personal"]
+            assert ledger["source_box_label"].tolist() == ["Property Management"]
+            assert ledger["tag"].tolist() == ["scope_personal;recognition_of:example"]

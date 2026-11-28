@@ -55,6 +55,8 @@ def publish_report_bundle(
     clean: bool = True,
     dry_run: bool = False,
 ) -> Path:
+    if "PERSONAL" in scope_tag:
+        raise ValueError("Personal accounting scope is private and cannot be published")
     project_root = Path(project_root).resolve()
     source_root = (
         Path(reports_root).resolve(strict=True)

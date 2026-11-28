@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 BOX_CODES = {
     "Family Business": "FB",
     "Household": "HH",
+    "Personal": "PERSONAL",
     "Property Management": "PM",
 }
 CANONICAL_BOXES = frozenset(BOX_CODES)

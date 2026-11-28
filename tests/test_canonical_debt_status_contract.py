@@ -206,3 +206,28 @@ def test_zero_row_debt_outputs_keep_schema_and_balance_views_can_read_them(tmp_p
         "--open-items", str(debt_dir / "debt_open_items.csv"),
         "--write-dir", str(debt_dir),
     ], check=True)
+
+
+def test_planned_principal_and_interest_do_not_create_historical_debt(tmp_path):
+    ledger = tmp_path / "planned_debt.csv"
+    rows = [
+        {"tx_id": "recognized", "Date": "2025-01-01", "amount": 100,
+         "Currency": "USD", "payer": "Hector", "receiver": "MI",
+         "Flujo": "Transfer", "Tipo": "Prestamo", "status": "abierto", "Box": "Family Business"},
+        {"tx_id": "planned-loan", "Date": "2025-01-02", "amount": 490,
+         "Currency": "USD", "payer": "Primos", "receiver": "Hector",
+         "Flujo": "Transfer", "Tipo": "Prestamo", "status": "planeado", "Box": "Family Business"},
+        {"tx_id": "planned-interest", "Date": "2025-01-03", "amount": 15,
+         "Currency": "USD", "payer": "Hector", "receiver": "MI",
+         "Flujo": "Devengamiento", "Tipo": "Interes", "status": "planeado", "Box": "Family Business"},
+    ]
+    pd.DataFrame(rows).to_csv(ledger, index=False)
+    debt_dir = tmp_path / "debt"
+    subprocess.run([
+        sys.executable, "-m", "accounting.debt.resolve",
+        "--ledger-csv", str(ledger), "--write-dir", str(debt_dir),
+        "--currencies", "USD", "--repayment-statuses", "pagado",
+    ], check=True)
+    items = pd.read_csv(debt_dir / "debt_open_items.csv")
+    assert items["source_tx_id"].tolist() == ["recognized"]
+    assert items["open_amount"].sum() == 100

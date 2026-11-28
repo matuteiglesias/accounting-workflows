@@ -87,3 +87,9 @@ def test_public_publisher_rejects_private_evidence_before_touching_public_target
     with pytest.raises(ValueError, match="private evidence"):
         publish_report_bundle(project_root=tmp_path, scope_tag="FBPM", reports_root=reports)
     assert (existing / "keep.txt").read_text() == "existing public state"
+
+
+def test_personal_scope_cannot_be_published(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="Personal accounting scope is private"):
+        publish_report_bundle(project_root=tmp_path, scope_tag="PERSONAL")
